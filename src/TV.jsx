@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { db, collection, onSnapshot } from "./firebase";
+import { db, collection, onSnapshot, updateDoc, addDoc, doc } from "./firebase";
 
 // ============================================
 // FALLBACK DATA
@@ -28,7 +28,7 @@ function getToday(){ return new Date().toISOString().split("T")[0] }
 function extractYTId(s){ if(!s)return null; const p=[/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/,/^([a-zA-Z0-9_-]{11})$/]; for(const r of p){const m=s.match(r);if(m)return m[1]} return null }
 
 // ============ TIMELINE ABSOLUTA (7 dias contínuos) ============
-const QUEUE_DAYS=7;
+const QUEUE_DAYS=7; // Mudar para 15, 30, etc conforme necessário - escalável!
 const BASE_DATE=new Date("2026-06-24T00:00:00Z");
 function dateSecondsToAbsolute(dateStr,secondsInDay){
   const targetDate=new Date(dateStr+"T00:00:00Z");
@@ -462,8 +462,29 @@ export default function TVWeb(){
       prevProgIdRef.current=cp.id;
       ytStartRef.current=Math.max(0,Math.floor(getElapsed(cp)));
       ytKeyRef.current=`${curCh}_${cp.id}_${Date.now()}`;
+      
+      // AUTO-SAVE: Salva progresso quando muda de programa
+      (async()=>{
+        try {
+          const prog = allPrograms.find(p => p.id === cp.id);
+          if (prog) {
+            await updateDoc(doc(db,"progress",curCh),{
+              currentProgramId:cp.id,
+              currentProgramName:prog.nome,
+              timestamp:new Date(),
+              absoluteSeconds:getAbsoluteNow()
+            }).catch(()=>addDoc(collection(db,"progress"),{
+              canalId:curCh,
+              currentProgramId:cp.id,
+              currentProgramName:prog.nome,
+              timestamp:new Date(),
+              absoluteSeconds:getAbsoluteNow()
+            }));
+          }
+        } catch(err){ console.error("Auto-save progress err:",err); }
+      })();
     }
-  },[cp?.id,curCh]);
+  },[cp?.id,curCh,allPrograms]);
 
   const ytVideoId=cp?extractYTId(cp.youtubeId||cp.videos?.[0]?.youtubeUrl):null;
   const ytSrc=ytVideoId
