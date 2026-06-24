@@ -585,16 +585,17 @@ export default function AdminPanel(){
   const handleQuickClone=async()=>{
     if(cloneMenuProgs.length===0)return;
     try {
-      const today=getToday();
-      const channelProgsToday=programs.filter(p=>p.canalId===selCh&&p.data===today).sort((a,b)=>Number(b.horarioFim)-Number(a.horarioFim));
-      let startTime=channelProgsToday.length>0?Number(channelProgsToday[0].horarioFim):0;
+      // Use selected date, not always today
+      const targetDate=selDate;
+      const channelProgsOnDate=programs.filter(p=>p.canalId===selCh&&p.data===targetDate).sort((a,b)=>Number(b.horarioFim)-Number(a.horarioFim));
+      let startTime=channelProgsOnDate.length>0?Number(channelProgsOnDate[0].horarioFim):0;
       
       for(const sourceProgram of cloneMenuProgs){
         const endTime=startTime+Number(sourceProgram.duracao);
         const newProg={
           nome:sourceProgram.nome,
           canalId:selCh,
-          data:today,
+          data:targetDate,
           horarioInicio:startTime,
           horarioFim:endTime,
           duracao:sourceProgram.duracao,
