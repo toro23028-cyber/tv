@@ -362,6 +362,11 @@ export default function TVWeb(){
 
   // ========== FIREBASE REAL-TIME ==========
   useEffect(() => {
+    let loaded = { channels: false, programs: false };
+    const loadingTimeout = setTimeout(() => {
+      setLoading(false);
+    }, 5000); // Fallback: stop loading after 5 seconds
+
     const unsubCh = onSnapshot(collection(db, "channels"), (snap) => {
       const list = snap.docs.map(d => ({ ...d.data(), id: d.id }));
       const sorted = list.sort((a,b) => (a.numero||0) - (b.numero||0));
@@ -372,6 +377,16 @@ export default function TVWeb(){
         setChannels(FALLBACK_CHANNELS);
         setCurCh("_info");
       }
+      loaded.channels = true;
+      if (loaded.channels && loaded.programs) {
+        setLoading(false);
+        clearTimeout(loadingTimeout);
+      }
+    }, (err) => {
+      console.error("Erro ao carregar canais:", err);
+      setChannels(FALLBACK_CHANNELS);
+      loaded.channels = true;
+      if (loaded.channels && loaded.programs) setLoading(false);
     });
 
     const unsubPr = onSnapshot(collection(db, "programs"), (snap) => {
@@ -381,10 +396,23 @@ export default function TVWeb(){
       } else {
         setAllPrograms(FALLBACK_PROGRAMS);
       }
-      setLoading(false);
+      loaded.programs = true;
+      if (loaded.channels && loaded.programs) {
+        setLoading(false);
+        clearTimeout(loadingTimeout);
+      }
+    }, (err) => {
+      console.error("Erro ao carregar programas:", err);
+      setAllPrograms(FALLBACK_PROGRAMS);
+      loaded.programs = true;
+      if (loaded.channels && loaded.programs) setLoading(false);
     });
 
-    return () => { unsubCh(); unsubPr(); };
+    return () => {
+      unsubCh();
+      unsubPr();
+      clearTimeout(loadingTimeout);
+    };
   }, []);
 
   // ========== DERIVED STATE ==========
@@ -538,10 +566,10 @@ export default function TVWeb(){
     </div>
 
     {/* Dark blur on top of screen - hides YouTube info */}
-    {showBlur && <div style={{position:"absolute",top:0,left:0,right:0,height:200,background:"linear-gradient(180deg, rgba(0,0,0,0.9) 0%, transparent 100%)",zIndex:6,backdropFilter:"blur(8px)",transition:"opacity 0.5s",opacity:showBlur?1:0,pointerEvents:"none"}}/>}
+    {showBlur && <div style={{position:"absolute",top:0,left:0,right:0,height:200,background:"linear-gradient(180deg, rgba(0,0,0,0.9) 0%, transparent 100%)",zIndex:6,transition:"opacity 0.5s",opacity:showBlur?1:0,pointerEvents:"none"}}/>}
 
     {/* Dark blur behind EPG */}
-    {showBlur && showEPG && <div style={{position:"absolute",bottom:0,left:0,right:0,height:400,background:"rgba(0,0,0,0.7)",zIndex:19,backdropFilter:"blur(4px)",transition:"opacity 0.5s",pointerEvents:"none"}}/>}
+    {showBlur && showEPG && <div style={{position:"absolute",bottom:0,left:0,right:0,height:400,background:"rgba(0,0,0,0.7)",zIndex:19,transition:"opacity 0.5s",pointerEvents:"none"}}/>}
 
     {showEPG && <EPGCompact channels={CHANNELS} allPrograms={allPrograms} currentChannelId={curCh} onSelectChannel={swCh} onSelectProgram={setSP} onOpenFull={()=>{setEPG(false);setFull(true)}} onClose={()=>setEPG(false)}/>}
     {showFull && <FullDay channels={CHANNELS} allPrograms={allPrograms} currentChannelId={curCh} onClose={()=>setFull(false)} onProgramClick={setSP}/>}
