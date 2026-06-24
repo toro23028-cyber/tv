@@ -16,6 +16,7 @@ function getDayLabel(d){const x=new Date(d+"T00:00:00");const ds=["Dom","Seg","T
 function secTo(s){return{h:Math.floor(s/3600),m:Math.floor((s%3600)/60)}}
 function parseDur(h,m){return(parseInt(h)||0)*3600+(parseInt(m)||0)*60}
 function getToday(){ const n=new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,"0")}-${String(n.getDate()).padStart(2,"0")}`; }
+function getNow(){ const n=new Date(); return n.getHours()*3600+n.getMinutes()*60+n.getSeconds() }
 function genDates(n){const ds=[]; let d=new Date(getToday()+"T00:00:00"); for(let i=0;i<n;i++){ const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,"0"),da=String(d.getDate()).padStart(2,"0"); ds.push(`${y}-${m}-${da}`); d.setDate(d.getDate()+1); } return ds}
 function extractYTId(s){if(!s)return null;const p=[/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/,/^([a-zA-Z0-9_-]{11})$/];for(const r of p){const m=s.match(r);if(m)return m[1]}return null}
 function ytThumb(id){const x=extractYTId(id);return x?`https://img.youtube.com/vi/${x}/mqdefault.jpg`:null}
