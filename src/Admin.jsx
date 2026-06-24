@@ -271,7 +271,7 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
             <label style={{...lS,marginBottom:0}}>VÍDEOS</label>
             <div style={{display:"flex",gap:8}}>
               <span style={{fontSize:10,color:"#555"}}>{videos.length} vídeo(s)</span>
-              <button onClick={async()=>{for(let i=0;i<videos.length;i++){const vId=extractYouTubeId(videos[i].youtubeUrl);if(vId){const meta=await fetchYouTubeMetadata(vId);if(meta){const nv=[...videos];nv[i]={...nv[i],youtubeUrl:videos[i].youtubeUrl,titulo:meta.title};setVideos(nv);if(i===0){setCH(Math.floor(meta.duration/3600));setCM(Math.floor((meta.duration%3600)/60));setSinopse(meta.description)}}}}}} style={{fontSize:10,color:"#4caf50",background:"rgba(76,175,80,0.1)",border:"1px solid rgba(76,175,80,0.3)",padding:"2px 8px",borderRadius:3,cursor:"pointer",fontWeight:600}}>🔍 Buscar Todos</button>
+              <button onClick={async()=>{const videoCopy=[...videos];for(let i=0;i<videoCopy.length;i++){const vId=extractYouTubeId(videoCopy[i].youtubeUrl);if(vId){const meta=await fetchYouTubeMetadata(vId);if(meta){const nv=[...videoCopy];nv[i]={...nv[i],youtubeUrl:videoCopy[i].youtubeUrl,titulo:meta.title};setVideos(nv);videoCopy[i]=nv[i];if(i===0){setCH(Math.floor(meta.duration/3600));setCM(Math.floor((meta.duration%3600)/60));setSinopse(meta.description)}}}}}} style={{fontSize:10,color:"#4caf50",background:"rgba(76,175,80,0.1)",border:"1px solid rgba(76,175,80,0.3)",padding:"2px 8px",borderRadius:3,cursor:"pointer",fontWeight:600}}>🔍 Buscar Todos</button>
             </div>
           </div>
           <div style={{display:"flex",flexDirection:"column",gap:6}}>
@@ -469,7 +469,7 @@ export default function AdminPanel(){
   const [showCloneModal,setShowCloneModal]=useState(false);
   const [cloneMenuProgs,setCloneMenuProgs]=useState([]);
   const [selectedProgs,setSelectedProgs]=useState(new Set());
-  const [cloneData,setCloneData]=useState({channel:selCh,date:null,time:""});
+  const [cloneData,setCloneData]=useState({channel:"",date:null,time:""});
   const [showDup,setSD]=useState(false);
   const [toast,setToast]=useState("");
 
@@ -698,6 +698,9 @@ export default function AdminPanel(){
     else newSel.add(progId);
     setSelectedProgs(newSel);
   };
+
+  // Clear selected programs when channel or date changes
+  useEffect(()=>{setSelectedProgs(new Set())},[selCh,selDate]);
 
   // Task 4: Improved date filter - show only last hour + now + next programs
   const dayProgs=programs.filter(p=>{
