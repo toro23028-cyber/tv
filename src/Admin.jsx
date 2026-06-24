@@ -73,7 +73,7 @@ function ImgUploader({currentImage,imageType,onImageChange,label,shape="square"}
 // TIMELINE WITH DRAG
 // ============================================
 function TimelineView({programs,channels,selectedChannel,onEdit,onDelete,onReorder}){
-  const filtered=programs.filter(p=>p.canalId===selectedChannel).sort((a,b)=>a.horarioInicio-b.horarioInicio);
+  const filtered=programs.filter(p=>p.canalId===selectedChannel).sort((a,b)=>Number(a.horarioInicio)-Number(b.horarioInicio));
   const [dragIdx,setDragIdx]=useState(null);
   const [overIdx,setOverIdx]=useState(null);
 
@@ -97,9 +97,9 @@ function TimelineView({programs,channels,selectedChannel,onEdit,onDelete,onReord
 
   // Gaps
   const gaps=[];
-  if(filtered[0].horarioInicio>0) gaps.push({start:0,end:filtered[0].horarioInicio});
-  for(let i=0;i<filtered.length-1;i++) if(filtered[i].horarioFim<filtered[i+1].horarioInicio) gaps.push({start:filtered[i].horarioFim,end:filtered[i+1].horarioInicio});
-  if(filtered[filtered.length-1].horarioFim<86400) gaps.push({start:filtered[filtered.length-1].horarioFim,end:86400});
+  if(Number(filtered[0].horarioInicio)>0) gaps.push({start:0,end:Number(filtered[0].horarioInicio)});
+  for(let i=0;i<filtered.length-1;i++) if(Number(filtered[i].horarioFim)<Number(filtered[i+1].horarioInicio)) gaps.push({start:Number(filtered[i].horarioFim),end:Number(filtered[i+1].horarioInicio)});
+  if(Number(filtered[filtered.length-1].horarioFim)<86400) gaps.push({start:Number(filtered[filtered.length-1].horarioFim),end:86400});
 
   return <div style={{display:"flex",flexDirection:"column",gap:4}}>
     {filtered.map((prog,i)=>{
@@ -121,8 +121,8 @@ function TimelineView({programs,channels,selectedChannel,onEdit,onDelete,onReord
           <div style={{width:64,height:40,borderRadius:4,background:"rgba(255,255,255,0.06)",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><span style={{fontSize:18,opacity:0.3}}>🎬</span></div>}
         {/* Time */}
         <div style={{minWidth:85,textAlign:"center"}}>
-          <div style={{fontSize:14,fontWeight:700,color:"#fff"}}>{fmtSec(prog.horarioInicio)}</div>
-          <div style={{fontSize:10,color:"#555"}}>até {fmtSec(prog.horarioFim)}</div>
+          <div style={{fontSize:14,fontWeight:700,color:"#fff"}}>{fmtSec(Number(prog.horarioInicio))}</div>
+          <div style={{fontSize:10,color:"#555"}}>até {fmtSec(Number(prog.horarioFim))}</div>
         </div>
         <div style={{width:3,height:40,borderRadius:2,background:ch?.cor||"#555"}}/>
         <div style={{flex:1,minWidth:0}}>
@@ -132,7 +132,7 @@ function TimelineView({programs,channels,selectedChannel,onEdit,onDelete,onReord
             {isMulti&&<span style={{fontSize:9,padding:"2px 6px",borderRadius:3,background:"#9c27b0",color:"#fff",fontWeight:700}}>{prog.videos.length}v</span>}
             {prog.tags?.map(t=><span key={t} style={{fontSize:9,padding:"2px 6px",borderRadius:3,background:"rgba(255,255,255,0.08)",color:"#aaa",fontWeight:600}}>{t}</span>)}
           </div>
-          <div style={{fontSize:11,color:"#888"}}>{secTo(prog.duracao).h>0?`${secTo(prog.duracao).h}h`:""}{ secTo(prog.duracao).m>0?`${secTo(prog.duracao).m}min`:""}</div>
+          <div style={{fontSize:11,color:"#888"}}>{secTo(Number(prog.duracao)).h>0?`${secTo(Number(prog.duracao)).h}h`:""}{ secTo(Number(prog.duracao)).m>0?`${secTo(Number(prog.duracao)).m}min`:""}</div>
         </div>
         <button onClick={()=>onEdit(prog)} style={{background:"rgba(26,115,232,0.15)",border:"1px solid rgba(26,115,232,0.3)",color:"#4fc3f7",padding:"6px 12px",borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:600}}>✏️</button>
         <button onClick={()=>onDelete(prog.id)} style={{background:"rgba(244,67,54,0.1)",border:"1px solid rgba(244,67,54,0.3)",color:"#f44336",padding:"6px 12px",borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:600}}>🗑️</button>
@@ -201,7 +201,7 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
         {/* Canal */}
         <div><label style={lS}>CANAL</label>
           <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-            {channels.filter(c=>c.id>0).map(c=><button key={c.id} onClick={()=>setCanalId(c.id)} style={{padding:"6px 12px",borderRadius:4,cursor:"pointer",fontSize:12,background:canalId===c.id?`${c.cor}33`:"rgba(255,255,255,0.04)",border:canalId===c.id?`1px solid ${c.cor}`:"1px solid rgba(255,255,255,0.08)",color:canalId===c.id?"#fff":"#888",display:"flex",alignItems:"center",gap:4}}><ChLogo ch={c} size={16}/> {c.nome}</button>)}
+            {channels.filter(c=>!c.isInfo).map(c=><button key={c.id} onClick={()=>setCanalId(c.id)} style={{padding:"6px 12px",borderRadius:4,cursor:"pointer",fontSize:12,background:canalId===c.id?`${c.cor}33`:"rgba(255,255,255,0.04)",border:canalId===c.id?`1px solid ${c.cor}`:"1px solid rgba(255,255,255,0.08)",color:canalId===c.id?"#fff":"#888",display:"flex",alignItems:"center",gap:4}}><ChLogo ch={c} size={16}/> {c.nome}</button>)}
           </div>
         </div>
 
@@ -411,7 +411,7 @@ export default function AdminPanel(){
   const dates=genDates(30);
   const [tab,setTab]=useState("schedule");
   const [selDate,setSelDate]=useState(dates[0]);
-  const [selCh,setSelCh]=useState(1);
+  const [selCh,setSelCh]=useState(null);
   const [channels,setCh]=useState(DEFAULT_CHANNELS);
   const [programs,setProgs]=useState([]);
   const [showModal,setSM]=useState(false);
@@ -430,7 +430,9 @@ export default function AdminPanel(){
       const list = snap.docs.map(doc => ({ ...doc.data(), id: doc.id }));
       console.log("✅ Canais carregados:", list.length, list);
       if (list.length > 0) {
-        setCh(list.sort((a,b) => (a.numero||0) - (b.numero||0)));
+        const sorted = list.sort((a,b) => (a.numero||0) - (b.numero||0));
+        setCh(sorted);
+        setSelCh(prev => prev || sorted[0].id);
       }
     }, (err) => {
       console.error("❌ Erro ao carregar canais:", err);
@@ -533,7 +535,7 @@ export default function AdminPanel(){
   };
 
   const dayProgs=programs.filter(p=>p.data===selDate);
-  const totalSch=dayProgs.filter(p=>p.canalId===selCh).reduce((s,p)=>s+p.duracao,0);
+  const totalSch=dayProgs.filter(p=>p.canalId===selCh).reduce((s,p)=>s+(Number(p.duracao)||0),0);
 
   return <div style={{width:"100%",minHeight:"100vh",background:"#0a0c12",fontFamily:"'Segoe UI','Roboto',-apple-system,sans-serif",color:"#fff"}}>
     {/* Header */}
@@ -567,7 +569,7 @@ export default function AdminPanel(){
 
         {/* Channel selector */}
         <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:16}}>
-          {channels.filter(c=>c.id>0).map(c=><button key={c.id} onClick={()=>setSelCh(c.id)} style={{padding:"8px 14px",borderRadius:6,cursor:"pointer",background:selCh===c.id?`${c.cor}33`:"rgba(255,255,255,0.04)",border:selCh===c.id?`1px solid ${c.cor}`:"1px solid rgba(255,255,255,0.08)",color:selCh===c.id?"#fff":"#aaa",fontSize:12,fontWeight:600,display:"flex",alignItems:"center",gap:6}}><ChLogo ch={c} size={20}/> {c.nome}</button>)}
+          {channels.filter(c=>!c.isInfo).map(c=><button key={c.id} onClick={()=>setSelCh(c.id)} style={{padding:"8px 14px",borderRadius:6,cursor:"pointer",background:selCh===c.id?`${c.cor}33`:"rgba(255,255,255,0.04)",border:selCh===c.id?`1px solid ${c.cor}`:"1px solid rgba(255,255,255,0.08)",color:selCh===c.id?"#fff":"#aaa",fontSize:12,fontWeight:600,display:"flex",alignItems:"center",gap:6}}><ChLogo ch={c} size={20}/> {c.nome}</button>)}
         </div>
 
         {/* Stats */}
