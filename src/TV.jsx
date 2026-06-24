@@ -427,7 +427,7 @@ function ProgModal({ program, channel, onClose }) {
         </div>
         <div style={{ padding: 24 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-            <span style={{ fontSize: 12, color: channel?.cor })}>{channel?.nome}</span><span style={{ fontSize: 12, color: "#555" }}>·</span><span style={{ fontSize: 12, color: "#888" }}>Canal {channel?.numero}</span>
+           <span style={{ fontSize: 12, color: channel?.cor }}>{channel?.nome}</span><span style={{ fontSize: 12, color: "#555" }}>·</span><span style={{ fontSize: 12, color: "#888" }}>Canal {channel?.numero}</span>
           </div>
           <div style={{ fontSize: 22, fontWeight: 700, color: "#fff", marginBottom: 8 }}>{program.nome}</div>
           <div style={{ fontSize: 13, color: "#999", lineHeight: 1.6, marginBottom: 16 }}>{program.sinopse}</div>
