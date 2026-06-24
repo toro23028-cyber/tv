@@ -115,6 +115,8 @@ function TimelineView({programs,channels,selectedChannel,onEdit,onDelete,onReord
           border:isDragOver?"2px dashed #1a73e8":"1px solid rgba(255,255,255,0.06)",
           cursor:"grab",transition:"all 0.15s",opacity:dragIdx===i?0.4:1,
         }}>
+        {/* Checkbox - LEFT */}
+        <input type="checkbox" checked={selectedProgs.has(prog.id)} onChange={()=>onToggleSelect(prog.id)} style={{width:18,height:18,cursor:"pointer",accentColor:"#4caf50",flexShrink:0}}/>
         {/* Drag handle */}
         <div style={{fontSize:16,color:"#555",cursor:"grab",padding:"0 4px"}}>⠿</div>
         {/* Thumb */}
@@ -136,7 +138,6 @@ function TimelineView({programs,channels,selectedChannel,onEdit,onDelete,onReord
           <div style={{fontSize:11,color:"#888"}}>{secTo(Number(prog.duracao)).h>0?`${secTo(Number(prog.duracao)).h}h`:""}{ secTo(Number(prog.duracao)).m>0?`${secTo(Number(prog.duracao)).m}min`:""}</div>
         </div>
         <button onClick={()=>onEdit(prog)} style={{background:"rgba(26,115,232,0.15)",border:"1px solid rgba(26,115,232,0.3)",color:"#4fc3f7",padding:"6px 12px",borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:600}}>✏️</button>
-        <input type="checkbox" checked={selectedProgs.has(prog.id)} onChange={()=>onToggleSelect(prog.id)} style={{width:18,height:18,cursor:"pointer",accentColor:"#4caf50"}}/>
         <button onClick={()=>onDelete(prog.id)} style={{background:"rgba(244,67,54,0.1)",border:"1px solid rgba(244,67,54,0.3)",color:"#f44336",padding:"6px 12px",borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:600}}>🗑️</button>
       </div>;
     })}
@@ -727,10 +728,11 @@ export default function AdminPanel(){
         <TimelineView programs={dayProgs} channels={channels} selectedChannel={selCh}
           onEdit={p=>{setEP(p);setSM(true)}} onDelete={handleDel} onReorder={handleReorder} onToggleSelect={toggleProgSelect} selectedProgs={selectedProgs}/>
 
-        {selectedProgs.size>0&&<button onClick={()=>{const selected=dayProgs.filter(p=>selectedProgs.has(p.id));setCloneMenuProgs(selected)}} style={{marginTop:12,width:"100%",padding:12,borderRadius:8,cursor:"pointer",background:"linear-gradient(135deg,#4caf50,#81c784)",border:"none",color:"#fff",fontSize:14,fontWeight:700}}>📋 Clonar {selectedProgs.size} selecionado{selectedProgs.size>1?"s":""}</button>}
-
         <button onClick={()=>{setEP(null);setSM(true)}} style={{marginTop:16,width:"100%",padding:14,borderRadius:8,cursor:"pointer",background:"linear-gradient(135deg,#1a73e8,#4fc3f7)",border:"none",color:"#fff",fontSize:14,fontWeight:700}}>+ Adicionar Programa</button>
       </>}
+
+      {/* FLOATING CLONE BUTTON - RIGHT SIDE */}
+      {selectedProgs.size>0&&<button onClick={()=>{const selected=dayProgs.filter(p=>selectedProgs.has(p.id));setCloneMenuProgs(selected)}} style={{position:"fixed",bottom:40,right:40,width:180,padding:14,borderRadius:8,cursor:"pointer",background:"linear-gradient(135deg,#4caf50,#81c784)",border:"none",color:"#fff",fontSize:14,fontWeight:700,boxShadow:"0 4px 20px rgba(76,175,80,0.4)",zIndex:50,transition:"all 0.3s"}}>📋 Clonar {selectedProgs.size}</button>}
 
       {tab==="channels"&&<>
         <button onClick={createSkyChannel} style={{marginBottom:16,padding:"10px 16px",borderRadius:6,cursor:"pointer",background:"rgba(26,115,232,0.15)",border:"1px solid rgba(26,115,232,0.3)",color:"#4fc3f7",fontSize:13,fontWeight:600}}>📡 Recriar Canal Sky</button>
@@ -744,7 +746,7 @@ export default function AdminPanel(){
     {cloneMenuProgs.length>0&&<div onClick={()=>setCloneMenuProgs([])} style={{position:"fixed",inset:0,zIndex:100}}>
       <div style={{position:"fixed",bottom:200,right:40,background:"#1a1c24",border:"1px solid rgba(255,255,255,0.2)",borderRadius:8,boxShadow:"0 4px 16px rgba(0,0,0,0.6)",zIndex:101,minWidth:200}} onClick={e=>e.stopPropagation()}>
         <div style={{padding:"8px 0"}}>
-          <button onClick={()=>{handleQuickClone(cloneMenuProg);setCloneMenuProgs([])}} style={{width:"100%",padding:"12px 16px",textAlign:"left",background:"transparent",border:"none",color:"#4caf50",cursor:"pointer",fontSize:13,fontWeight:600,borderBottom:"0.5px solid rgba(255,255,255,0.1)",transition:"background 0.2s"}} onMouseEnter={e=>e.target.style.background="rgba(76,175,80,0.1)"} onMouseLeave={e=>e.target.style.background="transparent"}>
+          <button onClick={()=>{handleQuickClone();setCloneMenuProgs([])}} style={{width:"100%",padding:"12px 16px",textAlign:"left",background:"transparent",border:"none",color:"#4caf50",cursor:"pointer",fontSize:13,fontWeight:600,borderBottom:"0.5px solid rgba(255,255,255,0.1)",transition:"background 0.2s"}} onMouseEnter={e=>e.target.style.background="rgba(76,175,80,0.1)"} onMouseLeave={e=>e.target.style.background="transparent"}>
             ✓ Clonar aqui
           </button>
           <button onClick={()=>{setCloneData({...cloneData,channel:selCh});setShowCloneModal(true);setCloneMenuProgs([])}} style={{width:"100%",padding:"12px 16px",textAlign:"left",background:"transparent",border:"none",color:"#4fc3f7",cursor:"pointer",fontSize:13,fontWeight:600,transition:"background 0.2s"}} onMouseEnter={e=>e.target.style.background="rgba(79,195,247,0.1)"} onMouseLeave={e=>e.target.style.background="transparent"}>
@@ -784,7 +786,7 @@ export default function AdminPanel(){
         </div>}
 
         <div style={{display:"flex",gap:10}}>
-          <button onClick={()=>handleAdvancedClone(cloneMenuProg)} style={{flex:1,padding:12,background:"linear-gradient(135deg,#4caf50,#81c784)",border:"none",borderRadius:6,color:"#fff",cursor:"pointer",fontSize:13,fontWeight:700}}>✓ Clonar</button>
+          <button onClick={()=>handleAdvancedClone()} style={{flex:1,padding:12,background:"linear-gradient(135deg,#4caf50,#81c784)",border:"none",borderRadius:6,color:"#fff",cursor:"pointer",fontSize:13,fontWeight:700}}>✓ Clonar</button>
           <button onClick={()=>setShowCloneModal(false)} style={{flex:1,padding:12,background:"rgba(255,255,255,0.1)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:6,color:"#ccc",cursor:"pointer",fontSize:13,fontWeight:600}}>Cancelar</button>
         </div>
       </div>
