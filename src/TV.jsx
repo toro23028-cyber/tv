@@ -444,7 +444,7 @@ export default function TVWeb(){
     hideTimer.current=setTimeout(()=>{if(!showEPG&&!showFull)setOSD(false)},20000);
   },[showEPG,showFull]);
 
-  useEffect(()=>{showOSDNow();return()=>clearTimeout(hideTimer.current)},[]);
+  useEffect(()=>{showOSDNow();return()=>clearTimeout(hideTimer.current)},[showOSDNow]);
 
   // Keep OSD visible while EPG/Full are open
   useEffect(()=>{if(showEPG||showFull)setOSD(true)},[showEPG,showFull]);
