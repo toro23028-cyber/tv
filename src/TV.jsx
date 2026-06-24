@@ -236,27 +236,35 @@ function EPGCompact({channels,allPrograms,currentChannelId,onSelectChannel,onSel
         </div>)}
       </div>
       <div ref={scrollRef} style={{flex:1,overflowX:"auto",overflowY:"hidden"}}>
-        <div style={{display:"flex",height:35,borderBottom:"1px solid rgba(255,255,255,0.1)",position:"relative"}}>
-          {timeMarks.map((t,i) => <div key={i} style={{minWidth:PX/4,fontSize:t.isFull?14:11,color:t.isFull?"#ccc":"#666",padding:"8px 10px",borderLeft:t.isFull?"1px solid rgba(255,255,255,0.1)":"1px solid rgba(255,255,255,0.03)",fontWeight:t.isFull?600:400,whiteSpace:"nowrap"}}>{t.label}</div>)}
+        <div style={{display:"flex",height:35,borderBottom:"1px solid rgba(255,255,255,0.1)",position:"relative",minWidth:PX*24}}>
+          {timeMarks.map((t,i) => <div key={i} style={{minWidth:PX/4,width:PX/4,boxSizing:"border-box",fontSize:t.isFull?14:11,color:t.isFull?"#ccc":"#666",padding:"8px 10px",borderLeft:t.isFull?"1px solid rgba(255,255,255,0.1)":"1px solid rgba(255,255,255,0.03)",fontWeight:t.isFull?600:400,whiteSpace:"nowrap",flexShrink:0}}>{t.label}</div>)}
           <div style={{position:"absolute",top:0,bottom:-ROW_H*channels.length,left:nowPx,width:3,background:"#ff3b3b",zIndex:5,boxShadow:"0 0 12px #ff3b3b",pointerEvents:"none"}}><div style={{width:10,height:10,borderRadius:"50%",background:"#ff3b3b",position:"absolute",top:-3,left:-3.5}}/></div>
         </div>
         {channels.map(ch => {
           const sched = buildSchedule(allPrograms, ch.id);
           const cur = getCurProg(sched);
-          return <div key={ch.id} style={{display:"flex",height:ROW_H,borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
-            {sched.filter(p=>p.horarioFim<=86400).map(prog => {
-              const w=Math.max((prog.duracao/86400)*PX*24,80);
-              const isNow=cur?.id===prog.id;
-              const isLong = prog.duracao > 3600;
+          const totalW = PX * 24; // 9600px for 24h
+          return <div key={ch.id} style={{position:"relative",height:ROW_H,borderBottom:"1px solid rgba(255,255,255,0.05)",minWidth:totalW}}>
+            {sched.filter(p=>Number(p.horarioFim)<=86400&&!p.isPlaceholder).map(prog => {
+              const startSec = Number(prog.horarioInicio);
+              const dur = Number(prog.duracao);
+              const left = (startSec / 86400) * totalW;
+              const w = Math.max((dur / 86400) * totalW, 80);
+              const isNow = cur?.id === prog.id;
+              const isLong = dur > 3600;
+              // Calculate how many times to repeat the name horizontally
+              const repeatCount = isLong ? Math.max(Math.floor(w / 300), 2) : 1;
               return <div key={prog.id} onClick={()=>{onSelectChannel(ch.id);onSelectProgram(prog)}}
-                style={{minWidth:w,maxWidth:w,height:ROW_H-2,padding:"14px 16px",cursor:"pointer",overflow:"hidden",background:isNow?"rgba(40,44,60,0.95)":"rgba(30,32,44,0.6)",borderRight:"1px solid rgba(255,255,255,0.06)",display:"flex",flexDirection:"column",justifyContent:"center",transition:"background 0.2s"}}
+                style={{position:"absolute",left,width:w,height:ROW_H-2,padding:"14px 16px",cursor:"pointer",overflow:"hidden",background:isNow?"rgba(40,44,60,0.95)":"rgba(30,32,44,0.6)",borderRight:"1px solid rgba(255,255,255,0.06)",boxSizing:"border-box",transition:"background 0.2s"}}
                 onMouseEnter={e=>e.currentTarget.style.background=isNow?"rgba(60,70,90,1)":"rgba(45,50,65,0.9)"}
                 onMouseLeave={e=>e.currentTarget.style.background=isNow?"rgba(40,44,60,0.95)":"rgba(30,32,44,0.6)"}>
-                <div style={{fontSize:12,color:"#aaa",marginBottom:8,fontWeight:500}}>{prog.horarioTexto}{isNow&&<span style={{marginLeft:8,fontSize:10,fontWeight:700,padding:"3px 8px",borderRadius:3,background:"#f44336",color:"#fff"}}>AO VIVO</span>}</div>
-                <div style={{fontSize:18,fontWeight:700,color:isNow?"#fff":"#ddd",lineHeight:1.4,overflow:"hidden",display:"-webkit-box",WebkitLineClamp:isLong?2:3,WebkitBoxOrient:"vertical"}}>{prog.nome}{isLong&&<div style={{fontSize:16,marginTop:4}}>{prog.nome}</div>}</div>
+                <div style={{fontSize:12,color:"#aaa",marginBottom:6,fontWeight:500}}>{prog.horarioTexto}{isNow&&<span style={{marginLeft:8,fontSize:10,fontWeight:700,padding:"3px 8px",borderRadius:3,background:"#f44336",color:"#fff"}}>AO VIVO</span>}</div>
+                <div style={{display:"flex",gap:w>400?60:30,whiteSpace:"nowrap",overflow:"hidden"}}>
+                  {Array.from({length:repeatCount}).map((_,ri) => <span key={ri} style={{fontSize:16,fontWeight:700,color:isNow?"#fff":"#ddd",flexShrink:0}}>{prog.nome}</span>)}
+                </div>
               </div>;
             })}
-            {sched.length===0 && <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",color:"#555",fontSize:13}}>Sem programação</div>}
+            {sched.length===0 && <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",color:"#555",fontSize:13}}>Sem programação</div>}
           </div>;
         })}
       </div>
