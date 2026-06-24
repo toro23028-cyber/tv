@@ -27,6 +27,26 @@ const CC={L:"#0f0","10":"#00bfff","12":"#ff0","14":"#f80","16":"#f00","18":"#000
 function getToday(){ return new Date().toISOString().split("T")[0] }
 function extractYTId(s){ if(!s)return null; const p=[/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/,/^([a-zA-Z0-9_-]{11})$/]; for(const r of p){const m=s.match(r);if(m)return m[1]} return null }
 
+// ============ TIMELINE ABSOLUTA (7 dias contínuos) ============
+const QUEUE_DAYS=7;
+const BASE_DATE=new Date("2026-06-24T00:00:00Z");
+function dateSecondsToAbsolute(dateStr,secondsInDay){
+  const targetDate=new Date(dateStr+"T00:00:00Z");
+  const daysDiff=Math.floor((targetDate-BASE_DATE)/(1000*60*60*24));
+  return daysDiff*86400+secondsInDay;
+}
+function getAbsoluteNow(){
+  const now=new Date();
+  return Math.floor((now-BASE_DATE)/1000);
+}
+function absoluteToDateSeconds(absSeconds){
+  const dayNum=Math.floor(absSeconds/86400);
+  const secondsInDay=absSeconds%86400;
+  const targetDate=new Date(BASE_DATE.getTime()+dayNum*24*60*60*1000);
+  const dateStr=targetDate.toISOString().split("T")[0];
+  return {date:dateStr,seconds:secondsInDay};
+}
+
 function buildSchedule(programs, channelId) {
   const today = getToday();
   const dayProgs = programs
@@ -86,6 +106,19 @@ function getCurProg(schedule) {
   return schedule.find(p => s >= p.horarioInicio && s < p.horarioFim) || null;
 }
 function getElapsed(prog) { return getNow() - prog.horarioInicio }
+
+// Encontra qual programa está rodando AGORA em qualquer hora dos 7 dias
+function getCurrentProgramAbsolute(programs, channelId) {
+  const now = getAbsoluteNow();
+  for (const prog of programs.filter(p => p.canalId === channelId)) {
+    const progStart = dateSecondsToAbsolute(prog.data, Number(prog.horarioInicio));
+    const progEnd = progStart + Number(prog.duracao);
+    if (now >= progStart && now < progEnd) {
+      return { prog, startAbs: progStart, elapsed: now - progStart };
+    }
+  }
+  return null;
+}
 
 function ChLogo({ch, size=28}) {
   if (ch.logoType==="custom" && ch.logoUrl) return <img src={ch.logoUrl} alt="" style={{width:size,height:size,borderRadius:4,objectFit:"cover"}} />;
