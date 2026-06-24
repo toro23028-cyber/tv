@@ -13,9 +13,16 @@ function getNowSeconds() {
   return n.getHours() * 3600 + n.getMinutes() * 60 + n.getSeconds();
 }
 
+function getLocalDateString() {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 function getScheduleFromFirebase(channelId, programs) {
-  // Hoje no formato YYYY-MM-DD local
-  const todayStr = new Date().toISOString().split("T")[0];
+  const todayStr = getLocalDateString();
 
   const list = programs.filter(p => 
     Number(p.canalId) === Number(channelId) && p.data === todayStr
@@ -56,13 +63,11 @@ export default function TVWeb() {
 
   const containerRef = useRef(null);
 
-  /* LIVE CLOCK INTERNO (Para forçar re-render do player a cada segundo) */
   useEffect(() => {
     const i = setInterval(() => setTick(t => t + 1), 1000);
     return () => clearInterval(i);
   }, []);
 
-  /* SYNC FIRESTORE EM TEMPO REAL */
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "programs"), (snap) => {
       const data = snap.docs.map(doc => ({
@@ -114,7 +119,6 @@ export default function TVWeb() {
         overflow: "hidden"
       }}
     >
-      {/* SCREEN */}
       <div style={{
         position: "absolute",
         inset: 0,
@@ -142,7 +146,6 @@ export default function TVWeb() {
         )}
       </div>
 
-      {/* INFO TOP LEFT */}
       <div style={{
         position: "absolute",
         top: 20,
@@ -155,14 +158,12 @@ export default function TVWeb() {
         <div style={{ fontSize: 12 }}>{channel?.nome}</div>
       </div>
 
-      {/* NEXT PROGRAM */}
       {nextProgram && (
         <div style={{ position: "absolute", bottom: 20, left: 20, fontSize: 12, opacity: 0.6 }}>
           Próximo: {nextProgram.nome}
         </div>
       )}
 
-      {/* CHANNEL LIST */}
       <div style={{
         position: "absolute",
         right: 10,
