@@ -20,7 +20,7 @@ function getNow(){ const n=new Date(); return n.getHours()*3600+n.getMinutes()*6
 function genDates(n){const ds=[]; let d=new Date(getToday()+"T00:00:00"); for(let i=0;i<n;i++){ const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,"0"),da=String(d.getDate()).padStart(2,"0"); ds.push(`${y}-${m}-${da}`); d.setDate(d.getDate()+1); } return ds}
 
 // Timeline absoluta (7 dias contínuos)
-const QUEUE_DAYS=7;
+const QUEUE_DAYS=7; // Mudar para 15, 30, etc conforme necessário - escalável!
 const BASE_DATE=new Date("2026-06-24T00:00:00Z");
 function dateSecondsToAbsolute(dateStr,secondsInDay){
   const targetDate=new Date(dateStr+"T00:00:00Z");
@@ -214,6 +214,7 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
   const [thumbnailType,setTT]=useState(program?.thumbnailType||"youtube");
   const [thumbnailUrl,setTU]=useState(program?.thumbnailUrl||null);
   const [error,setError]=useState("");
+  const [saving,setSaving]=useState(false);
   // Start time
   const [startMode,setSM]=useState(isEdit?"custom":"auto");
   const [startH,setSH]=useState(isEdit?Math.floor(program.horarioInicio/3600):0);
@@ -229,7 +230,7 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
   const yt=ytThumb(videos[0]?.youtubeUrl);
   const dispThumb=thumbnailType==="custom"&&thumbnailUrl?thumbnailUrl:yt;
 
-  const save=()=>{
+  const save=async()=>{
     if(!nome.trim()){setError("Digite o nome");return}
     if(dur<300){setError("Mínimo 5 min");return}
     if(hasOverlap){setError("Conflito de horário!");return}
@@ -246,7 +247,15 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
       if(!continua){setError("Operação cancelada");return}
     }
     
-    onSave({id:isEdit?program.id:`prog_${Date.now()}`,nome,canalId,classificacao,tags,sinopse,data:selectedDate,duracao:dur,horarioInicio:horIn,horarioFim:horFim,youtubeId:videos[0].youtubeUrl,videos:videos.filter(v=>v.youtubeUrl.trim()),thumbnailType,thumbnailUrl});
+    setSaving(true);
+    try {
+      onSave({id:isEdit?program.id:`prog_${Date.now()}`,nome,canalId,classificacao,tags,sinopse,data:selectedDate,duracao:dur,horarioInicio:horIn,horarioFim:horFim,youtubeId:videos[0].youtubeUrl,videos:videos.filter(v=>v.youtubeUrl.trim()),thumbnailType,thumbnailUrl});
+      setSaving(false);
+    } catch(err) {
+      console.error("Erro ao salvar:",err);
+      setSaving(false);
+      setError("Erro ao salvar programa");
+    }
   };
 
   return <div onClick={onClose} style={{position:"fixed",inset:0,zIndex:100,background:"rgba(0,0,0,0.7)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
@@ -381,7 +390,7 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
 
         <div style={{display:"flex",gap:8}}>
           <button onClick={onClose} style={{flex:1,padding:12,borderRadius:6,cursor:"pointer",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",color:"#aaa",fontSize:13,fontWeight:600}}>Cancelar</button>
-          <button onClick={save} disabled={hasOverlap} style={{flex:2,padding:12,borderRadius:6,cursor:hasOverlap?"not-allowed":"pointer",background:hasOverlap?"#333":"#1a73e8",border:"none",color:"#fff",fontSize:13,fontWeight:700,opacity:hasOverlap?0.5:1}}>{isEdit?"💾 Salvar":"✅ Agendar"}</button>
+          <button onClick={save} disabled={hasOverlap||saving} style={{flex:2,padding:12,borderRadius:6,cursor:hasOverlap||saving?"not-allowed":"pointer",background:hasOverlap||saving?"#333":"#1a73e8",border:"none",color:"#fff",fontSize:13,fontWeight:700,opacity:hasOverlap||saving?0.5:1}}>{saving?"⏳ Salvando...":isEdit?"💾 Salvar":"✅ Agendar"}</button>
         </div>
       </div>
     </div>
@@ -872,7 +881,7 @@ export default function AdminPanel(){
 
     {showDup&&<DupModal dates={dates} onDup={handleDup} onClose={()=>setSD(false)}/>}
 
-    {toast&&<div style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",padding:"12px 24px",borderRadius:8,background:"#1a73e8",color:"#fff",fontSize:13,fontWeight:600,zIndex:200,animation:"fadeIn 0.3s ease",boxShadow:"0 4px 20px rgba(0,0,0,0.4)"}}>{toast}</div>}
+    {toast&&<div style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",padding:"12px 24px",borderRadius:8,background:toast.includes("✅")||toast.includes("✓")?"#4caf50":toast.includes("❌")||toast.includes("⚠️")?"#f44336":"#1a73e8",color:"#fff",fontSize:13,fontWeight:600,zIndex:200,animation:"fadeIn 0.3s ease",boxShadow:"0 4px 20px rgba(0,0,0,0.4)"}}>{toast}</div>}
 
     <style>{`
       @keyframes fadeIn{from{opacity:0;transform:translateX(-50%) translateY(10px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
