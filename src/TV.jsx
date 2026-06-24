@@ -2,6 +2,10 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { db } from "./firebase";
 import { collection, onSnapshot } from "firebase/firestore";
 
+/* =========================
+   HELPERS
+========================= */
+
 function formatTime(sec) {
   const h = Math.floor(sec / 3600);
   const m = Math.floor((sec % 3600) / 60);
@@ -20,6 +24,10 @@ function getLocalDateString() {
   const dd = String(d.getDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
 }
+
+/* =========================
+   FIREBASE SCHEDULE ENGINE
+========================= */
 
 function getScheduleFromFirebase(channelId, programs) {
   const todayStr = getLocalDateString();
@@ -48,6 +56,10 @@ function getCurrentProgram(channelId, programs) {
   );
 }
 
+/* =========================
+   CHANNELS
+========================= */
+
 const CHANNELS = [
   { id: 1, numero: 1, nome: "TV Cultura", cor: "#2196F3", logo: "🎭" },
   { id: 2, numero: 2, nome: "CineMax", cor: "#E91E63", logo: "🎬" },
@@ -56,6 +68,10 @@ const CHANNELS = [
   { id: 5, numero: 5, nome: "RetroGames", cor: "#9C27B0", logo: "🎮" }
 ];
 
+/* =========================
+   MAIN TV
+========================= */
+
 export default function TVWeb() {
   const [channelId, setChannelId] = useState(1);
   const [programs, setPrograms] = useState([]);
@@ -63,11 +79,13 @@ export default function TVWeb() {
 
   const containerRef = useRef(null);
 
+  /* LIVE CLOCK */
   useEffect(() => {
     const i = setInterval(() => setTick(t => t + 1), 1000);
     return () => clearInterval(i);
   }, []);
 
+  /* 🔥 LOAD FIREBASE REALTIME */
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "programs"), (snap) => {
       const data = snap.docs.map(doc => ({
@@ -80,6 +98,7 @@ export default function TVWeb() {
     return () => unsub();
   }, []);
 
+  /* CURRENT DATA */
   const channel = CHANNELS.find(c => c.id === channelId);
   const currentProgram = getCurrentProgram(channelId, programs);
   const schedule = getScheduleFromFirebase(channelId, programs);
@@ -88,14 +107,18 @@ export default function TVWeb() {
     p => p.id === currentProgram?.id
   );
 
-  const nextProgram = currentIndex >= 0 ? schedule[currentIndex + 1] : null;
+  const nextProgram =
+    currentIndex >= 0 ? schedule[currentIndex + 1] : null;
 
+  /* CHANNEL SWITCH */
   const switchChannel = useCallback((id) => {
     setChannelId(id);
   }, []);
 
+  /* WHEEL NAV */
   const handleWheel = useCallback((e) => {
     const idx = CHANNELS.findIndex(c => c.id === channelId);
+
     if (e.deltaY > 0) {
       const next = idx < CHANNELS.length - 1 ? idx + 1 : 0;
       setChannelId(CHANNELS[next].id);
@@ -119,6 +142,8 @@ export default function TVWeb() {
         overflow: "hidden"
       }}
     >
+
+      {/* SCREEN */}
       <div style={{
         position: "absolute",
         inset: 0,
@@ -133,10 +158,18 @@ export default function TVWeb() {
         </div>
 
         {currentProgram ? (
-          <div style={{ position: "absolute", textAlign: "center", maxWidth: 600 }}>
+          <div style={{
+            position: "absolute",
+            textAlign: "center",
+            maxWidth: 600
+          }}>
             <div style={{ fontSize: 40 }}>📺</div>
-            <div style={{ fontSize: 28, fontWeight: "bold" }}>{currentProgram.nome}</div>
-            <div style={{ fontSize: 14, opacity: 0.7, marginTop: 8 }}>{currentProgram.sinopse}</div>
+            <div style={{ fontSize: 28, fontWeight: "bold" }}>
+              {currentProgram.nome}
+            </div>
+            <div style={{ fontSize: 14, opacity: 0.7 }}>
+              {currentProgram.sinopse}
+            </div>
           </div>
         ) : (
           <div style={{ position: "absolute", textAlign: "center" }}>
@@ -146,6 +179,7 @@ export default function TVWeb() {
         )}
       </div>
 
+      {/* INFO TOP LEFT */}
       <div style={{
         position: "absolute",
         top: 20,
@@ -158,12 +192,20 @@ export default function TVWeb() {
         <div style={{ fontSize: 12 }}>{channel?.nome}</div>
       </div>
 
+      {/* NEXT PROGRAM */}
       {nextProgram && (
-        <div style={{ position: "absolute", bottom: 20, left: 20, fontSize: 12, opacity: 0.6 }}>
+        <div style={{
+          position: "absolute",
+          bottom: 20,
+          left: 20,
+          fontSize: 12,
+          opacity: 0.6
+        }}>
           Próximo: {nextProgram.nome}
         </div>
       )}
 
+      {/* CHANNEL LIST */}
       <div style={{
         position: "absolute",
         right: 10,
@@ -185,14 +227,14 @@ export default function TVWeb() {
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              cursor: "pointer",
-              transition: "0.2s"
+              cursor: "pointer"
             }}
           >
             {c.logo}
           </div>
         ))}
       </div>
+
     </div>
   );
 }
