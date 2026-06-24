@@ -427,7 +427,6 @@ export default function AdminPanel(){
       setProgs(list);
     }, (err) => {
       console.error("Erro ao carregar programas:", err);
-      notify("❌ Erro ao carregar programas");
     });
     return () => unsub();
   }, []);
