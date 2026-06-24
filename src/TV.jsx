@@ -261,7 +261,7 @@ function EPGCompact({channels,allPrograms,currentChannelId,onSelectChannel,onSel
           const cur=getCurProg(sched);
           const isCurrent=ch.id===currentChannelId;
           return <div key={ch.id} style={{position:"relative",height:ROW_H,borderBottom:"1px solid rgba(255,255,255,0.05)",borderLeft:isCurrent?"3px solid #1a73e8":"none",width:totalW,background:isCurrent?"rgba(26,115,232,0.08)":"transparent"}}>
-            {sched.filter(p=>Number(p.horarioFim)<=86400&&!p.isPlaceholder).map(prog=>{
+            {sched.filter(p=>Number(p.horarioFim)<=86400&&!p.isPlaceholder&&Number(p.horarioFim)>getNow()).map(prog=>{
               const startSec=Number(prog.horarioInicio), dur=Number(prog.duracao);
               const left=secToPx(startSec), w=Math.max(secToPx(dur),80);
               const isNow=cur?.id===prog.id;
@@ -315,7 +315,7 @@ function FullDay({channels,allPrograms,currentChannelId,onClose,onProgramClick})
       </div>
       <div style={{display:"flex",flexDirection:"column",gap:6}}>
         {sched.length===0&&<div style={{padding:40,textAlign:"center",color:"#555"}}>Sem programação para este canal hoje.</div>}
-        {sched.filter(p=>p.horarioFim<=86400).map(prog=>{
+        {sched.filter(p=>p.horarioFim<=86400&&p.horarioFim>getNow()).map(prog=>{
           const isNow=ns>=prog.horarioInicio&&ns<prog.horarioFim;
           const isPast=ns>=prog.horarioFim;
           return <div key={prog.id} onClick={()=>onProgramClick(prog)} style={{display:"flex",gap:14,padding:"16px 18px",borderRadius:10,cursor:"pointer",background:isNow?"rgba(26,115,232,0.15)":isPast?"rgba(255,255,255,0.015)":"rgba(255,255,255,0.04)",border:isNow?"1px solid #1a73e8":"1px solid rgba(255,255,255,0.06)",opacity:isPast?0.4:1,transition:"all 0.2s"}}>
