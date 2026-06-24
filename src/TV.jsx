@@ -324,10 +324,10 @@ function FullDay({channels,allPrograms,currentChannelId,onClose,onProgramClick})
 // ============================================
 // PROGRAM MODAL
 // ============================================
-function ProgModal({program,channel,onClose}){
+function ProgModal({program,channel,onClose,onWatch}){
   if(!program) return null;
-  const isNow=getNow()>=program.horarioInicio&&getNow()<program.horarioFim;
-  const isFut=getNow()<program.horarioInicio;
+  const isNow=getNow()>=Number(program.horarioInicio)&&getNow()<Number(program.horarioFim);
+  const isFut=getNow()<Number(program.horarioInicio);
   return <div onClick={onClose} style={{position:"fixed",inset:0,zIndex:100,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
     <div onClick={e=>e.stopPropagation()} style={{background:"#1a1c24",borderRadius:10,maxWidth:500,width:"100%",border:"1px solid rgba(255,255,255,0.1)",overflow:"hidden"}}>
       <div style={{height:140,background:`linear-gradient(135deg,${channel?.cor||"#333"}33,#0a0c12)`,display:"flex",alignItems:"center",justifyContent:"center",position:"relative"}}>
@@ -339,8 +339,9 @@ function ProgModal({program,channel,onClose}){
         <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}><span style={{fontSize:12,color:channel?.cor}}>{channel?.nome}</span></div>
         <div style={{fontSize:22,fontWeight:700,color:"#fff",marginBottom:8}}>{program.nome}</div>
         <div style={{fontSize:13,color:"#999",lineHeight:1.6,marginBottom:16}}>{program.sinopse}</div>
-        <div style={{display:"flex",gap:16,fontSize:12,color:"#666",marginBottom:16}}><span>⏰ {program.horarioTexto} - {program.horarioFimTexto}</span><span>⏱ {fD(program.duracao)}</span></div>
+        <div style={{display:"flex",gap:16,fontSize:12,color:"#666",marginBottom:16}}><span>⏰ {program.horarioTexto} - {program.horarioFimTexto}</span><span>⏱ {fD(Number(program.duracao))}</span></div>
         <div style={{display:"flex",gap:8}}>
+          {isNow&&onWatch&&<button onClick={()=>{onWatch(program.canalId);onClose()}} style={{flex:1,padding:10,background:"linear-gradient(135deg,#f44336,#e91e63)",border:"none",borderRadius:6,color:"#fff",cursor:"pointer",fontSize:12,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>▶ Assistir Agora</button>}
           <button onClick={()=>shareProgram(program,channel)} style={{flex:1,padding:10,background:"rgba(76,175,80,0.15)",border:"1px solid rgba(76,175,80,0.3)",borderRadius:6,color:"#4caf50",cursor:"pointer",fontSize:12,fontWeight:600}}>📤 Compartilhar</button>
           {isFut&&<button onClick={()=>scheduleNotif(program,channel)} style={{flex:1,padding:10,background:"rgba(255,152,0,0.15)",border:"1px solid rgba(255,152,0,0.3)",borderRadius:6,color:"#ff9800",cursor:"pointer",fontSize:12,fontWeight:600}}>🔔 Lembrete</button>}
           <button onClick={onClose} style={{flex:1,padding:10,background:"rgba(26,115,232,0.2)",border:"1px solid rgba(26,115,232,0.3)",borderRadius:6,color:"#4fc3f7",cursor:"pointer",fontSize:12,fontWeight:600}}>Fechar</button>
@@ -584,7 +585,7 @@ export default function TVWeb(){
 
     {showEPG && <EPGCompact channels={CHANNELS} allPrograms={allPrograms} currentChannelId={curCh} onSelectChannel={swCh} onSelectProgram={setSP} onOpenFull={()=>{setEPG(false);setFull(true)}} onClose={()=>setEPG(false)}/>}
     {showFull && <FullDay channels={CHANNELS} allPrograms={allPrograms} currentChannelId={curCh} onClose={()=>setFull(false)} onProgramClick={setSP}/>}
-    {selProg && <ProgModal program={selProg} channel={CHANNELS.find(c=>buildSchedule(allPrograms,c.id).some(p=>p.id===selProg.id))||ch} onClose={()=>setSP(null)}/>}
+    {selProg && <ProgModal program={selProg} channel={CHANNELS.find(c=>buildSchedule(allPrograms,c.id).some(p=>p.id===selProg.id))||ch} onClose={()=>setSP(null)} onWatch={(chId)=>{swCh(chId);setEPG(false);setFull(false)}}/>}
 
     <style>{`
       @keyframes slideUp{from{transform:translateY(100%);opacity:0}to{transform:translateY(0);opacity:1}}
