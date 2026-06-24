@@ -1,10 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { db } from "./firebase";
-import { collection, getDocs } from "firebase/firestore";
-
-/* =========================
-   HELPERS
-========================= */
+import { collection, onSnapshot } from "firebase/firestore";
 
 function formatTime(sec) {
   const h = Math.floor(sec / 3600);
@@ -17,12 +13,13 @@ function getNowSeconds() {
   return n.getHours() * 3600 + n.getMinutes() * 60 + n.getSeconds();
 }
 
-/* =========================
-   FIREBASE SCHEDULE ENGINE
-========================= */
-
 function getScheduleFromFirebase(channelId, programs) {
-  const list = programs.filter(p => p.canalId === channelId);
+  // Hoje no formato YYYY-MM-DD local
+  const todayStr = new Date().toISOString().split("T")[0];
+
+  const list = programs.filter(p => 
+    Number(p.canalId) === Number(channelId) && p.data === todayStr
+  );
 
   if (!list.length) return [];
 
@@ -44,10 +41,6 @@ function getCurrentProgram(channelId, programs) {
   );
 }
 
-/* =========================
-   CHANNELS (podem virar Firebase depois)
-========================= */
-
 const CHANNELS = [
   { id: 1, numero: 1, nome: "TV Cultura", cor: "#2196F3", logo: "🎭" },
   { id: 2, numero: 2, nome: "CineMax", cor: "#E91E63", logo: "🎬" },
@@ -56,10 +49,6 @@ const CHANNELS = [
   { id: 5, numero: 5, nome: "RetroGames", cor: "#9C27B0", logo: "🎮" }
 ];
 
-/* =========================
-   MAIN TV
-========================= */
-
 export default function TVWeb() {
   const [channelId, setChannelId] = useState(1);
   const [programs, setPrograms] = useState([]);
@@ -67,32 +56,25 @@ export default function TVWeb() {
 
   const containerRef = useRef(null);
 
-  /* LIVE CLOCK */
+  /* LIVE CLOCK INTERNO (Para forçar re-render do player a cada segundo) */
   useEffect(() => {
     const i = setInterval(() => setTick(t => t + 1), 1000);
     return () => clearInterval(i);
   }, []);
 
-  /* LOAD FIREBASE (SINCRONIZAÇÃO TV ↔ PAINEL) */
+  /* SYNC FIRESTORE EM TEMPO REAL */
   useEffect(() => {
-    async function load() {
-      const snap = await getDocs(collection(db, "programs"));
+    const unsub = onSnapshot(collection(db, "programs"), (snap) => {
       const data = snap.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       }));
-
       setPrograms(data);
-    }
+    });
 
-    load();
-
-    // refresh leve pra simular live TV
-    const interval = setInterval(load, 5000);
-    return () => clearInterval(interval);
+    return () => unsub();
   }, []);
 
-  /* CURRENT DATA */
   const channel = CHANNELS.find(c => c.id === channelId);
   const currentProgram = getCurrentProgram(channelId, programs);
   const schedule = getScheduleFromFirebase(channelId, programs);
@@ -101,18 +83,14 @@ export default function TVWeb() {
     p => p.id === currentProgram?.id
   );
 
-  const nextProgram =
-    currentIndex >= 0 ? schedule[currentIndex + 1] : null;
+  const nextProgram = currentIndex >= 0 ? schedule[currentIndex + 1] : null;
 
-  /* CHANNEL SWITCH */
   const switchChannel = useCallback((id) => {
     setChannelId(id);
   }, []);
 
-  /* WHEEL NAV */
   const handleWheel = useCallback((e) => {
     const idx = CHANNELS.findIndex(c => c.id === channelId);
-
     if (e.deltaY > 0) {
       const next = idx < CHANNELS.length - 1 ? idx + 1 : 0;
       setChannelId(CHANNELS[next].id);
@@ -136,7 +114,6 @@ export default function TVWeb() {
         overflow: "hidden"
       }}
     >
-
       {/* SCREEN */}
       <div style={{
         position: "absolute",
@@ -151,19 +128,16 @@ export default function TVWeb() {
           <div style={{ fontSize: 24 }}>{channel?.nome}</div>
         </div>
 
-        {currentProgram && (
-          <div style={{
-            position: "absolute",
-            textAlign: "center",
-            maxWidth: 600
-          }}>
+        {currentProgram ? (
+          <div style={{ position: "absolute", textAlign: "center", maxWidth: 600 }}>
             <div style={{ fontSize: 40 }}>📺</div>
-            <div style={{ fontSize: 28, fontWeight: "bold" }}>
-              {currentProgram.nome}
-            </div>
-            <div style={{ fontSize: 14, opacity: 0.7 }}>
-              {currentProgram.sinopse}
-            </div>
+            <div style={{ fontSize: 28, fontWeight: "bold" }}>{currentProgram.nome}</div>
+            <div style={{ fontSize: 14, opacity: 0.7, marginTop: 8 }}>{currentProgram.sinopse}</div>
+          </div>
+        ) : (
+          <div style={{ position: "absolute", textAlign: "center" }}>
+            <div style={{ fontSize: 40 }}>🚫</div>
+            <div style={{ fontSize: 18, opacity: 0.5 }}>Fora do Ar / Sem Programação</div>
           </div>
         )}
       </div>
@@ -183,13 +157,7 @@ export default function TVWeb() {
 
       {/* NEXT PROGRAM */}
       {nextProgram && (
-        <div style={{
-          position: "absolute",
-          bottom: 20,
-          left: 20,
-          fontSize: 12,
-          opacity: 0.6
-        }}>
+        <div style={{ position: "absolute", bottom: 20, left: 20, fontSize: 12, opacity: 0.6 }}>
           Próximo: {nextProgram.nome}
         </div>
       )}
@@ -216,14 +184,14 @@ export default function TVWeb() {
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              cursor: "pointer"
+              cursor: "pointer",
+              transition: "0.2s"
             }}
           >
             {c.logo}
           </div>
         ))}
       </div>
-
     </div>
   );
 }
