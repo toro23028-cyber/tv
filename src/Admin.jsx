@@ -14,13 +14,17 @@ function fmtSec(s) {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
 
+// Gera strings de datas locais puras YYYY-MM-DD ignorando problemas de fuso
 function genDates(n) {
   const ds = [];
   const now = new Date();
   for (let i = 0; i < n; i++) {
     const d = new Date(now);
     d.setDate(now.getDate() + i);
-    ds.push(d.toISOString().split("T")[0]);
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    ds.push(`${yyyy}-${mm}-${dd}`);
   }
   return ds;
 }
@@ -36,7 +40,6 @@ export default function AdminPanel() {
 
   const notify = (m) => alert(m);
 
-  // REALTIME LOAD FIRESTORE
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "programs"), (snap) => {
       const data = snap.docs.map(d => ({
@@ -51,15 +54,12 @@ export default function AdminPanel() {
   const handleSave = async (p) => {
     try {
       if (p.id) {
-        // Update
         await setDoc(doc(db, "programs", p.id), p);
       } else {
-        // Create - Deixa o Firebase gerar o ID automático
         const { id, ...newData } = p;
         await addDoc(collection(db, "programs"), newData);
       }
-
-      notify("Salvo no Firebase com sucesso!");
+      notify("Salvo no Firebase!");
       setSM(false);
       setEP(null);
     } catch (err) {
@@ -78,7 +78,6 @@ export default function AdminPanel() {
     }
   };
 
-  // Garante a comparação correta convertendo o canalId para Número
   const dayProgs = programs.filter(p =>
     p.data === selDate && Number(p.canalId) === Number(selCh)
   );
@@ -88,11 +87,11 @@ export default function AdminPanel() {
       <h2>TV Admin (Firebase ativo)</h2>
 
       <div style={{ margin: "15px 0", display: "flex", gap: "10px" }}>
-        <select value={selDate} onChange={e => setSelDate(e.target.value)}>
+        <select value={selDate} onChange={e => setSelDate(e.target.value)} style={{ padding: 6 }}>
           {dates.map(d => <option key={d} value={d}>{d}</option>)}
         </select>
 
-        <select value={selCh} onChange={e => setSelCh(e.target.value)}>
+        <select value={selCh} onChange={e => setSelCh(e.target.value)} style={{ padding: 6 }}>
           <option value={1}>Canal 1 - TV Cultura</option>
           <option value={2}>Canal 2 - CineMax</option>
           <option value={3}>Canal 3 - DocWorld</option>
@@ -108,7 +107,7 @@ export default function AdminPanel() {
       <hr style={{ margin: "20px 0", opacity: 0.3 }} />
 
       {dayProgs.length === 0 && (
-        <p>Nenhum programa nesse dia/canal</p>
+        <p style={{ color: "#aaa" }}>Nenhum programa cadastrado para esta data e canal no painel.</p>
       )}
 
       {dayProgs.map(p => (
@@ -123,10 +122,9 @@ export default function AdminPanel() {
           <div style={{ fontSize: 13, color: "#aaa", marginTop: 4 }}>
             {fmtSec(p.horarioInicio)} - {fmtSec(p.horarioFim)}
           </div>
-
           <div style={{ marginTop: 10 }}>
             <button onClick={() => { setEP(p); setSM(true); }}>Editar</button>
-            <button onClick={() => handleDel(p.id)} style={{ marginLeft: 8, background: "#d9534f", color: "#fff", border: "none", padding: "2px 8px", borderRadius: 4, cursor: "pointer" }}>
+            <button onClick={() => handleDel(p.id)} style={{ marginLeft: 8, background: "#d9534f", color: "#fff", border: "none", padding: "4px 10px", borderRadius: 4, cursor: "pointer" }}>
               Deletar
             </button>
           </div>
@@ -159,31 +157,32 @@ function ProgramModal({ program, selDate, selCh, onSave, onClose }) {
       id: program?.id || null,
       nome,
       sinopse: sinopse || "Sem sinopse disponível.",
-      data: program?.data || selDate,
+      data: program?.data || selDate, // Salva na data exata que você está visualizando no topo
       canalId: Number(selCh),
-      horarioInicio: 0, 
-      horarioFim: 86400 
+      horarioInicio: 0,
+      horarioFim: 86400
     });
   };
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", display: "flex", alignItems: "center", justifyCenter: "center", display: "flex", justifyContent: "center" }}>
-      <div style={{ background: "#fff", padding: 25, borderRadius: 8, color: "#000", width: 300, margin: "auto" }}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ background: "#fff", padding: 25, borderRadius: 8, color: "#000", width: 300 }}>
         <h3>{program ? "Editar Programa" : "Novo Programa"}</h3>
         <br />
         <input
-          style={{ width: "100%", padding: 6, marginBottom: 10 }}
+          style={{ width: "100%", padding: 6, marginBottom: 10, boxSizing: "border-box" }}
           value={nome}
           onChange={e => setNome(e.target.value)}
           placeholder="Nome do programa"
         />
         <input
-          style={{ width: "100%", padding: 6, marginBottom: 10 }}
+          style={{ width: "100%", padding: 6, marginBottom: 10, boxSizing: "border-box" }}
           value={sinopse}
           onChange={e => setSinopse(e.target.value)}
           placeholder="Sinopse"
         />
-        <p style={{ fontSize: 11, color: "#666" }}>Agendado para o dia todo (00:00 - 24:00)</p>
+        <p style={{ fontSize: 11, color: "#666" }}>Data: {program?.data || selDate}</p>
+        <p style={{ fontSize: 11, color: "#666" }}>No ar o dia todo (00:00 - 24:00)</p>
         <br />
         <button onClick={save} style={{ padding: "6px 12px", background: "#2196F3", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer" }}>Salvar</button>
         <button onClick={onClose} style={{ marginLeft: 8, padding: "6px 12px" }}>Cancelar</button>
