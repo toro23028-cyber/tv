@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { db, collection, addDoc, updateDoc, deleteDoc, onSnapshot, doc } from "./firebase";
 
 const DURATION_PRESETS = [
   { label:"15min", value:900 },{ label:"30min", value:1800 },{ label:"40min", value:2400 },
@@ -13,8 +14,8 @@ const COLOR_LIST = ["#2196F3","#E91E63","#4CAF50","#FF9800","#9C27B0","#f44336",
 function fmtSec(s){const h=Math.floor(s/3600),m=Math.floor((s%3600)/60);return`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`}
 function secTo(s){return{h:Math.floor(s/3600),m:Math.floor((s%3600)/60)}}
 function parseDur(h,m){return(parseInt(h)||0)*3600+(parseInt(m)||0)*60}
-function getDayLabel(d){const x=new Date(d);const ds=["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"];return`${ds[x.getDay()]} ${x.getDate()}/${x.getMonth()+1}`}
-function genDates(n){const ds=[];const now=new Date();for(let i=0;i<n;i++){const d=new Date(now);d.setDate(now.getDate()+i);ds.push(d.toISOString().split("T")[0])}return ds}
+function getToday(){ const n=new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,"0")}-${String(n.getDate()).padStart(2,"0")}`; }
+function genDates(n){const ds=[];const now=new Date();for(let i=0;i<n;i++){const d=new Date(now);d.setDate(now.getDate()+i);const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,"0"),da=String(d.getDate()).padStart(2,"0");ds.push(`${y}-${m}-${da}`)}return ds}
 function extractYTId(s){if(!s)return null;const p=[/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/,/^([a-zA-Z0-9_-]{11})$/];for(const r of p){const m=s.match(r);if(m)return m[1]}return null}
 function ytThumb(id){const x=extractYTId(id);return x?`https://img.youtube.com/vi/${x}/mqdefault.jpg`:null}
 
@@ -419,13 +420,68 @@ export default function AdminPanel(){
 
   const notify=(m)=>{setToast(m);setTimeout(()=>setToast(""),3000)};
 
-  const handleSave=(p)=>{
-    if(editProg) setProgs(programs.map(x=>x.id===p.id?p:x));
-    else setProgs([...programs,p]);
-    notify(editProg?"✅ Atualizado!":"✅ Agendado!");
-    setSM(false);setEP(null);
+  // Firebase listener para programas
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, "programs"), (snap) => {
+      const list = snap.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+      setProgs(list);
+    }, (err) => {
+      console.error("Erro ao carregar programas:", err);
+      notify("❌ Erro ao carregar programas");
+    });
+    return () => unsub();
+  }, []);
+
+  const handleSave = async (p) => {
+    try {
+      // Validação de overlap
+      const conflicts = programs.filter(x => 
+        x.data === p.data && 
+        x.canalId === p.canalId && 
+        x.id !== p.id && 
+        !(x.horarioFim <= p.horarioInicio || x.horarioInicio >= p.horarioFim)
+      );
+      
+      if (conflicts.length > 0) {
+        notify("⚠️ Conflito de horário com outro programa!");
+        return;
+      }
+
+      // Atualizar estado local
+      if (editProg) setProgs(programs.map(x => x.id === p.id ? p : x));
+      else setProgs([...programs, p]);
+
+      // Persistir no Firestore
+      if (editProg) {
+        // Update existing
+        await updateDoc(doc(db, "programs", p.id), p);
+      } else {
+        // Add new
+        const ref = await addDoc(collection(db, "programs"), p);
+        // Atualizar ID local com ID do Firebase
+        setProgs(progs => progs.map(x => x === p ? { ...x, id: ref.id } : x));
+      }
+
+      notify(editProg ? "✅ Atualizado!" : "✅ Agendado!");
+      setSM(false);
+      setEP(null);
+    } catch (err) {
+      console.error("Erro ao salvar:", err);
+      notify("❌ Erro ao salvar");
+    }
   };
-  const handleDel=(id)=>{setProgs(programs.filter(p=>p.id!==id));notify("🗑️ Removido")};
+  const handleDel = async (id) => {
+    try {
+      setProgs(programs.filter(p => p.id !== id));
+      await deleteDoc(doc(db, "programs", id));
+      notify("🗑️ Removido");
+    } catch (err) {
+      console.error("Erro ao deletar:", err);
+      notify("❌ Erro ao deletar");
+      // Reverter estado se falhar
+      setProgs(programs);
+    }
+  };
   const handleDup=(from,to)=>{
     const fp=programs.filter(p=>p.data===from);
     const np=fp.map(p=>({...p,id:`prog_${Date.now()}_${Math.random().toString(36).slice(2)}`,data:to}));
@@ -468,7 +524,7 @@ export default function AdminPanel(){
         <div style={{marginBottom:20}}>
           <div style={{fontSize:12,color:"#888",marginBottom:8,fontWeight:600}}>📅 DATA</div>
           <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:8}}>
-            {dates.map(d=>{const isT=d===new Date().toISOString().split("T")[0],isS=d===selDate;
+            {dates.map(d=>{const isT=d===getToday(),isS=d===selDate;
               return <button key={d} onClick={()=>setSelDate(d)} style={{minWidth:72,padding:"8px 10px",borderRadius:6,cursor:"pointer",textAlign:"center",background:isS?"#1a73e8":"rgba(255,255,255,0.04)",border:isS?"1px solid #1a73e8":isT?"1px solid #4fc3f7":"1px solid rgba(255,255,255,0.08)",color:isS?"#fff":"#ccc",fontSize:11,fontWeight:600,flexShrink:0}}>
                 <div>{getDayLabel(d).split(" ")[0]}</div><div style={{fontSize:14,marginTop:2}}>{new Date(d).getDate()}</div>
                 {isT&&<div style={{fontSize:8,color:isS?"#fff":"#4fc3f7",marginTop:2}}>HOJE</div>}
