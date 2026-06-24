@@ -695,7 +695,6 @@ export default function AdminPanel(){
   };
 
   // Task 4: Improved date filter - show only last hour + now + next programs
-
   const dayProgs=programs.filter(p=>{
     // Task 4: Filter - show last hour + now + next programs for selected date
     if(p.data!==selDate) return false;
@@ -704,9 +703,9 @@ export default function AdminPanel(){
       const now=getNow();
       const progStart=Number(p.horarioInicio);
       const progEnd=Number(p.horarioFim);
-      const oneHourAgo=now-3600;
-      // Keep only programs from last 1h until end of day
-      return progEnd>oneHourAgo;
+      // Show: (programs that started in last 1h) OR (programs that end in future)
+      const oneHourAgo=Math.max(0, now-3600); // Never go below 0
+      return progStart>=oneHourAgo || progEnd>now;
     }
     // For other dates, show all programs
     return true;
