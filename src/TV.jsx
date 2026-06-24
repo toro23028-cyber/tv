@@ -199,14 +199,19 @@ function EPGCompact({channels,allPrograms,currentChannelId,onSelectChannel,onSel
   const now=getNow();
   const scrollRef=useRef(null);
   const ROW_H=140, PX=400;
-  const nowPx = (now/86400) * PX * 24; // Calculate exact pixel position based on 24h = PX*24 pixels
+  const nowPx = (now/86400) * PX * 24;
   
   useEffect(()=>{
     if(scrollRef.current) {
-      // Scroll to show now with some left margin
       scrollRef.current.scrollLeft = Math.max(0, nowPx - 200);
     }
   },[nowPx]);
+
+  const scroll = (dir) => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollLeft += dir * 300;
+    }
+  };
   
   const timeMarks=[];
   for(let i=0;i<96;i++){
@@ -242,12 +247,13 @@ function EPGCompact({channels,allPrograms,currentChannelId,onSelectChannel,onSel
             {sched.filter(p=>p.horarioFim<=86400).map(prog => {
               const w=Math.max((prog.duracao/86400)*PX*24,80);
               const isNow=cur?.id===prog.id;
+              const isLong = prog.duracao > 3600;
               return <div key={prog.id} onClick={()=>{onSelectChannel(ch.id);onSelectProgram(prog)}}
                 style={{minWidth:w,maxWidth:w,height:ROW_H-2,padding:"14px 16px",cursor:"pointer",overflow:"hidden",background:isNow?"rgba(40,44,60,0.95)":"rgba(30,32,44,0.6)",borderRight:"1px solid rgba(255,255,255,0.06)",display:"flex",flexDirection:"column",justifyContent:"center",transition:"background 0.2s"}}
                 onMouseEnter={e=>e.currentTarget.style.background=isNow?"rgba(60,70,90,1)":"rgba(45,50,65,0.9)"}
                 onMouseLeave={e=>e.currentTarget.style.background=isNow?"rgba(40,44,60,0.95)":"rgba(30,32,44,0.6)"}>
-                <div style={{fontSize:12,color:"#aaa",marginBottom:8,fontWeight:500}}>{prog.horarioTexto} - {prog.horarioFimTexto}{isNow&&<span style={{marginLeft:8,fontSize:10,fontWeight:700,padding:"3px 8px",borderRadius:3,background:"#f44336",color:"#fff"}}>AO VIVO</span>}</div>
-                <div style={{fontSize:18,fontWeight:700,color:isNow?"#fff":"#ddd",lineHeight:1.4,overflow:"hidden",display:"-webkit-box",WebkitLineClamp:3,WebkitBoxOrient:"vertical"}}>{prog.nome}</div>
+                <div style={{fontSize:12,color:"#aaa",marginBottom:8,fontWeight:500}}>{prog.horarioTexto}{isNow&&<span style={{marginLeft:8,fontSize:10,fontWeight:700,padding:"3px 8px",borderRadius:3,background:"#f44336",color:"#fff"}}>AO VIVO</span>}</div>
+                <div style={{fontSize:18,fontWeight:700,color:isNow?"#fff":"#ddd",lineHeight:1.4,overflow:"hidden",display:"-webkit-box",WebkitLineClamp:isLong?2:3,WebkitBoxOrient:"vertical"}}>{prog.nome}{isLong&&<div style={{fontSize:16,marginTop:4}}>{prog.nome}</div>}</div>
               </div>;
             })}
             {sched.length===0 && <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",color:"#555",fontSize:13}}>Sem programação</div>}
@@ -255,8 +261,10 @@ function EPGCompact({channels,allPrograms,currentChannelId,onSelectChannel,onSel
         })}
       </div>
     </div>
-    <div style={{background:"rgba(16,18,26,0.98)",padding:"10px 16px",borderTop:"1px solid rgba(255,255,255,0.06)",display:"flex",justifyContent:"center",gap:24,fontSize:12,color:"#666"}}>
-      <span>↑↓ ou Scroll = Canal</span><span>ESC = Fechar</span><span>G = Guia</span>
+    <div style={{background:"rgba(16,18,26,0.98)",padding:"10px 16px",borderTop:"1px solid rgba(255,255,255,0.06)",display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,color:"#666"}}>
+      <button onClick={()=>scroll(-1)} style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",color:"#aaa",padding:"6px 12px",borderRadius:4,cursor:"pointer",fontSize:12}}>← Anterior</button>
+      <div style={{display:"flex",gap:24}}><span>↑↓ = Canal</span><span>ESC = Fechar</span><span>G = Guia</span></div>
+      <button onClick={()=>scroll(1)} style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",color:"#aaa",padding:"6px 12px",borderRadius:4,cursor:"pointer",fontSize:12}}>Próximo →</button>
     </div>
   </div>;
 }
@@ -344,7 +352,12 @@ export default function TVWeb(){
   const [showFull, setFull] = useState(false);
   const [showInfo, setInfo] = useState(true);
   const [selProg, setSP] = useState(null);
-  const [fade, setFade] = useState(false);
+  const [showBlur, setShowBlur] = useState(true);
+  
+  useEffect(() => {
+    const timer = setTimeout(() => setShowBlur(false), 7000);
+    return () => clearTimeout(timer);
+  }, []);
   const hRef=useRef(null); const cRef=useRef(null); const wRef=useRef(null);
 
   // ========== FIREBASE REAL-TIME ==========
@@ -523,6 +536,12 @@ export default function TVWeb(){
     <div style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",zIndex:15,display:"flex",flexDirection:"column",gap:4,opacity:showInfo&&!showEPG&&!showFull?0.7:0,transition:"opacity 0.3s"}}>
       {CHANNELS.map(c => <div key={c.id} onClick={()=>swCh(c.id)} style={{width:36,height:36,borderRadius:4,background:c.id===curCh?"rgba(26,115,232,0.3)":"rgba(0,0,0,0.4)",border:c.id===curCh?"1px solid #1a73e8":"1px solid rgba(255,255,255,0.1)",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",overflow:"hidden"}}><ChLogo ch={c} size={c.logoType==="custom"?36:20}/></div>)}
     </div>
+
+    {/* Dark blur on top of screen - hides YouTube info */}
+    {showBlur && <div style={{position:"absolute",top:0,left:0,right:0,height:200,background:"linear-gradient(180deg, rgba(0,0,0,0.9) 0%, transparent 100%)",zIndex:6,backdropFilter:"blur(8px)",transition:"opacity 0.5s",opacity:showBlur?1:0,pointerEvents:"none"}}/>}
+
+    {/* Dark blur behind EPG */}
+    {showBlur && showEPG && <div style={{position:"absolute",bottom:0,left:0,right:0,height:400,background:"rgba(0,0,0,0.7)",zIndex:19,backdropFilter:"blur(4px)",transition:"opacity 0.5s",pointerEvents:"none"}}/>}
 
     {showEPG && <EPGCompact channels={CHANNELS} allPrograms={allPrograms} currentChannelId={curCh} onSelectChannel={swCh} onSelectProgram={setSP} onOpenFull={()=>{setEPG(false);setFull(true)}} onClose={()=>setEPG(false)}/>}
     {showFull && <FullDay channels={CHANNELS} allPrograms={allPrograms} currentChannelId={curCh} onClose={()=>setFull(false)} onProgramClick={setSP}/>}
