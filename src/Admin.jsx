@@ -12,6 +12,7 @@ const EMOJI_LIST = ["📺","🎭","🎬","🌍","🎵","🎮","📡","🎨","�
 const COLOR_LIST = ["#2196F3","#E91E63","#4CAF50","#FF9800","#9C27B0","#f44336","#00bcd4","#ff5722","#607d8b","#78909C","#3f51b5","#8bc34a","#ffc107","#795548"];
 
 function fmtSec(s){const h=Math.floor(s/3600),m=Math.floor((s%3600)/60);return`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`}
+function getDayLabel(d){const x=new Date(d+"T00:00:00");const ds=["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"];return`${ds[x.getDay()]} ${x.getDate()}/${x.getMonth()+1}`}
 function secTo(s){return{h:Math.floor(s/3600),m:Math.floor((s%3600)/60)}}
 function parseDur(h,m){return(parseInt(h)||0)*3600+(parseInt(m)||0)*60}
 function getToday(){ const n=new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,"0")}-${String(n.getDate()).padStart(2,"0")}`; }
