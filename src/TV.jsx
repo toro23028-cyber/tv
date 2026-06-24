@@ -439,7 +439,21 @@ export default function TVWeb(){
 
   // Mouse wheel
   const handleWheel=useCallback(e=>{if(showEPG||showFull)return;if(wRef.current)return;wRef.current=setTimeout(()=>{wRef.current=null},400);swDir(e.deltaY>0?1:-1)},[swDir,showEPG,showFull]);
-  const handleClick=useCallback(()=>{if(showEPG){setEPG(false);return}rHide()},[showEPG,rHide]);
+  const [lastClickTime, setLastClickTime] = useState(0);
+  const handleClick = useCallback(() => {
+    const now = Date.now();
+    // Double click = fullscreen
+    if (now - lastClickTime < 300) {
+      if (!document.fullscreenElement) cRef.current?.requestFullscreen?.();
+      else document.exitFullscreen?.();
+    }
+    setLastClickTime(now);
+    
+    // Any click unmutes or closes EPG
+    if (showEPG) { setEPG(false); return; }
+    if (muted) handleUnmute();
+    else rHide();
+  }, [showEPG, muted, lastClickTime, handleUnmute, rHide]);
 
   // ========== LOADING ==========
   if (loading) return <div style={{width:"100%",height:"100vh",background:"#000",display:"flex",alignItems:"center",justifyContent:"center",color:"#888",fontFamily:"system-ui",fontSize:16}}>
@@ -501,8 +515,6 @@ export default function TVWeb(){
       <div style={{position:"absolute",top:16,right:20,fontSize:14,fontWeight:700,color:"rgba(255,255,255,0.15)",letterSpacing:2,zIndex:3,textShadow:"0 1px 3px rgba(0,0,0,0.8)"}}>TVWEB</div>
       {/* Channel indicator - LARGER on channel change */}
       {showInfo && <div style={{position:"absolute",top:20,left:20,background:"rgba(0,0,0,0.7)",padding:"8px 16px",borderRadius:6,border:"1px solid rgba(255,255,255,0.1)",display:"flex",alignItems:"center",gap:12,zIndex:3,animation:"slideDown 0.4s ease"}}><span style={{fontSize:32,fontWeight:700,color:"#fff"}}>{ch.numero}</span><div><div style={{fontSize:16,fontWeight:700,color:ch.cor}}>{ch.nome}</div><div style={{fontSize:12,color:"#aaa",marginTop:2}}>Canal {ch.numero}</div></div></div>}
-      {/* Program name overlay on channel change */}
-      {cp && showInfo && <div style={{position:"absolute",left:"50%",top:"50%",transform:"translate(-50%, -50%)",textAlign:"center",pointerEvents:"none",animation:"fadeInOut 3s ease"}}><div style={{fontSize:48,fontWeight:700,color:"#fff",textShadow:"0 2px 10px rgba(0,0,0,0.9)",maxWidth:"80%"}}>{cp.nome}</div></div>}
     </div>
 
     {showInfo && <FsBtn cRef={cRef}/>}
@@ -520,7 +532,6 @@ export default function TVWeb(){
     <style>{`
       @keyframes slideUp{from{transform:translateY(100%);opacity:0}to{transform:translateY(0);opacity:1}}
       @keyframes slideDown{from{transform:translateY(-20px);opacity:0}to{transform:translateY(0);opacity:1}}
-      @keyframes fadeInOut{0%{opacity:0}20%{opacity:1}80%{opacity:1}100%{opacity:0}}
       @keyframes pulseFull{0%,100%{opacity:.6;transform:translateX(-50%) scale(1)}50%{opacity:1;transform:translateX(-50%) scale(1.05)}}
       ::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:rgba(255,255,255,.02)}::-webkit-scrollbar-thumb{background:rgba(255,255,255,.1);border-radius:3px}
       *{box-sizing:border-box;margin:0;padding:0}
