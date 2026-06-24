@@ -423,26 +423,43 @@ export default function AdminPanel(){
 
   // Firebase listeners
   useEffect(() => {
+    console.log("📱 Firebase listeners iniciando...");
+    
     // Load channels
     const unsubCh = onSnapshot(collection(db, "channels"), (snap) => {
       const list = snap.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+      console.log("✅ Canais carregados:", list.length, list);
       if (list.length > 0) {
         setCh(list.sort((a,b) => (a.numero||0) - (b.numero||0)));
       }
     }, (err) => {
-      console.error("Erro ao carregar canais:", err);
+      console.error("❌ Erro ao carregar canais:", err);
     });
 
     // Load programs
     const unsubPr = onSnapshot(collection(db, "programs"), (snap) => {
-      const list = snap.docs.map(doc => ({ ...doc.data(), id: doc.id }));
-      console.log("Programas carregados:", list.length);
+      console.log("📊 Snapshot recebido:", snap.size, "docs");
+      const list = snap.docs.map(doc => {
+        const data = doc.data();
+        console.log("  📄 Doc:", doc.id, "→", data.nome || "(sem nome)");
+        return { ...data, id: doc.id };
+      });
+      console.log("✅ Programas carregados:", list.length);
+      if (list.length > 0) {
+        console.log("   🎬 Amostra:", {
+          nome: list[0].nome,
+          data: list[0].data,
+          canalId: list[0].canalId,
+          horarioInicio: list[0].horarioInicio
+        });
+      }
       setProgs(list);
     }, (err) => {
-      console.error("Erro ao carregar programas:", err);
+      console.error("❌ Erro Firebase programs:", err.code, err.message);
     });
 
     return () => {
+      console.log("🔌 Desconectando listeners");
       unsubCh();
       unsubPr();
     };
@@ -542,7 +559,7 @@ export default function AdminPanel(){
           <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:8}}>
             {dates.map(d=>{const isT=d===getToday(),isS=d===selDate;
               return <button key={d} onClick={()=>setSelDate(d)} style={{minWidth:72,padding:"8px 10px",borderRadius:6,cursor:"pointer",textAlign:"center",background:isS?"#1a73e8":"rgba(255,255,255,0.04)",border:isS?"1px solid #1a73e8":isT?"1px solid #4fc3f7":"1px solid rgba(255,255,255,0.08)",color:isS?"#fff":"#ccc",fontSize:11,fontWeight:600,flexShrink:0}}>
-                <div>{getDayLabel(d).split(" ")[0]}</div><div style={{fontSize:14,marginTop:2}}>{new Date(d).getDate()}</div>
+                <div>{getDayLabel(d).split(" ")[0]}</div><div style={{fontSize:14,marginTop:2}}>{new Date(d+"T00:00:00").getDate()}</div>
                 {isT&&<div style={{fontSize:8,color:isS?"#fff":"#4fc3f7",marginTop:2}}>HOJE</div>}
               </button>})}
           </div>
