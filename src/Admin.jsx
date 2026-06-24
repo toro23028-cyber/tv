@@ -269,8 +269,9 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
         <div>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
             <label style={{...lS,marginBottom:0}}>VÍDEOS</label>
-            <div style={{display:"flex",gap:8}}>
+            <div style={{display:"flex",gap:8,alignItems:"center"}}>
               <span style={{fontSize:10,color:"#555"}}>{videos.length} vídeo(s)</span>
+              <input type="checkbox" checked={videos.length>0&&videos.every(v=>v.youtubeUrl)} onChange={e=>{if(e.target.checked){const nv=videos.map(v=>({...v}));setVideos(nv)}}} title="Marcar todos" style={{width:14,height:14,cursor:"pointer",accentColor:"#4caf50"}}/>
               <button onClick={async()=>{const videoCopy=[...videos];for(let i=0;i<videoCopy.length;i++){const vId=extractYouTubeId(videoCopy[i].youtubeUrl);if(vId){const meta=await fetchYouTubeMetadata(vId);if(meta){const nv=[...videoCopy];nv[i]={...nv[i],youtubeUrl:videoCopy[i].youtubeUrl,titulo:meta.title};setVideos(nv);videoCopy[i]=nv[i];if(i===0){setCH(Math.floor(meta.duration/3600));setCM(Math.floor((meta.duration%3600)/60));setSinopse(meta.description)}}}}}} style={{fontSize:10,color:"#4caf50",background:"rgba(76,175,80,0.1)",border:"1px solid rgba(76,175,80,0.3)",padding:"2px 8px",borderRadius:3,cursor:"pointer",fontWeight:600}}>🔍 Buscar Todos</button>
             </div>
           </div>
@@ -536,20 +537,19 @@ export default function AdminPanel(){
         return;
       }
 
-      // Atualizar estado local
-      if (editProg) setProgs(programs.map(x => x.id === p.id ? p : x));
-      else setProgs([...programs, p]);
-
-      // Persistir no Firestore
+      // Persistir no Firestore FIRST
       if (editProg) {
         // Update existing
         await updateDoc(doc(db, "programs", p.id), p);
       } else {
         // Add new
         const ref = await addDoc(collection(db, "programs"), p);
-        // Atualizar ID local com ID do Firebase
-        setProgs(progs => progs.map(x => x === p ? { ...x, id: ref.id } : x));
+        p.id = ref.id; // Update ID with Firebase ID
       }
+
+      // THEN update local state (only if Firebase save succeeded)
+      if (editProg) setProgs(programs.map(x => x.id === p.id ? p : x));
+      else setProgs([...programs, p]);
 
       notify(editProg ? "✅ Atualizado!" : "✅ Agendado!");
       setSM(false);
