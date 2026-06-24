@@ -11,6 +11,22 @@ const FALLBACK_PROGRAMS = [
   { id:"fb1", canalId:"_info", nome:"Bem-vindo à TVWEB", sinopse:"Configure canais e programas no painel /admin para começar!", duracao:3600, horarioInicio:0, horarioFim:3600, classificacao:"L", tags:["HD"], data:"" },
 ];
 
+// "Voltamos já" slide for gaps
+const VOLTAMOS_JA = {
+  id: "_voltamos",
+  nome: "Voltamos já!",
+  sinopse: "Programação em breve",
+  duracao: 600,
+  horarioInicio: 0,
+  horarioFim: 600,
+  horarioTexto: "00:00",
+  horarioFimTexto: "00:10",
+  classificacao: "L",
+  tags: ["HD"],
+  youtubeId: null,
+  isPlaceholder: true
+};
+
 // ============================================
 // HELPERS
 // ============================================
@@ -38,7 +54,65 @@ function buildSchedule(programs, channelId) {
       horarioFimTexto: fmtSec(Number(p.horarioFim)),
     }));
 
-  if (dayProgs.length > 0) return dayProgs;
+  if (dayProgs.length > 0) {
+    // Fill gaps with "Voltamos já"
+    const withGaps = [];
+    for (let i = 0; i < dayProgs.length; i++) {
+      if (i === 0 && dayProgs[i].horarioInicio > 0) {
+        // Gap before first program
+        let cur = 0;
+        while (cur < dayProgs[i].horarioInicio) {
+          const gapEnd = Math.min(cur + 600, dayProgs[i].horarioInicio);
+          withGaps.push({
+            ...VOLTAMOS_JA,
+            id: `_gap_${i}_${cur}`,
+            horarioInicio: cur,
+            horarioFim: gapEnd,
+            duracao: gapEnd - cur,
+            horarioTexto: fmtSec(cur),
+            horarioFimTexto: fmtSec(gapEnd),
+          });
+          cur = gapEnd;
+        }
+      }
+      withGaps.push(dayProgs[i]);
+      // Gap after this program
+      if (i < dayProgs.length - 1 && dayProgs[i].horarioFim < dayProgs[i + 1].horarioInicio) {
+        let cur = dayProgs[i].horarioFim;
+        while (cur < dayProgs[i + 1].horarioInicio) {
+          const gapEnd = Math.min(cur + 600, dayProgs[i + 1].horarioInicio);
+          withGaps.push({
+            ...VOLTAMOS_JA,
+            id: `_gap_${i}_${cur}`,
+            horarioInicio: cur,
+            horarioFim: gapEnd,
+            duracao: gapEnd - cur,
+            horarioTexto: fmtSec(cur),
+            horarioFimTexto: fmtSec(gapEnd),
+          });
+          cur = gapEnd;
+        }
+      }
+    }
+    // Gap after last program
+    if (dayProgs[dayProgs.length - 1].horarioFim < 86400) {
+      let cur = dayProgs[dayProgs.length - 1].horarioFim;
+      while (cur < 86400) {
+        const gapEnd = Math.min(cur + 600, 86400);
+        withGaps.push({
+          ...VOLTAMOS_JA,
+          id: `_gap_end_${cur}`,
+          horarioInicio: cur,
+          horarioFim: gapEnd,
+          duracao: gapEnd - cur,
+          horarioTexto: fmtSec(cur),
+          horarioFimTexto: fmtSec(gapEnd),
+        });
+        cur = gapEnd;
+      }
+    }
+    return withGaps;
+  }
 
   // No programs for today — try repeating any programs from this channel
   const anyProgs = programs
@@ -124,52 +198,64 @@ function InfoBar({channel,program,nextProgram,onOpenEPG,onOpenFull}){
 function EPGCompact({channels,allPrograms,currentChannelId,onSelectChannel,onSelectProgram,onOpenFull,onClose}){
   const now=getNow();
   const scrollRef=useRef(null);
-  const ROW_H=80, PX=320;
-  useEffect(()=>{if(scrollRef.current)scrollRef.current.scrollLeft=Math.max(0,(now/3600)*PX-300)},[]);
+  const ROW_H=140, PX=400;
+  const nowPx = (now/86400) * PX * 24; // Calculate exact pixel position based on 24h = PX*24 pixels
+  
+  useEffect(()=>{
+    if(scrollRef.current) {
+      // Scroll to show now with some left margin
+      scrollRef.current.scrollLeft = Math.max(0, nowPx - 200);
+    }
+  },[nowPx]);
+  
   const timeMarks=[];
-  for(let i=0;i<96;i++){const h=Math.floor(i/4),m=(i%4)*15;timeMarks.push({label:m===0?`${String(h).padStart(2,"0")}:00`:"",isFull:m===0})}
+  for(let i=0;i<96;i++){
+    const h=Math.floor(i/4);
+    const m=(i%4)*15;
+    timeMarks.push({label:m===0?`${String(h).padStart(2,"0")}:00`:"",isFull:m===0,position:(i/96)*PX*24})
+  }
 
   return <div style={{position:"absolute",bottom:0,left:0,right:0,zIndex:20,animation:"slideUp 0.3s ease"}}>
-    <div style={{background:"rgba(16,18,26,0.98)",borderTop:"1px solid rgba(255,255,255,0.1)",padding:"10px 20px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-      <div style={{display:"flex",alignItems:"center",gap:12}}><span style={{fontSize:16,fontWeight:700,color:"#fff",letterSpacing:1}}>GUIA</span><LiveDot/></div>
+    <div style={{background:"rgba(16,18,26,0.98)",borderTop:"1px solid rgba(255,255,255,0.1)",padding:"12px 20px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+      <div style={{display:"flex",alignItems:"center",gap:12}}><span style={{fontSize:18,fontWeight:700,color:"#fff",letterSpacing:1}}>GUIA</span><LiveDot/></div>
       <div style={{display:"flex",gap:8}}>
-        <button onClick={onOpenFull} style={{background:"rgba(26,115,232,0.15)",border:"1px solid rgba(26,115,232,0.3)",color:"#4fc3f7",padding:"7px 16px",borderRadius:4,cursor:"pointer",fontSize:12,fontWeight:600}}>📺 Ver Completa</button>
-        <button onClick={onClose} style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",color:"#aaa",width:34,height:34,borderRadius:"50%",cursor:"pointer",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+        <button onClick={onOpenFull} style={{background:"rgba(26,115,232,0.15)",border:"1px solid rgba(26,115,232,0.3)",color:"#4fc3f7",padding:"8px 18px",borderRadius:4,cursor:"pointer",fontSize:13,fontWeight:600}}>📺 Ver Completa</button>
+        <button onClick={onClose} style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",color:"#aaa",width:36,height:36,borderRadius:"50%",cursor:"pointer",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
       </div>
     </div>
-    <div style={{background:"rgba(16,18,26,0.98)",display:"flex",overflow:"hidden",maxHeight:ROW_H*channels.length+40}}>
-      <div style={{minWidth:120,borderRight:"1px solid rgba(255,255,255,0.08)",flexShrink:0}}>
-        <div style={{height:30}}/>
-        {channels.map(ch => <div key={ch.id} onClick={()=>onSelectChannel(ch.id)} style={{height:ROW_H,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",borderBottom:"1px solid rgba(255,255,255,0.05)",background:ch.id===currentChannelId?"rgba(26,115,232,0.1)":"transparent"}}>
-          <div style={{textAlign:"center"}}><ChLogo ch={ch} size={32}/><div style={{fontSize:11,fontWeight:600,color:ch.id===currentChannelId?"#fff":"#999",marginTop:4}}>{ch.nome}</div></div>
+    <div style={{background:"rgba(16,18,26,0.98)",display:"flex",overflow:"hidden",maxHeight:ROW_H*Math.min(channels.length,5)+50}}>
+      <div style={{minWidth:140,borderRight:"1px solid rgba(255,255,255,0.08)",flexShrink:0}}>
+        <div style={{height:35}}/>
+        {channels.map(ch => <div key={ch.id} onClick={()=>onSelectChannel(ch.id)} style={{height:ROW_H,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",borderBottom:"1px solid rgba(255,255,255,0.05)",background:ch.id===currentChannelId?"rgba(26,115,232,0.1)":"transparent",transition:"background 0.2s"}}>
+          <div style={{textAlign:"center"}}><ChLogo ch={ch} size={40}/><div style={{fontSize:13,fontWeight:600,color:ch.id===currentChannelId?"#fff":"#999",marginTop:6}}>{ch.nome}</div></div>
         </div>)}
       </div>
       <div ref={scrollRef} style={{flex:1,overflowX:"auto",overflowY:"hidden"}}>
-        <div style={{display:"flex",height:30,borderBottom:"1px solid rgba(255,255,255,0.1)",position:"relative"}}>
-          {timeMarks.map((t,i) => <div key={i} style={{minWidth:PX/4,fontSize:t.isFull?13:10,color:t.isFull?"#bbb":"#555",padding:"7px 8px",borderLeft:t.isFull?"1px solid rgba(255,255,255,0.1)":"1px solid rgba(255,255,255,0.03)",fontWeight:t.isFull?600:400}}>{t.label}</div>)}
-          <div style={{position:"absolute",top:0,bottom:-ROW_H*channels.length,left:(now/3600)*PX,width:2,background:"#ff3b3b",zIndex:5}}><div style={{width:8,height:8,borderRadius:"50%",background:"#ff3b3b",position:"absolute",top:-2,left:-3}}/></div>
+        <div style={{display:"flex",height:35,borderBottom:"1px solid rgba(255,255,255,0.1)",position:"relative"}}>
+          {timeMarks.map((t,i) => <div key={i} style={{minWidth:PX/4,fontSize:t.isFull?14:11,color:t.isFull?"#ccc":"#666",padding:"8px 10px",borderLeft:t.isFull?"1px solid rgba(255,255,255,0.1)":"1px solid rgba(255,255,255,0.03)",fontWeight:t.isFull?600:400,whiteSpace:"nowrap"}}>{t.label}</div>)}
+          <div style={{position:"absolute",top:0,bottom:-ROW_H*channels.length,left:nowPx,width:3,background:"#ff3b3b",zIndex:5,boxShadow:"0 0 12px #ff3b3b",pointerEvents:"none"}}><div style={{width:10,height:10,borderRadius:"50%",background:"#ff3b3b",position:"absolute",top:-3,left:-3.5}}/></div>
         </div>
         {channels.map(ch => {
           const sched = buildSchedule(allPrograms, ch.id);
           const cur = getCurProg(sched);
           return <div key={ch.id} style={{display:"flex",height:ROW_H,borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
             {sched.filter(p=>p.horarioFim<=86400).map(prog => {
-              const w=Math.max((prog.duracao/3600)*PX,70);
+              const w=Math.max((prog.duracao/86400)*PX*24,80);
               const isNow=cur?.id===prog.id;
               return <div key={prog.id} onClick={()=>{onSelectChannel(ch.id);onSelectProgram(prog)}}
-                style={{minWidth:w,maxWidth:w,height:ROW_H-2,padding:"12px 14px",cursor:"pointer",overflow:"hidden",background:isNow?"rgba(40,44,60,0.9)":"rgba(30,32,44,0.6)",borderRight:"1px solid rgba(255,255,255,0.06)",display:"flex",flexDirection:"column",justifyContent:"center",transition:"background 0.2s"}}
-                onMouseEnter={e=>e.currentTarget.style.background=isNow?"rgba(50,55,75,0.95)":"rgba(40,44,60,0.8)"}
-                onMouseLeave={e=>e.currentTarget.style.background=isNow?"rgba(40,44,60,0.9)":"rgba(30,32,44,0.6)"}>
-                <div style={{fontSize:11,color:"#999",marginBottom:6}}>{prog.horarioTexto} - {prog.horarioFimTexto}{isNow&&<span style={{marginLeft:6,fontSize:9,fontWeight:700,padding:"2px 6px",borderRadius:3,background:"#f44336",color:"#fff"}}>AO VIVO</span>}</div>
-                <div style={{fontSize:16,fontWeight:700,color:isNow?"#fff":"#ddd",lineHeight:1.3,overflow:"hidden",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}}>{prog.nome}</div>
+                style={{minWidth:w,maxWidth:w,height:ROW_H-2,padding:"14px 16px",cursor:"pointer",overflow:"hidden",background:isNow?"rgba(40,44,60,0.95)":"rgba(30,32,44,0.6)",borderRight:"1px solid rgba(255,255,255,0.06)",display:"flex",flexDirection:"column",justifyContent:"center",transition:"background 0.2s"}}
+                onMouseEnter={e=>e.currentTarget.style.background=isNow?"rgba(60,70,90,1)":"rgba(45,50,65,0.9)"}
+                onMouseLeave={e=>e.currentTarget.style.background=isNow?"rgba(40,44,60,0.95)":"rgba(30,32,44,0.6)"}>
+                <div style={{fontSize:12,color:"#aaa",marginBottom:8,fontWeight:500}}>{prog.horarioTexto} - {prog.horarioFimTexto}{isNow&&<span style={{marginLeft:8,fontSize:10,fontWeight:700,padding:"3px 8px",borderRadius:3,background:"#f44336",color:"#fff"}}>AO VIVO</span>}</div>
+                <div style={{fontSize:18,fontWeight:700,color:isNow?"#fff":"#ddd",lineHeight:1.4,overflow:"hidden",display:"-webkit-box",WebkitLineClamp:3,WebkitBoxOrient:"vertical"}}>{prog.nome}</div>
               </div>;
             })}
-            {sched.length===0 && <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",color:"#555",fontSize:12}}>Sem programação</div>}
+            {sched.length===0 && <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",color:"#555",fontSize:13}}>Sem programação</div>}
           </div>;
         })}
       </div>
     </div>
-    <div style={{background:"rgba(16,18,26,0.98)",padding:"8px 16px",borderTop:"1px solid rgba(255,255,255,0.06)",display:"flex",justifyContent:"center",gap:24,fontSize:11,color:"#555"}}>
+    <div style={{background:"rgba(16,18,26,0.98)",padding:"10px 16px",borderTop:"1px solid rgba(255,255,255,0.06)",display:"flex",justifyContent:"center",gap:24,fontSize:12,color:"#666"}}>
       <span>↑↓ ou Scroll = Canal</span><span>ESC = Fechar</span><span>G = Guia</span>
     </div>
   </div>;
@@ -369,7 +455,7 @@ export default function TVWeb(){
     {/* TV SCREEN */}
     <div onClick={handleClick} style={{position:"absolute",inset:0,background:"#000",transition:"opacity 0.5s",opacity:fade?0:1}}>
       {/* YouTube Player */}
-      {ytSrc ? (
+      {ytSrc && !cp?.isPlaceholder ? (
         <div style={{position:"absolute",inset:0}}>
           <iframe
             key={ytKeyRef.current}
@@ -393,15 +479,30 @@ export default function TVWeb(){
           )}
         </div>
       ) : (
-        /* Fallback when no video */
+        /* Fallback - "Voltamos já" or no channel */
         <div style={{position:"absolute",inset:0,background:`radial-gradient(ellipse at center,${ch.cor||"#1a73e8"}15,#0a0c12 70%)`,display:"flex",alignItems:"center",justifyContent:"center"}}>
-          <div style={{textAlign:"center",opacity:0.15}}><div style={{fontSize:100}}><ChLogo ch={ch} size={100}/></div><div style={{fontSize:24,color:"#fff",marginTop:8,fontWeight:700}}>{ch.nome}</div></div>
+          {cp?.isPlaceholder ? (
+            // "Voltamos já" slide
+            <div style={{textAlign:"center",maxWidth:600}}>
+              <div style={{fontSize:140,marginBottom:30,opacity:0.8}}>📺</div>
+              <div style={{fontSize:48,fontWeight:700,color:"#fff",marginBottom:16}}>Voltamos já!</div>
+              <div style={{fontSize:18,color:"#999",marginBottom:30}}>Programação em breve</div>
+              <div style={{display:"flex",gap:12,justifyContent:"center",fontSize:12,color:"#666"}}>
+                <span>⏱ {cp?.duracao ? fD(cp.duracao) : "em breve"}</span>
+              </div>
+            </div>
+          ) : (
+            // Channel logo fallback
+            <div style={{textAlign:"center",opacity:0.15}}><div style={{fontSize:100}}><ChLogo ch={ch} size={100}/></div><div style={{fontSize:24,color:"#fff",marginTop:8,fontWeight:700}}>{ch.nome}</div></div>
+          )}
         </div>
       )}
       {/* Watermark */}
       <div style={{position:"absolute",top:16,right:20,fontSize:14,fontWeight:700,color:"rgba(255,255,255,0.15)",letterSpacing:2,zIndex:3,textShadow:"0 1px 3px rgba(0,0,0,0.8)"}}>TVWEB</div>
-      {/* Channel indicator */}
-      {showInfo && <div style={{position:"absolute",top:20,left:20,background:"rgba(0,0,0,0.7)",padding:"6px 14px",borderRadius:4,border:"1px solid rgba(255,255,255,0.1)",display:"flex",alignItems:"center",gap:10,zIndex:3}}><span style={{fontSize:28,fontWeight:700,color:"#fff"}}>{ch.numero}</span><div><div style={{fontSize:13,fontWeight:600,color:ch.cor}}>{ch.nome}</div><div style={{fontSize:10,color:"#888"}}>Canal {ch.numero}</div></div></div>}
+      {/* Channel indicator - LARGER on channel change */}
+      {showInfo && <div style={{position:"absolute",top:20,left:20,background:"rgba(0,0,0,0.7)",padding:"8px 16px",borderRadius:6,border:"1px solid rgba(255,255,255,0.1)",display:"flex",alignItems:"center",gap:12,zIndex:3,animation:"slideDown 0.4s ease"}}><span style={{fontSize:32,fontWeight:700,color:"#fff"}}>{ch.numero}</span><div><div style={{fontSize:16,fontWeight:700,color:ch.cor}}>{ch.nome}</div><div style={{fontSize:12,color:"#aaa",marginTop:2}}>Canal {ch.numero}</div></div></div>}
+      {/* Program name overlay on channel change */}
+      {cp && showInfo && <div style={{position:"absolute",left:"50%",top:"50%",transform:"translate(-50%, -50%)",textAlign:"center",pointerEvents:"none",animation:"fadeInOut 3s ease"}}><div style={{fontSize:48,fontWeight:700,color:"#fff",textShadow:"0 2px 10px rgba(0,0,0,0.9)",maxWidth:"80%"}}>{cp.nome}</div></div>}
     </div>
 
     {showInfo && <FsBtn cRef={cRef}/>}
@@ -418,6 +519,8 @@ export default function TVWeb(){
 
     <style>{`
       @keyframes slideUp{from{transform:translateY(100%);opacity:0}to{transform:translateY(0);opacity:1}}
+      @keyframes slideDown{from{transform:translateY(-20px);opacity:0}to{transform:translateY(0);opacity:1}}
+      @keyframes fadeInOut{0%{opacity:0}20%{opacity:1}80%{opacity:1}100%{opacity:0}}
       @keyframes pulseFull{0%,100%{opacity:.6;transform:translateX(-50%) scale(1)}50%{opacity:1;transform:translateX(-50%) scale(1.05)}}
       ::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:rgba(255,255,255,.02)}::-webkit-scrollbar-thumb{background:rgba(255,255,255,.1);border-radius:3px}
       *{box-sizing:border-box;margin:0;padding:0}
