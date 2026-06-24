@@ -157,13 +157,21 @@ function OSDHeader({channel,program,visible}){
 // ============================================
 // OSD FOOTER (TV-style bottom bar)
 // ============================================
-function OSDFooter({program,nextProgram,onOpenEPG,onOpenFull,visible}){
+function OSDFooter({program,nextProgram,onOpenEPG,onOpenFull,onFullscreen,visible}){
   const[el,setEl]=useState(0);
+  const[isFullscreen,setIsFullscreen]=useState(false);
+  
   useEffect(()=>{
     if(!program) return;
     const u=()=>setEl(getElapsed(program)); u();
     const i=setInterval(u,1000); return()=>clearInterval(i);
   },[program]);
+
+  useEffect(()=>{
+    const h=()=>setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange",h);
+    return()=>document.removeEventListener("fullscreenchange",h);
+  },[]);
   if(!program) return null;
   const pct=Math.min((el/program.duracao)*100,100);
   const nowH=fmtHM(getNow());
@@ -192,6 +200,7 @@ function OSDFooter({program,nextProgram,onOpenEPG,onOpenFull,visible}){
       <div style={{display:"flex",gap:10}}>
         <button onClick={e=>{e.stopPropagation();onOpenEPG()}} style={{background:"rgba(255,255,255,0.1)",border:"1px solid rgba(255,255,255,0.15)",color:"#ccc",padding:"10px 22px",borderRadius:6,cursor:"pointer",fontSize:14,fontWeight:600}}>▲ Guia Rápido</button>
         <button onClick={e=>{e.stopPropagation();onOpenFull()}} style={{background:"rgba(26,115,232,0.2)",border:"1px solid rgba(26,115,232,0.3)",color:"#4fc3f7",padding:"10px 22px",borderRadius:6,cursor:"pointer",fontSize:14,fontWeight:600}}>📺 Programação</button>
+        <button onClick={e=>{e.stopPropagation();onFullscreen()}} style={{background:"rgba(255,255,255,0.1)",border:"1px solid rgba(255,255,255,0.15)",color:"#ccc",padding:"10px 22px",borderRadius:6,cursor:"pointer",fontSize:14,fontWeight:600}}>{isFullscreen?"↙ Sair":"⛶ Tela Cheia"}</button>
       </div>
     </div>
   </div>;
@@ -481,15 +490,19 @@ export default function TVWeb(){
 
   // ========== CLICK HANDLER (on the video overlay only) ==========
   const handleVideoClick=useCallback(()=>{
+    // Don't activate audio if menus are open
+    if(showEPG||showFull||selProg)return;
+    
     const now=Date.now();
     if(now-lastClickTimeRef.current<300){
       if(!document.fullscreenElement)cRef.current?.requestFullscreen?.();
       else document.exitFullscreen?.();
     }
     lastClickTimeRef.current=now;
+    // Any click on video area activates audio
     if(muted)handleUnmute();
     showOSDNow();
-  },[muted,handleUnmute,showOSDNow]);
+  },[muted,handleUnmute,showOSDNow,showEPG,showFull,selProg]);
 
   // ========== LOADING ==========
   if(loading) return <div style={{width:"100%",height:"100vh",background:"#000",display:"flex",alignItems:"center",justifyContent:"center",color:"#888",fontFamily:"system-ui",fontSize:16}}>
@@ -547,7 +560,8 @@ export default function TVWeb(){
 
     {/* ===== OSD FOOTER (TV-style, 20s) ===== */}
     <OSDFooter program={cp} nextProgram={np} visible={showOSD&&!showEPG&&!showFull}
-      onOpenEPG={()=>setEPG(true)} onOpenFull={()=>setFull(true)}/>
+      onOpenEPG={()=>setEPG(true)} onOpenFull={()=>setFull(true)} onFullscreen={()=>{if(!document.fullscreenElement)cRef.current?.requestFullscreen?.();else document.exitFullscreen?.()}}/>
+
 
     {/* ===== CHANNEL SIDEBAR ===== */}
     <div style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",zIndex:15,display:"flex",flexDirection:"column",gap:4,opacity:showOSD&&!showEPG&&!showFull?0.7:0,transition:"opacity 0.3s",pointerEvents:showOSD&&!showEPG&&!showFull?"auto":"none"}}>
