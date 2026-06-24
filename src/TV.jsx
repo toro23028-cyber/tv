@@ -63,8 +63,9 @@ function buildSchedule(programs, channelId) {
 }
 
 function getCurProg(schedule) {
+  if (!schedule || schedule.length === 0) return null;
   const s = getNow();
-  return schedule.find(p => s >= p.horarioInicio && s < p.horarioFim) || schedule[0] || null;
+  return schedule.find(p => s >= p.horarioInicio && s < p.horarioFim) || null;
 }
 
 function getElapsed(prog) { return getNow() - prog.horarioInicio }
@@ -301,7 +302,8 @@ export default function TVWeb(){
 
   // ========== YOUTUBE IFRAME (stable - only recalculates on program change) ==========
   const ytVideoId = cp ? extractYTId(cp.youtubeId || cp.videos?.[0]?.youtubeUrl) : null;
-  const ytKey = `${curCh}_${cp?.id || "none"}`;
+  const ytKey = `${curCh}_${cp?.id || "none"}_${allPrograms.length}`;
+  const [muted, setMuted] = useState(true);
 
   const ytStartRef = useRef(0);
   const ytKeyRef = useRef("");
@@ -311,8 +313,15 @@ export default function TVWeb(){
   }
 
   const ytSrc = ytVideoId
-    ? `https://www.youtube.com/embed/${ytVideoId}?autoplay=1&mute=0&start=${ytStartRef.current}&controls=0&disablekb=1&modestbranding=1&rel=0&showinfo=0&iv_load_policy=3&fs=0&playsinline=1`
+    ? `https://www.youtube.com/embed/${ytVideoId}?autoplay=1&mute=${muted?1:0}&start=${ytStartRef.current}&controls=0&disablekb=1&modestbranding=1&rel=0&showinfo=0&iv_load_policy=3&fs=0&playsinline=1&enablejsapi=1`
     : null;
+
+  // Unmute handler - recalculates start position
+  const handleUnmute = useCallback(() => {
+    if (cp) ytStartRef.current = Math.max(0, Math.floor(getElapsed(cp)));
+    ytKeyRef.current = ytKeyRef.current + "_unmuted";
+    setMuted(false);
+  }, [cp]);
 
   // ========== CHANNEL SWITCHING ==========
   const swCh = useCallback(id => {
@@ -363,7 +372,7 @@ export default function TVWeb(){
       {ytSrc ? (
         <div style={{position:"absolute",inset:0}}>
           <iframe
-            key={ytKey}
+            key={ytKeyRef.current}
             src={ytSrc}
             allow="autoplay; encrypted-media"
             allowFullScreen={false}
@@ -372,6 +381,16 @@ export default function TVWeb(){
           />
           {/* Transparent overlay to block interaction (no pause/seek) */}
           <div style={{position:"absolute",inset:0,zIndex:2}} />
+          {/* Unmute button */}
+          {muted && (
+            <button onClick={handleUnmute} style={{
+              position:"absolute",bottom:showInfo?200:30,left:"50%",transform:"translateX(-50%)",zIndex:5,
+              background:"rgba(0,0,0,0.8)",border:"1px solid rgba(255,255,255,0.2)",
+              color:"#fff",padding:"10px 24px",borderRadius:24,cursor:"pointer",
+              fontSize:13,fontWeight:600,display:"flex",alignItems:"center",gap:8,
+              animation:"pulseFull 2s ease infinite",
+            }}>🔇 Clique para ativar o som</button>
+          )}
         </div>
       ) : (
         /* Fallback when no video */
