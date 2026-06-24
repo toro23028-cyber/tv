@@ -19,6 +19,19 @@ function getToday(){ const n=new Date(); return `${n.getFullYear()}-${String(n.g
 function getNow(){ const n=new Date(); return n.getHours()*3600+n.getMinutes()*60+n.getSeconds() }
 function genDates(n){const ds=[]; let d=new Date(getToday()+"T00:00:00"); for(let i=0;i<n;i++){ const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,"0"),da=String(d.getDate()).padStart(2,"0"); ds.push(`${y}-${m}-${da}`); d.setDate(d.getDate()+1); } return ds}
 
+// Timeline absoluta (7 dias contínuos)
+const QUEUE_DAYS=7;
+const BASE_DATE=new Date("2026-06-24T00:00:00Z");
+function dateSecondsToAbsolute(dateStr,secondsInDay){
+  const targetDate=new Date(dateStr+"T00:00:00Z");
+  const daysDiff=Math.floor((targetDate-BASE_DATE)/(1000*60*60*24));
+  return daysDiff*86400+secondsInDay;
+}
+function getAbsoluteNow(){
+  const now=new Date();
+  return Math.floor((now-BASE_DATE)/1000);
+}
+
 // YouTube metadata extraction
 function extractYouTubeId(url){
   if(!url)return null;
@@ -197,6 +210,7 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
   const [customH,setCH]=useState(program?Math.floor(program.duracao/3600):1);
   const [customM,setCM]=useState(program?Math.floor((program.duracao%3600)/60):0);
   const [videos,setVideos]=useState(program?.videos||[{youtubeUrl:program?.youtubeId||"",titulo:""}]);
+  const [selectedVideos,setSelectedVideos]=useState(new Set());
   const [thumbnailType,setTT]=useState(program?.thumbnailType||"youtube");
   const [thumbnailUrl,setTU]=useState(program?.thumbnailUrl||null);
   const [error,setError]=useState("");
@@ -218,9 +232,20 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
   const save=()=>{
     if(!nome.trim()){setError("Digite o nome");return}
     if(dur<300){setError("Mínimo 5 min");return}
-    if(horFim>86400){setError("Ultrapassa 24h");return}
     if(hasOverlap){setError("Conflito de horário!");return}
     if(!videos[0].youtubeUrl.trim()){setError("Adicione um vídeo");return}
+    
+    // Validação: ultrapassa 24h?
+    const totalSeconds=Number(horIn)+dur;
+    if(totalSeconds>86400){
+      const overflowMinutes=Math.floor((totalSeconds-86400)/60);
+      const overflowHours=Math.floor(overflowMinutes/60);
+      const overflowMins=overflowMinutes%60;
+      const nextDayTime=`${String(overflowHours).padStart(2,"0")}:${String(overflowMins).padStart(2,"0")}`;
+      const continua=confirm(`⚠️ Este programa vai até ${nextDayTime} do DIA SEGUINTE!\n\n✓ Manter contínuo (vai pro próximo dia)?\n✕ Cancelar`);
+      if(!continua){setError("Operação cancelada");return}
+    }
+    
     onSave({id:isEdit?program.id:`prog_${Date.now()}`,nome,canalId,classificacao,tags,sinopse,data:selectedDate,duracao:dur,horarioInicio:horIn,horarioFim:horFim,youtubeId:videos[0].youtubeUrl,videos:videos.filter(v=>v.youtubeUrl.trim()),thumbnailType,thumbnailUrl});
   };
 
@@ -271,12 +296,13 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
             <label style={{...lS,marginBottom:0}}>VÍDEOS</label>
             <div style={{display:"flex",gap:8,alignItems:"center"}}>
               <span style={{fontSize:10,color:"#555"}}>{videos.length} vídeo(s)</span>
-              <input type="checkbox" checked={videos.length>0&&videos.every(v=>v.youtubeUrl)} onChange={e=>{if(e.target.checked){const nv=videos.map(v=>({...v}));setVideos(nv)}}} title="Marcar todos" style={{width:14,height:14,cursor:"pointer",accentColor:"#4caf50"}}/>
+              <input type="checkbox" checked={videos.length>0&&selectedVideos.size===videos.length} onChange={e=>{if(e.target.checked){const newSel=new Set();for(let i=0;i<videos.length;i++)newSel.add(i);setSelectedVideos(newSel)}else{setSelectedVideos(new Set())}}} title="Marcar/desmarcar todos" style={{width:14,height:14,cursor:"pointer",accentColor:"#4caf50"}}/>
               <button onClick={async()=>{const videoCopy=[...videos];for(let i=0;i<videoCopy.length;i++){const vId=extractYouTubeId(videoCopy[i].youtubeUrl);if(vId){const meta=await fetchYouTubeMetadata(vId);if(meta){const nv=[...videoCopy];nv[i]={...nv[i],youtubeUrl:videoCopy[i].youtubeUrl,titulo:meta.title};setVideos(nv);videoCopy[i]=nv[i];if(i===0){setCH(Math.floor(meta.duration/3600));setCM(Math.floor((meta.duration%3600)/60));setSinopse(meta.description)}}}}}} style={{fontSize:10,color:"#4caf50",background:"rgba(76,175,80,0.1)",border:"1px solid rgba(76,175,80,0.3)",padding:"2px 8px",borderRadius:3,cursor:"pointer",fontWeight:600}}>🔍 Buscar Todos</button>
             </div>
           </div>
           <div style={{display:"flex",flexDirection:"column",gap:6}}>
             {videos.map((v,i)=><div key={i} style={{display:"flex",gap:8,alignItems:"center",padding:"8px 10px",background:"rgba(255,255,255,0.02)",borderRadius:4,border:"1px solid rgba(255,255,255,0.06)"}}>
+              <input type="checkbox" checked={selectedVideos.has(i)} onChange={()=>{const newSel=new Set(selectedVideos);if(newSel.has(i))newSel.delete(i);else newSel.add(i);setSelectedVideos(newSel)}} style={{width:16,height:16,cursor:"pointer",accentColor:"#4caf50",flexShrink:0}}/>
               <span style={{fontSize:11,color:"#555",fontWeight:700,minWidth:20}}>#{i+1}</span>
               {(()=>{const t=ytThumb(v.youtubeUrl);return t?<img src={t} alt="" style={{width:40,height:26,borderRadius:3,objectFit:"cover"}}/>:null})()}
               <input value={v.youtubeUrl} onChange={e=>{const nv=[...videos];nv[i]={...v,youtubeUrl:e.target.value};setVideos(nv)}} placeholder="YouTube URL ou ID" style={{...iS,flex:1}}/>
@@ -368,17 +394,18 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
 function ChannelEditor({channels,onUpdate,onAdd,onDelete}){
   const [editing,setEditing]=useState(null);
   const [nome,setNome]=useState("");
+  const [numero,setNumber]=useState(0);
   const [logo,setLogo]=useState("");
   const [logoType,setLT]=useState("emoji");
   const [logoUrl,setLU]=useState(null);
   const [cor,setCor]=useState("");
   const [saving,setSaving]=useState(false);
 
-  const startEdit=(ch)=>{setEditing(ch.id);setNome(ch.nome);setLogo(ch.logo);setLT(ch.logoType||"emoji");setLU(ch.logoUrl||null);setCor(ch.cor)};
+  const startEdit=(ch)=>{setEditing(ch.id);setNome(ch.nome);setLogo(ch.logo);setLT(ch.logoType||"emoji");setLU(ch.logoUrl||null);setCor(ch.cor);setNumber(ch.numero||0)};
   const save=async()=>{
     setSaving(true);
     try {
-      const updated = {nome,logo,logoType,logoUrl,cor};
+      const updated = {nome,numero,logo,logoType,logoUrl,cor};
       await updateDoc(doc(db,"channels",editing), updated);
       setEditing(null);
     } catch(err) {
@@ -391,7 +418,10 @@ function ChannelEditor({channels,onUpdate,onAdd,onDelete}){
   return <div style={{display:"flex",flexDirection:"column",gap:8}}>
     {channels.map(ch=><div key={ch.id} style={{padding:16,borderRadius:8,background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.06)"}}>
       {editing===ch.id?<div style={{display:"flex",flexDirection:"column",gap:14}}>
-        <div><label style={lS}>NOME</label><input value={nome} onChange={e=>setNome(e.target.value)} style={{...iS,width:"100%"}}/></div>
+        <div style={{display:"flex",gap:12}}>
+          <div style={{flex:1}}><label style={lS}>NOME</label><input value={nome} onChange={e=>setNome(e.target.value)} style={{...iS,width:"100%"}}/></div>
+          <div style={{width:80}}><label style={lS}>NÚMERO</label><input type="number" value={numero} onChange={e=>setNumber(parseInt(e.target.value)||0)} min="1" max="999" style={{...iS,width:"100%"}}/></div>
+        </div>
         <div><label style={lS}>TIPO DE LOGO</label>
           <div style={{display:"flex",gap:6,marginBottom:10}}>
             <button onClick={()=>setLT("emoji")} style={{padding:"6px 14px",borderRadius:4,cursor:"pointer",fontSize:12,background:logoType==="emoji"?"#1a73e822":"rgba(255,255,255,0.04)",border:logoType==="emoji"?"1px solid #1a73e8":"1px solid rgba(255,255,255,0.08)",color:logoType==="emoji"?"#4fc3f7":"#888"}}>😀 Emoji</button>
@@ -702,22 +732,21 @@ export default function AdminPanel(){
   // Clear selected programs when channel or date changes
   useEffect(()=>{setSelectedProgs(new Set())},[selCh,selDate]);
 
-  // Task 4: Improved date filter - show only last hour + now + next programs
-  const dayProgs=programs.filter(p=>{
-    // Task 4: Filter - show last hour + now + next programs for selected date
-    if(p.data!==selDate) return false;
-    // If viewing today, apply smart filter
-    if(selDate===getToday()){
-      const now=getNow();
-      const progStart=Number(p.horarioInicio);
-      const progEnd=Number(p.horarioFim);
-      // Show: (programs that started in last 1h) OR (programs that end in future)
-      const oneHourAgo=Math.max(0, now-3600); // Never go below 0
-      return progStart>=oneHourAgo || progEnd>now;
-    }
-    // For other dates, show all programs
-    return true;
+  // Task 4: FILA CONTÍNUA - 7 dias (últimas 24h + próximos 7 dias)
+  const queuedPrograms=programs.filter(p=>{
+    const pDate=new Date(p.data+"T00:00:00Z");
+    const today=new Date(getToday()+"T00:00:00Z");
+    const daysDiff=(pDate-today)/(1000*60*60*24);
+    // Mostra: últimas 24h + próximos 7 dias
+    return daysDiff>=-1 && daysDiff<=QUEUE_DAYS;
+  }).sort((a,b)=>{
+    const aAbs=dateSecondsToAbsolute(a.data,Number(a.horarioInicio));
+    const bAbs=dateSecondsToAbsolute(b.data,Number(b.horarioInicio));
+    return aAbs-bAbs;
   });
+
+  // Para compatibilidade, manter dayProgs (filtra só o dia selecionado)
+  const dayProgs=queuedPrograms.filter(p=>p.data===selDate);
   const totalSch=dayProgs.filter(p=>p.canalId===selCh).reduce((s,p)=>s+(Number(p.duracao)||0),0);
 
   return <div style={{width:"100%",minHeight:"100vh",background:"#0a0c12",fontFamily:"'Segoe UI','Roboto',-apple-system,sans-serif",color:"#fff"}}>
@@ -797,9 +826,18 @@ export default function AdminPanel(){
 
     {/* Clone in another channel/date modal */}
     {showCloneModal&&cloneMenuProgs.length>0&&<div onClick={()=>setShowCloneModal(false)} style={{position:"fixed",inset:0,zIndex:100,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
-      <div onClick={e=>e.stopPropagation()} style={{background:"#1a1c24",borderRadius:8,maxWidth:500,width:"100%",border:"1px solid rgba(255,255,255,0.1)",padding:24}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:"#1a1c24",borderRadius:8,maxWidth:600,width:"100%",border:"1px solid rgba(255,255,255,0.1)",padding:24,maxHeight:"80vh",overflowY:"auto"}}>
         <div style={{fontSize:18,fontWeight:700,color:"#fff",marginBottom:4}}>📋 Clonar em outro...</div>
-        <div style={{fontSize:13,color:"#888",marginBottom:20}}>{cloneMenuProgs.length} programa(s) selecionado(s)</div>
+        <div style={{fontSize:13,color:"#888",marginBottom:16}}>{cloneMenuProgs.length} programa(s) selecionado(s)</div>
+        
+        {/* Preview dos programas */}
+        <div style={{marginBottom:16,padding:12,background:"rgba(76,175,80,0.08)",borderRadius:6,border:"1px solid rgba(76,175,80,0.2)"}}>
+          <div style={{fontSize:11,color:"#4caf50",fontWeight:700,marginBottom:8}}>📺 PROGRAMAS A CLONAR:</div>
+          {cloneMenuProgs.map((prog,i)=><div key={i} style={{fontSize:11,color:"#aaa",marginBottom:6,paddingBottom:6,borderBottom:i<cloneMenuProgs.length-1?"1px solid rgba(255,255,255,0.05)":"none"}}>
+            <div style={{fontWeight:600,color:"#fff",marginBottom:2}}>{prog.nome}</div>
+            <div style={{fontSize:10}}>📹 {prog.videos?.length||1} vídeo(s) • ⏱️ {fmtSec(Number(prog.duracao))}</div>
+          </div>)}
+        </div>
         
         {/* Canal selector */}
         <div style={{marginBottom:16}}>
@@ -826,7 +864,7 @@ export default function AdminPanel(){
         </div>}
 
         <div style={{display:"flex",gap:10}}>
-          <button onClick={()=>handleAdvancedClone()} style={{flex:1,padding:12,background:"linear-gradient(135deg,#4caf50,#81c784)",border:"none",borderRadius:6,color:"#fff",cursor:"pointer",fontSize:13,fontWeight:700}}>✓ Clonar</button>
+          <button onClick={()=>handleAdvancedClone()} style={{flex:1,padding:12,background:"linear-gradient(135deg,#4caf50,#81c784)",border:"none",borderRadius:6,color:"#fff",cursor:"pointer",fontSize:13,fontWeight:700}}>✓ Clonar com vídeos</button>
           <button onClick={()=>setShowCloneModal(false)} style={{flex:1,padding:12,background:"rgba(255,255,255,0.1)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:6,color:"#ccc",cursor:"pointer",fontSize:13,fontWeight:600}}>Cancelar</button>
         </div>
       </div>
