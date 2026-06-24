@@ -22,39 +22,44 @@ const CC={L:"#0f0","10":"#00bfff","12":"#ff0","14":"#f80","16":"#f00","18":"#000
 
 function getToday(){ return new Date().toISOString().split("T")[0] }
 
+function extractYTId(s){ if(!s)return null; const p=[/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/,/^([a-zA-Z0-9_-]{11})$/]; for(const r of p){const m=s.match(r);if(m)return m[1]} return null }
+
 function buildSchedule(programs, channelId) {
   const today = getToday();
   const dayProgs = programs
     .filter(p => p.canalId === channelId && p.data === today)
-    .sort((a,b) => a.horarioInicio - b.horarioInicio)
+    .sort((a,b) => Number(a.horarioInicio) - Number(b.horarioInicio))
     .map(p => ({
       ...p,
-      horarioTexto: fmtSec(p.horarioInicio),
-      horarioFimTexto: fmtSec(p.horarioFim),
+      horarioInicio: Number(p.horarioInicio),
+      horarioFim: Number(p.horarioFim),
+      duracao: Number(p.duracao),
+      horarioTexto: fmtSec(Number(p.horarioInicio)),
+      horarioFimTexto: fmtSec(Number(p.horarioFim)),
     }));
 
-  // If no programs for today, repeat any existing programs to fill 24h
-  if (dayProgs.length === 0) {
-    const anyProgs = programs.filter(p => p.canalId === channelId).sort((a,b) => a.horarioInicio - b.horarioInicio);
-    if (anyProgs.length === 0) return [];
-    const schedule = [];
-    let cur = 0, idx = 0;
-    while (cur < 86400) {
-      const src = anyProgs[idx % anyProgs.length];
-      const end = cur + (src.duracao || 3600);
-      schedule.push({
-        ...src,
-        id: `${src.id}_rep${idx}`,
-        horarioInicio: cur,
-        horarioFim: end,
-        horarioTexto: fmtSec(cur),
-        horarioFimTexto: fmtSec(end),
-      });
-      cur = end; idx++;
-    }
-    return schedule;
+  if (dayProgs.length > 0) return dayProgs;
+
+  // No programs for today — try repeating any programs from this channel
+  const anyProgs = programs
+    .filter(p => p.canalId === channelId)
+    .sort((a,b) => Number(a.horarioInicio) - Number(b.horarioInicio));
+  if (anyProgs.length === 0) return [];
+  const schedule = [];
+  let cur = 0, idx = 0;
+  while (cur < 86400) {
+    const src = anyProgs[idx % anyProgs.length];
+    const dur = Number(src.duracao) || 3600;
+    const end = cur + dur;
+    schedule.push({
+      ...src,
+      id: `${src.id}_rep${idx}`,
+      horarioInicio: cur, horarioFim: end, duracao: dur,
+      horarioTexto: fmtSec(cur), horarioFimTexto: fmtSec(end),
+    });
+    cur = end; idx++;
   }
-  return dayProgs;
+  return schedule;
 }
 
 function getCurProg(schedule) {
@@ -337,10 +342,32 @@ export default function TVWeb(){
   return <div ref={cRef} onWheel={handleWheel} onMouseMove={rHide}
     style={{width:"100%",height:"100vh",background:"#000",position:"relative",fontFamily:"'Segoe UI','Roboto',-apple-system,sans-serif",overflow:"hidden",cursor:"default",userSelect:"none"}}>
 
-    <div onClick={handleClick} style={{position:"absolute",inset:0,background:`radial-gradient(ellipse at center,${ch.cor||"#1a73e8"}15,#0a0c12 70%)`,transition:"background 0.5s",opacity:fade?0:1,display:"flex",alignItems:"center",justifyContent:"center"}}>
-      <div style={{textAlign:"center",opacity:0.15}}><div style={{fontSize:100}}><ChLogo ch={ch} size={100}/></div><div style={{fontSize:24,color:"#fff",marginTop:8,fontWeight:700}}>{ch.nome}</div></div>
-      <div style={{position:"absolute",top:16,right:20,fontSize:14,fontWeight:700,color:"rgba(255,255,255,0.08)",letterSpacing:2}}>TVWEB</div>
-      {showInfo && <div style={{position:"absolute",top:20,left:20,background:"rgba(0,0,0,0.6)",padding:"6px 14px",borderRadius:4,border:"1px solid rgba(255,255,255,0.1)",display:"flex",alignItems:"center",gap:10}}><span style={{fontSize:28,fontWeight:700,color:"#fff"}}>{ch.numero}</span><div><div style={{fontSize:13,fontWeight:600,color:ch.cor}}>{ch.nome}</div><div style={{fontSize:10,color:"#888"}}>Canal {ch.numero}</div></div></div>}
+    {/* TV SCREEN */}
+    <div onClick={handleClick} style={{position:"absolute",inset:0,background:"#000",transition:"opacity 0.5s",opacity:fade?0:1}}>
+      {/* YouTube Player */}
+      {cp && extractYTId(cp.youtubeId || cp.videos?.[0]?.youtubeUrl) ? (
+        <div style={{position:"absolute",inset:0}}>
+          <iframe
+            key={`${cp.id}_${cp.horarioInicio}`}
+            src={`https://www.youtube.com/embed/${extractYTId(cp.youtubeId || cp.videos?.[0]?.youtubeUrl)}?autoplay=1&mute=0&start=${Math.max(0,Math.floor(getElapsed(cp)))}&controls=0&disablekb=1&modestbranding=1&rel=0&showinfo=0&iv_load_policy=3&fs=0&playsinline=1`}
+            allow="autoplay; encrypted-media"
+            allowFullScreen={false}
+            style={{width:"100%",height:"100%",border:"none",pointerEvents:"none"}}
+            title={cp.nome}
+          />
+          {/* Transparent overlay to block interaction (no pause/seek) */}
+          <div style={{position:"absolute",inset:0,zIndex:2}} />
+        </div>
+      ) : (
+        /* Fallback when no video */
+        <div style={{position:"absolute",inset:0,background:`radial-gradient(ellipse at center,${ch.cor||"#1a73e8"}15,#0a0c12 70%)`,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <div style={{textAlign:"center",opacity:0.15}}><div style={{fontSize:100}}><ChLogo ch={ch} size={100}/></div><div style={{fontSize:24,color:"#fff",marginTop:8,fontWeight:700}}>{ch.nome}</div></div>
+        </div>
+      )}
+      {/* Watermark */}
+      <div style={{position:"absolute",top:16,right:20,fontSize:14,fontWeight:700,color:"rgba(255,255,255,0.15)",letterSpacing:2,zIndex:3,textShadow:"0 1px 3px rgba(0,0,0,0.8)"}}>TVWEB</div>
+      {/* Channel indicator */}
+      {showInfo && <div style={{position:"absolute",top:20,left:20,background:"rgba(0,0,0,0.7)",padding:"6px 14px",borderRadius:4,border:"1px solid rgba(255,255,255,0.1)",display:"flex",alignItems:"center",gap:10,zIndex:3}}><span style={{fontSize:28,fontWeight:700,color:"#fff"}}>{ch.numero}</span><div><div style={{fontSize:13,fontWeight:600,color:ch.cor}}>{ch.nome}</div><div style={{fontSize:10,color:"#888"}}>Canal {ch.numero}</div></div></div>}
     </div>
 
     {showInfo && <FsBtn cRef={cRef}/>}
