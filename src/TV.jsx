@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { db, collection, onSnapshot } from "./firebase";
 
 // ============================================
@@ -299,6 +299,21 @@ export default function TVWeb(){
   const ci = schedule.findIndex(p=>p.id===cp?.id);
   const np = ci>=0 ? schedule[ci+1] : null;
 
+  // ========== YOUTUBE IFRAME (stable - only recalculates on program change) ==========
+  const ytVideoId = cp ? extractYTId(cp.youtubeId || cp.videos?.[0]?.youtubeUrl) : null;
+  const ytKey = `${curCh}_${cp?.id || "none"}`;
+
+  const ytStartRef = useRef(0);
+  const ytKeyRef = useRef("");
+  if (ytKey !== ytKeyRef.current) {
+    ytKeyRef.current = ytKey;
+    ytStartRef.current = cp ? Math.max(0, Math.floor(getElapsed(cp))) : 0;
+  }
+
+  const ytSrc = ytVideoId
+    ? `https://www.youtube.com/embed/${ytVideoId}?autoplay=1&mute=0&start=${ytStartRef.current}&controls=0&disablekb=1&modestbranding=1&rel=0&showinfo=0&iv_load_policy=3&fs=0&playsinline=1`
+    : null;
+
   // ========== CHANNEL SWITCHING ==========
   const swCh = useCallback(id => {
     if(id===curCh) return;
@@ -345,15 +360,15 @@ export default function TVWeb(){
     {/* TV SCREEN */}
     <div onClick={handleClick} style={{position:"absolute",inset:0,background:"#000",transition:"opacity 0.5s",opacity:fade?0:1}}>
       {/* YouTube Player */}
-      {cp && extractYTId(cp.youtubeId || cp.videos?.[0]?.youtubeUrl) ? (
+      {ytSrc ? (
         <div style={{position:"absolute",inset:0}}>
           <iframe
-            key={`${cp.id}_${cp.horarioInicio}`}
-            src={`https://www.youtube.com/embed/${extractYTId(cp.youtubeId || cp.videos?.[0]?.youtubeUrl)}?autoplay=1&mute=0&start=${Math.max(0,Math.floor(getElapsed(cp)))}&controls=0&disablekb=1&modestbranding=1&rel=0&showinfo=0&iv_load_policy=3&fs=0&playsinline=1`}
+            key={ytKey}
+            src={ytSrc}
             allow="autoplay; encrypted-media"
             allowFullScreen={false}
             style={{width:"100%",height:"100%",border:"none",pointerEvents:"none"}}
-            title={cp.nome}
+            title={cp?.nome || "TVWEB"}
           />
           {/* Transparent overlay to block interaction (no pause/seek) */}
           <div style={{position:"absolute",inset:0,zIndex:2}} />
