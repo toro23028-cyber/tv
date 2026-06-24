@@ -268,7 +268,7 @@ export default function TVWeb(){
   // ========== FIREBASE REAL-TIME ==========
   useEffect(() => {
     const unsubCh = onSnapshot(collection(db, "channels"), (snap) => {
-      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const list = snap.docs.map(d => ({ ...d.data(), id: d.id }));
       const sorted = list.sort((a,b) => (a.numero||0) - (b.numero||0));
       if (sorted.length > 0) {
         setChannels(sorted);
@@ -280,7 +280,7 @@ export default function TVWeb(){
     });
 
     const unsubPr = onSnapshot(collection(db, "programs"), (snap) => {
-      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const list = snap.docs.map(d => ({ ...d.data(), id: d.id }));
       if (list.length > 0) {
         setAllPrograms(list);
       } else {
