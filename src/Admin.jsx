@@ -421,15 +421,31 @@ export default function AdminPanel(){
 
   const notify=(m)=>{setToast(m);setTimeout(()=>setToast(""),3000)};
 
-  // Firebase listener para programas
+  // Firebase listeners
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, "programs"), (snap) => {
+    // Load channels
+    const unsubCh = onSnapshot(collection(db, "channels"), (snap) => {
       const list = snap.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+      if (list.length > 0) {
+        setCh(list.sort((a,b) => (a.numero||0) - (b.numero||0)));
+      }
+    }, (err) => {
+      console.error("Erro ao carregar canais:", err);
+    });
+
+    // Load programs
+    const unsubPr = onSnapshot(collection(db, "programs"), (snap) => {
+      const list = snap.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+      console.log("Programas carregados:", list.length);
       setProgs(list);
     }, (err) => {
       console.error("Erro ao carregar programas:", err);
     });
-    return () => unsub();
+
+    return () => {
+      unsubCh();
+      unsubPr();
+    };
   }, []);
 
   const handleSave = async (p) => {
