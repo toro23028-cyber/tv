@@ -18,6 +18,36 @@ function parseDur(h,m){return(parseInt(h)||0)*3600+(parseInt(m)||0)*60}
 function getToday(){ const n=new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,"0")}-${String(n.getDate()).padStart(2,"0")}`; }
 function getNow(){ const n=new Date(); return n.getHours()*3600+n.getMinutes()*60+n.getSeconds() }
 function genDates(n){const ds=[]; let d=new Date(getToday()+"T00:00:00"); for(let i=0;i<n;i++){ const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,"0"),da=String(d.getDate()).padStart(2,"0"); ds.push(`${y}-${m}-${da}`); d.setDate(d.getDate()+1); } return ds}
+
+// YouTube metadata extraction
+function extractYouTubeId(url){
+  if(!url)return null;
+  const patterns=[/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&\n?#]+)/,/^([a-zA-Z0-9_-]{11})$/];
+  for(const p of patterns){const m=url.match(p);if(m)return m[1]}return null;
+}
+async function fetchYouTubeMetadata(videoId){
+  if(!videoId)return null;
+  try{
+    const API_KEY="AIzaSyCt0t7IvYYPMXTfXB1zZ6AB4Na9JpL50EQ";
+    const url=`https://www.googleapis.com/youtube/v3/videos?id=${videoId}&key=${API_KEY}&part=snippet,contentDetails`;
+    const res=await fetch(url);
+    if(!res.ok)return null;
+    const data=await res.json();
+    if(!data.items||data.items.length===0)return null;
+    const item=data.items[0];
+    const snippet=item.snippet;
+    const duration=item.contentDetails.duration;
+    const match=duration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+    const hours=parseInt(match?.[1]||0);
+    const minutes=parseInt(match?.[2]||0);
+    const seconds=parseInt(match?.[3]||0);
+    const totalSeconds=hours*3600+minutes*60+seconds;
+    return{duration:totalSeconds,description:snippet.description,title:snippet.title,thumbnail:snippet.thumbnails.default.url};
+  }catch(err){
+    console.error("Erro ao buscar metadados YouTube:",err);
+    return null;
+  }
+}
 function extractYTId(s){if(!s)return null;const p=[/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/,/^([a-zA-Z0-9_-]{11})$/];for(const r of p){const m=s.match(r);if(m)return m[1]}return null}
 function ytThumb(id){const x=extractYTId(id);return x?`https://img.youtube.com/vi/${x}/mqdefault.jpg`:null}
 
@@ -246,6 +276,7 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
               {(()=>{const t=ytThumb(v.youtubeUrl);return t?<img src={t} alt="" style={{width:40,height:26,borderRadius:3,objectFit:"cover"}}/>:null})()}
               <input value={v.youtubeUrl} onChange={e=>{const nv=[...videos];nv[i]={...v,youtubeUrl:e.target.value};setVideos(nv)}} placeholder="YouTube URL ou ID" style={{...iS,flex:1}}/>
               <input value={v.titulo||""} onChange={e=>{const nv=[...videos];nv[i]={...v,titulo:e.target.value};setVideos(nv)}} placeholder="Título" style={{...iS,width:120}}/>
+              <button onClick={async()=>{const vId=extractYouTubeId(v.youtubeUrl);if(!vId){setError("URL YouTube inválida");return}const meta=await fetchYouTubeMetadata(vId);if(meta){const nv=[...videos];nv[i]={...nv[i],youtubeUrl:v.youtubeUrl,titulo:meta.title};setVideos(nv);setCH(Math.floor(meta.duration/3600));setCM(Math.floor((meta.duration%3600)/60));setSinopse(meta.description);setError("")}else setError("Erro ao buscar vídeo")}} style={{background:"rgba(26,115,232,0.15)",border:"1px solid rgba(26,115,232,0.3)",color:"#4fc3f7",padding:"6px 10px",borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:600,whiteSpace:"nowrap"}}>🔍 Buscar</button>
               {videos.length>1&&<button onClick={()=>setVideos(videos.filter((_,j)=>j!==i))} style={{background:"none",border:"none",color:"#f44336",cursor:"pointer",fontSize:14}}>✕</button>}
             </div>)}
           </div>
