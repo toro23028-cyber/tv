@@ -268,7 +268,11 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
         {/* Videos */}
         <div>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-            <label style={{...lS,marginBottom:0}}>VÍDEOS</label><span style={{fontSize:10,color:"#555"}}>{videos.length} vídeo(s)</span>
+            <label style={{...lS,marginBottom:0}}>VÍDEOS</label>
+            <div style={{display:"flex",gap:8}}>
+              <span style={{fontSize:10,color:"#555"}}>{videos.length} vídeo(s)</span>
+              <button onClick={async()=>{for(let i=0;i<videos.length;i++){const vId=extractYouTubeId(videos[i].youtubeUrl);if(vId){const meta=await fetchYouTubeMetadata(vId);if(meta){const nv=[...videos];nv[i]={...nv[i],youtubeUrl:videos[i].youtubeUrl,titulo:meta.title};setVideos(nv);if(i===0){setCH(Math.floor(meta.duration/3600));setCM(Math.floor((meta.duration%3600)/60));setSinopse(meta.description)}}}}}} style={{fontSize:10,color:"#4caf50",background:"rgba(76,175,80,0.1)",border:"1px solid rgba(76,175,80,0.3)",padding:"2px 8px",borderRadius:3,cursor:"pointer",fontWeight:600}}>🔍 Buscar Todos</button>
+            </div>
           </div>
           <div style={{display:"flex",flexDirection:"column",gap:6}}>
             {videos.map((v,i)=><div key={i} style={{display:"flex",gap:8,alignItems:"center",padding:"8px 10px",background:"rgba(255,255,255,0.02)",borderRadius:4,border:"1px solid rgba(255,255,255,0.06)"}}>
@@ -652,16 +656,17 @@ export default function AdminPanel(){
 
   // Task 5: Clone program - ADVANCED clone (to another channel/date)
   const handleAdvancedClone=async()=>{
-    if(!cloneData.channel||cloneMenuProgs.length===0)return;
+    if(!cloneData.channel||cloneData.channel===""||cloneMenuProgs.length===0){setError("Selecione um canal");return}
     try {
       let startTime=Number(cloneData.time)||0;
+      const targetDate=cloneData.date||getToday();
       
       for(const sourceProgram of cloneMenuProgs){
         const endTime=startTime+Number(sourceProgram.duracao);
         const newProg={
           nome:sourceProgram.nome,
           canalId:cloneData.channel,
-          data:cloneData.date||getToday(),
+          data:targetDate,
           horarioInicio:startTime,
           horarioFim:endTime,
           duracao:sourceProgram.duracao,
@@ -679,8 +684,8 @@ export default function AdminPanel(){
       setShowCloneModal(false);
       setCloneMenuProgs([]);
       setSelectedProgs(new Set());
-      setCloneData({channel:selCh,date:null,time:""});
-      notify(`✅ ${cloneMenuProgs.length} programa(s) clonado(s)!`);
+      setCloneData({channel:"",date:null,time:""});
+      notify(`✅ ${cloneMenuProgs.length} programa(s) clonado(s) em outro canal!`);
     } catch(err) {
       console.error("Erro ao clonar programa:",err);
       notify("❌ Erro ao clonar programa");
@@ -780,7 +785,7 @@ export default function AdminPanel(){
           <button onClick={()=>{handleQuickClone();setCloneMenuProgs([])}} style={{width:"100%",padding:"12px 16px",textAlign:"left",background:"transparent",border:"none",color:"#4caf50",cursor:"pointer",fontSize:13,fontWeight:600,borderBottom:"0.5px solid rgba(255,255,255,0.1)",transition:"background 0.2s"}} onMouseEnter={e=>e.target.style.background="rgba(76,175,80,0.1)"} onMouseLeave={e=>e.target.style.background="transparent"}>
             ✓ Clonar aqui
           </button>
-          <button onClick={()=>{setCloneData({...cloneData,channel:selCh});setShowCloneModal(true);setCloneMenuProgs([])}} style={{width:"100%",padding:"12px 16px",textAlign:"left",background:"transparent",border:"none",color:"#4fc3f7",cursor:"pointer",fontSize:13,fontWeight:600,transition:"background 0.2s"}} onMouseEnter={e=>e.target.style.background="rgba(79,195,247,0.1)"} onMouseLeave={e=>e.target.style.background="transparent"}>
+          <button onClick={()=>{setCloneData({channel:"",date:null,time:""});setShowCloneModal(true)}} style={{width:"100%",padding:"12px 16px",textAlign:"left",background:"transparent",border:"none",color:"#4fc3f7",cursor:"pointer",fontSize:13,fontWeight:600,transition:"background 0.2s"}} onMouseEnter={e=>e.target.style.background="rgba(79,195,247,0.1)"} onMouseLeave={e=>e.target.style.background="transparent"}>
             → Clonar em outro...
           </button>
         </div>
@@ -796,8 +801,9 @@ export default function AdminPanel(){
         {/* Canal selector */}
         <div style={{marginBottom:16}}>
           <label style={{fontSize:12,color:"#888",fontWeight:600,marginBottom:6,display:"block"}}>Canal</label>
-          <select value={cloneData.channel||selCh} onChange={e=>setCloneData({...cloneData,channel:e.target.value})} style={{width:"100%",padding:"8px 12px",borderRadius:4,background:"#14161e",border:"1px solid rgba(255,255,255,0.1)",color:"#fff",fontSize:13,cursor:"pointer"}}>
-            {channels.filter(c=>!c.isInfo).map(c=><option key={c.id} value={c.id}>{c.nome} ({c.numero})</option>)}
+          <select value={cloneData.channel||""} onChange={e=>setCloneData({...cloneData,channel:e.target.value})} style={{width:"100%",padding:"8px 12px",borderRadius:4,background:"#14161e",border:"1px solid rgba(255,255,255,0.1)",color:"#fff",fontSize:13,cursor:"pointer"}}>
+            <option value="">--- Selecione um canal ---</option>
+            {channels.filter(c=>!c.isInfo&&c.id!==selCh).map(c=><option key={c.id} value={c.id}>{c.nome} ({c.numero})</option>)}
           </select>
         </div>
 
