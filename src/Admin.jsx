@@ -326,16 +326,28 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
 // ============================================
 // CHANNEL EDITOR
 // ============================================
-function ChannelEditor({channels,onUpdate,onAdd}){
+function ChannelEditor({channels,onUpdate,onAdd,onDelete}){
   const [editing,setEditing]=useState(null);
   const [nome,setNome]=useState("");
   const [logo,setLogo]=useState("");
   const [logoType,setLT]=useState("emoji");
   const [logoUrl,setLU]=useState(null);
   const [cor,setCor]=useState("");
+  const [saving,setSaving]=useState(false);
 
   const startEdit=(ch)=>{setEditing(ch.id);setNome(ch.nome);setLogo(ch.logo);setLT(ch.logoType||"emoji");setLU(ch.logoUrl||null);setCor(ch.cor)};
-  const save=()=>{onUpdate(channels.map(ch=>ch.id===editing?{...ch,nome,logo,logoType,logoUrl,cor}:ch));setEditing(null)};
+  const save=async()=>{
+    setSaving(true);
+    try {
+      const updated = {nome,logo,logoType,logoUrl,cor};
+      await updateDoc(doc(db,"channels",editing), updated);
+      setEditing(null);
+    } catch(err) {
+      console.error("Erro ao salvar canal:", err);
+      alert("Erro ao salvar canal");
+    }
+    setSaving(false);
+  };
 
   return <div style={{display:"flex",flexDirection:"column",gap:8}}>
     {channels.map(ch=><div key={ch.id} style={{padding:16,borderRadius:8,background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.06)"}}>
@@ -364,7 +376,7 @@ function ChannelEditor({channels,onUpdate,onAdd}){
         </div>
         <div style={{display:"flex",gap:8}}>
           <button onClick={()=>setEditing(null)} style={{flex:1,padding:10,borderRadius:4,cursor:"pointer",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",color:"#aaa",fontSize:12}}>Cancelar</button>
-          <button onClick={save} style={{flex:1,padding:10,borderRadius:4,cursor:"pointer",background:"#1a73e8",border:"none",color:"#fff",fontSize:12,fontWeight:700}}>💾 Salvar</button>
+          <button onClick={save} style={{flex:1,padding:10,borderRadius:4,cursor:"pointer",background:"#1a73e8",border:"none",color:"#fff",fontSize:12,fontWeight:700,opacity:saving?0.5:1}}>{saving?"Salvando...":"💾 Salvar"}</button>
         </div>
       </div>
       :<div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
@@ -375,7 +387,7 @@ function ChannelEditor({channels,onUpdate,onAdd}){
         </div>
         <div style={{display:"flex",gap:8}}>
           <button onClick={()=>startEdit(ch)} style={{padding:"8px 16px",borderRadius:4,cursor:"pointer",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",color:"#aaa",fontSize:12}}>✏️ Editar</button>
-          <button onClick={()=>{if(confirm(`Deletar canal "${ch.nome}"? Isso não deletará os programas agendados.`)){setCh(channels.filter(c=>c.id!==ch.id));notify("🗑️ Canal deletado")}}} style={{padding:"8px 16px",borderRadius:4,cursor:"pointer",background:"rgba(244,67,54,0.1)",border:"1px solid rgba(244,67,54,0.2)",color:"#f44336",fontSize:12}}>🗑️ Deletar</button>
+          <button onClick={()=>onDelete(ch)} style={{padding:"8px 16px",borderRadius:4,cursor:"pointer",background:"rgba(244,67,54,0.1)",border:"1px solid rgba(244,67,54,0.2)",color:"#f44336",fontSize:12}}>🗑️ Deletar</button>
         </div>
       </div>}
     </div>)}
@@ -527,11 +539,27 @@ export default function AdminPanel(){
     setProgs([...programs.filter(p=>!(p.canalId===selCh&&p.data===selDate)),...updated]);
     notify("🔄 Reordenado!");
   };
-  const addChannel=()=>{
-    const maxId=Math.max(...channels.map(c=>c.id));
-    const maxNum=Math.max(...channels.map(c=>c.numero));
-    setCh([...channels,{id:maxId+1,numero:maxNum+1,nome:`Canal ${maxNum+1}`,logo:"📺",logoType:"emoji",logoUrl:null,cor:COLOR_LIST[channels.length%COLOR_LIST.length]}]);
-    notify("📺 Canal adicionado!");
+  const addChannel=async()=>{
+    try {
+      const maxNum=channels.length>0?Math.max(...channels.map(c=>c.numero||0)):0;
+      const newCh={numero:maxNum+1,nome:`Canal ${maxNum+1}`,logo:"📺",logoType:"emoji",logoUrl:null,cor:COLOR_LIST[channels.length%COLOR_LIST.length]};
+      await addDoc(collection(db,"channels"),newCh);
+      notify("📺 Canal adicionado!");
+    } catch(err) {
+      console.error("Erro ao adicionar canal:", err);
+      notify("❌ Erro ao adicionar canal");
+    }
+  };
+
+  const delChannel=async(ch)=>{
+    if(!confirm(`Deletar canal "${ch.nome}"? Isso não deletará os programas agendados.`)) return;
+    try {
+      await deleteDoc(doc(db,"channels",ch.id));
+      notify("🗑️ Canal deletado");
+    } catch(err) {
+      console.error("Erro ao deletar canal:", err);
+      notify("❌ Erro ao deletar canal");
+    }
   };
 
   const dayProgs=programs.filter(p=>p.data===selDate);
@@ -587,7 +615,7 @@ export default function AdminPanel(){
         <button onClick={()=>{setEP(null);setSM(true)}} style={{marginTop:16,width:"100%",padding:14,borderRadius:8,cursor:"pointer",background:"linear-gradient(135deg,#1a73e8,#4fc3f7)",border:"none",color:"#fff",fontSize:14,fontWeight:700}}>+ Adicionar Programa</button>
       </>}
 
-      {tab==="channels"&&<ChannelEditor channels={channels} onUpdate={setCh} onAdd={addChannel}/>}
+      {tab==="channels"&&<ChannelEditor channels={channels} onUpdate={setCh} onAdd={addChannel} onDelete={delChannel}/>}
     </div>
 
     {showModal&&<ProgramModal mode={editProg?"edit":"add"} program={editProg} channels={channels} selectedChannel={selCh} selectedDate={selDate} existingPrograms={programs} onSave={handleSave} onClose={()=>{setSM(false);setEP(null)}}/>}
