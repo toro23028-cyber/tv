@@ -353,6 +353,7 @@ export default function TVWeb(){
   const [showInfo, setInfo] = useState(true);
   const [selProg, setSP] = useState(null);
   const [showBlur, setShowBlur] = useState(true);
+  const [fade, setFade] = useState(false);
   
   useEffect(() => {
     const timer = setTimeout(() => setShowBlur(false), 7000);
