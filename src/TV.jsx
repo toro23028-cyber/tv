@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { db, collection, onSnapshot } from "./firebase";
 
 // ============================================
-// FALLBACK DATA (shown when Firebase is empty)
+// FALLBACK DATA
 // ============================================
 const FALLBACK_CHANNELS = [
   { id:"_info", numero:0, nome:"Sobre", logo:"ℹ️", logoType:"emoji", logoUrl:null, cor:"#78909C", isInfo:true },
@@ -10,34 +10,21 @@ const FALLBACK_CHANNELS = [
 const FALLBACK_PROGRAMS = [
   { id:"fb1", canalId:"_info", nome:"Bem-vindo à TVWEB", sinopse:"Configure canais e programas no painel /admin para começar!", duracao:3600, horarioInicio:0, horarioFim:3600, classificacao:"L", tags:["HD"], data:"" },
 ];
-
-// "Voltamos já" slide for gaps
 const VOLTAMOS_JA = {
-  id: "_voltamos",
-  nome: "Voltamos já!",
-  sinopse: "Programação em breve",
-  duracao: 600,
-  horarioInicio: 0,
-  horarioFim: 600,
-  horarioTexto: "00:00",
-  horarioFimTexto: "00:10",
-  classificacao: "L",
-  tags: ["HD"],
-  youtubeId: null,
-  isPlaceholder: true
+  id: "_voltamos", nome: "Voltamos já!", sinopse: "Programação em breve",
+  duracao: 600, horarioInicio: 0, horarioFim: 600,
+  horarioTexto: "00:00", horarioFimTexto: "00:10",
+  classificacao: "L", tags: ["HD"], youtubeId: null, isPlaceholder: true
 };
 
 // ============================================
 // HELPERS
 // ============================================
 function getNow(){ const n=new Date(); return n.getHours()*3600+n.getMinutes()*60+n.getSeconds() }
-function fT(s){ return `${String(Math.floor(s/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")}` }
+function fmtHM(s){ return `${String(Math.floor(s/3600)).padStart(2,"0")}:${String(Math.floor((s%3600)/60)).padStart(2,"0")}` }
 function fD(s){ const h=Math.floor(s/3600),m=Math.floor((s%3600)/60); return h>0?`${h}h${m>0?String(m).padStart(2,"0")+"min":""}`: `${m}min` }
-function fmtSec(s){ const h=Math.floor(s/3600),m=Math.floor((s%3600)/60); return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}` }
 const CC={L:"#0f0","10":"#00bfff","12":"#ff0","14":"#f80","16":"#f00","18":"#000"};
-
 function getToday(){ return new Date().toISOString().split("T")[0] }
-
 function extractYTId(s){ if(!s)return null; const p=[/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/,/^([a-zA-Z0-9_-]{11})$/]; for(const r of p){const m=s.match(r);if(m)return m[1]} return null }
 
 function buildSchedule(programs, channelId) {
@@ -47,90 +34,47 @@ function buildSchedule(programs, channelId) {
     .sort((a,b) => Number(a.horarioInicio) - Number(b.horarioInicio))
     .map(p => ({
       ...p,
-      horarioInicio: Number(p.horarioInicio),
-      horarioFim: Number(p.horarioFim),
+      horarioInicio: Number(p.horarioInicio), horarioFim: Number(p.horarioFim),
       duracao: Number(p.duracao),
-      horarioTexto: fmtSec(Number(p.horarioInicio)),
-      horarioFimTexto: fmtSec(Number(p.horarioFim)),
+      horarioTexto: fmtHM(Number(p.horarioInicio)), horarioFimTexto: fmtHM(Number(p.horarioFim)),
     }));
-
   if (dayProgs.length > 0) {
-    // Fill gaps with "Voltamos já"
     const withGaps = [];
     for (let i = 0; i < dayProgs.length; i++) {
       if (i === 0 && dayProgs[i].horarioInicio > 0) {
-        // Gap before first program
         let cur = 0;
         while (cur < dayProgs[i].horarioInicio) {
           const gapEnd = Math.min(cur + 600, dayProgs[i].horarioInicio);
-          withGaps.push({
-            ...VOLTAMOS_JA,
-            id: `_gap_${i}_${cur}`,
-            horarioInicio: cur,
-            horarioFim: gapEnd,
-            duracao: gapEnd - cur,
-            horarioTexto: fmtSec(cur),
-            horarioFimTexto: fmtSec(gapEnd),
-          });
+          withGaps.push({ ...VOLTAMOS_JA, id:`_gap_${i}_${cur}`, horarioInicio:cur, horarioFim:gapEnd, duracao:gapEnd-cur, horarioTexto:fmtHM(cur), horarioFimTexto:fmtHM(gapEnd) });
           cur = gapEnd;
         }
       }
       withGaps.push(dayProgs[i]);
-      // Gap after this program
-      if (i < dayProgs.length - 1 && dayProgs[i].horarioFim < dayProgs[i + 1].horarioInicio) {
+      if (i < dayProgs.length - 1 && dayProgs[i].horarioFim < dayProgs[i+1].horarioInicio) {
         let cur = dayProgs[i].horarioFim;
-        while (cur < dayProgs[i + 1].horarioInicio) {
-          const gapEnd = Math.min(cur + 600, dayProgs[i + 1].horarioInicio);
-          withGaps.push({
-            ...VOLTAMOS_JA,
-            id: `_gap_${i}_${cur}`,
-            horarioInicio: cur,
-            horarioFim: gapEnd,
-            duracao: gapEnd - cur,
-            horarioTexto: fmtSec(cur),
-            horarioFimTexto: fmtSec(gapEnd),
-          });
+        while (cur < dayProgs[i+1].horarioInicio) {
+          const gapEnd = Math.min(cur + 600, dayProgs[i+1].horarioInicio);
+          withGaps.push({ ...VOLTAMOS_JA, id:`_gap_${i}_${cur}`, horarioInicio:cur, horarioFim:gapEnd, duracao:gapEnd-cur, horarioTexto:fmtHM(cur), horarioFimTexto:fmtHM(gapEnd) });
           cur = gapEnd;
         }
       }
     }
-    // Gap after last program
-    if (dayProgs[dayProgs.length - 1].horarioFim < 86400) {
-      let cur = dayProgs[dayProgs.length - 1].horarioFim;
+    if (dayProgs[dayProgs.length-1].horarioFim < 86400) {
+      let cur = dayProgs[dayProgs.length-1].horarioFim;
       while (cur < 86400) {
         const gapEnd = Math.min(cur + 600, 86400);
-        withGaps.push({
-          ...VOLTAMOS_JA,
-          id: `_gap_end_${cur}`,
-          horarioInicio: cur,
-          horarioFim: gapEnd,
-          duracao: gapEnd - cur,
-          horarioTexto: fmtSec(cur),
-          horarioFimTexto: fmtSec(gapEnd),
-        });
+        withGaps.push({ ...VOLTAMOS_JA, id:`_gap_end_${cur}`, horarioInicio:cur, horarioFim:gapEnd, duracao:gapEnd-cur, horarioTexto:fmtHM(cur), horarioFimTexto:fmtHM(gapEnd) });
         cur = gapEnd;
       }
     }
     return withGaps;
   }
-
-  // No programs for today — try repeating any programs from this channel
-  const anyProgs = programs
-    .filter(p => p.canalId === channelId)
-    .sort((a,b) => Number(a.horarioInicio) - Number(b.horarioInicio));
+  const anyProgs = programs.filter(p => p.canalId === channelId).sort((a,b) => Number(a.horarioInicio) - Number(b.horarioInicio));
   if (anyProgs.length === 0) return [];
-  const schedule = [];
-  let cur = 0, idx = 0;
+  const schedule = []; let cur = 0, idx = 0;
   while (cur < 86400) {
-    const src = anyProgs[idx % anyProgs.length];
-    const dur = Number(src.duracao) || 3600;
-    const end = cur + dur;
-    schedule.push({
-      ...src,
-      id: `${src.id}_rep${idx}`,
-      horarioInicio: cur, horarioFim: end, duracao: dur,
-      horarioTexto: fmtSec(cur), horarioFimTexto: fmtSec(end),
-    });
+    const src = anyProgs[idx % anyProgs.length]; const dur = Number(src.duracao) || 3600; const end = cur + dur;
+    schedule.push({ ...src, id:`${src.id}_rep${idx}`, horarioInicio:cur, horarioFim:end, duracao:dur, horarioTexto:fmtHM(cur), horarioFimTexto:fmtHM(end) });
     cur = end; idx++;
   }
   return schedule;
@@ -141,7 +85,6 @@ function getCurProg(schedule) {
   const s = getNow();
   return schedule.find(p => s >= p.horarioInicio && s < p.horarioFim) || null;
 }
-
 function getElapsed(prog) { return getNow() - prog.horarioInicio }
 
 function ChLogo({ch, size=28}) {
@@ -152,129 +95,195 @@ function ChLogo({ch, size=28}) {
 // ============================================
 // SMALL COMPONENTS
 // ============================================
-function LiveDot(){ const[v,setV]=useState(true); useEffect(()=>{const i=setInterval(()=>setV(x=>!x),800);return()=>clearInterval(i)},[]); return <span style={{display:"inline-flex",alignItems:"center",gap:4,fontSize:11,fontWeight:700,color:"#ff3b3b",opacity:v?1:0.3,transition:"opacity 0.3s"}}><span style={{width:8,height:8,borderRadius:"50%",background:"#ff3b3b",boxShadow:"0 0 6px #ff3b3b"}}/>AO VIVO</span> }
+function LiveDot({big}){ const[v,setV]=useState(true); useEffect(()=>{const i=setInterval(()=>setV(x=>!x),800);return()=>clearInterval(i)},[]); return <span style={{display:"inline-flex",alignItems:"center",gap:5,fontSize:big?14:11,fontWeight:800,color:"#ff3b3b",opacity:v?1:0.3,transition:"opacity 0.3s"}}><span style={{width:big?10:8,height:big?10:8,borderRadius:"50%",background:"#ff3b3b",boxShadow:"0 0 8px #ff3b3b"}}/>AO VIVO</span> }
 
-function Clock(){ const[t,setT]=useState(new Date()); useEffect(()=>{const i=setInterval(()=>setT(new Date()),1000);return()=>clearInterval(i)},[]); const d=["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"]; return <div style={{color:"#ccc",textAlign:"right",fontSize:13,lineHeight:1.3}}><div style={{fontSize:22,fontWeight:700,color:"#fff",letterSpacing:1}}>{String(t.getHours()).padStart(2,"0")}:{String(t.getMinutes()).padStart(2,"0")}</div><div>{d[t.getDay()]} {t.getDate()}/{t.getMonth()+1}</div></div> }
-
-function PBar({program}){ const[el,setEl]=useState(0); useEffect(()=>{const u=()=>setEl(getElapsed(program));u();const i=setInterval(u,1000);return()=>clearInterval(i)},[program]); const pct=Math.min((el/program.duracao)*100,100); return <div style={{display:"flex",alignItems:"center",gap:8,width:"100%",fontSize:11,color:"#aaa"}}><span style={{minWidth:40,textAlign:"right"}}>{fT(el)}</span><div style={{flex:1,height:4,background:"#333",borderRadius:2,overflow:"hidden"}}><div style={{width:`${pct}%`,height:"100%",background:"linear-gradient(90deg,#1a73e8,#4fc3f7)",borderRadius:2,transition:"width 1s linear"}}/></div><span style={{minWidth:40}}>{fT(program.duracao)}</span></div> }
-
-function Badge({c}){ return <span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:22,height:22,borderRadius:4,background:CC[c]||"#888",color:c==="L"||c==="18"?"#fff":"#000",fontSize:10,fontWeight:800}}>{c}</span> }
-function Tag({t}){ const c={HD:"#1a73e8","4K":"#e91e63",DUB:"#4caf50",LEG:"#ff9800","5.1":"#9c27b0"}; return <span style={{fontSize:9,fontWeight:700,padding:"2px 5px",borderRadius:3,background:c[t]||"#555",color:"#fff"}}>{t}</span> }
+function Badge({c,big}){ return <span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:big?30:22,height:big?30:22,borderRadius:4,background:CC[c]||"#888",color:c==="L"||c==="18"?"#fff":"#000",fontSize:big?13:10,fontWeight:800}}>{c}</span> }
+function Tag({t}){ const c={HD:"#1a73e8","4K":"#e91e63",DUB:"#4caf50",LEG:"#ff9800","5.1":"#9c27b0"}; return <span style={{fontSize:10,fontWeight:700,padding:"3px 7px",borderRadius:3,background:c[t]||"#555",color:"#fff"}}>{t}</span> }
 
 function shareProgram(prog,ch){ const text=`📺 ${prog.nome}\n🕐 ${prog.horarioTexto} - ${prog.horarioFimTexto}\n📡 ${ch?.nome||"TVWEB"}`; if(navigator.share)navigator.share({title:prog.nome,text,url:window.location.href}).catch(()=>{}); else{navigator.clipboard?.writeText(text);alert("Copiado!")} }
 function scheduleNotif(prog,ch,min=5){ const ns=getNow();const ts=prog.horarioInicio-min*60;const delay=(ts-ns)*1000;if(delay<=0){alert("Já começou!");return}if(!("Notification"in window)){alert("Sem suporte.");return}Notification.requestPermission().then(p=>{if(p!=="granted")return;setTimeout(()=>{new Notification(`📺 ${prog.nome} em ${min}min!`,{body:`${ch?.nome} · ${prog.horarioTexto}`})},delay);alert(`✅ Lembrete definido!`)}) }
 
-function FsBtn({cRef}){ const[fs,setFs]=useState(false);const[pulse,setPulse]=useState(true); useEffect(()=>{const h=()=>setFs(!!document.fullscreenElement);document.addEventListener("fullscreenchange",h);const t=setTimeout(()=>setPulse(false),6000);return()=>{document.removeEventListener("fullscreenchange",h);clearTimeout(t)}},[]); return <button onClick={()=>{if(!document.fullscreenElement)cRef.current?.requestFullscreen?.();else document.exitFullscreen?.()}} style={{position:"absolute",top:16,left:"50%",transform:"translateX(-50%)",zIndex:15,background:"rgba(0,0,0,0.5)",border:"1px solid rgba(255,255,255,0.15)",color:"#ccc",padding:"6px 14px",borderRadius:20,cursor:"pointer",fontSize:11,fontWeight:600,animation:pulse?"pulseFull 2s ease infinite":"none"}}>{fs?"↙ Sair":"↗ Tela Cheia"}</button> }
-
 // ============================================
-// INFO BAR
+// OSD HEADER (TV-style top bar)
 // ============================================
-function InfoBar({channel,program,nextProgram,onOpenEPG,onOpenFull}){
-  if(!program) return null;
-  return <div style={{position:"absolute",bottom:0,left:0,right:0,zIndex:10,background:"linear-gradient(transparent, rgba(0,0,0,0.95))",padding:"40px 24px 16px"}}>
-    <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:16}}>
-      <div style={{flex:1}}>
-        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6,flexWrap:"wrap"}}>
-          <ChLogo ch={channel} size={20}/><span style={{fontSize:13,color:channel.cor,fontWeight:700}}>{channel.nome}</span>
-          <Badge c={program.classificacao}/>{program.tags?.map(t => <Tag key={t} t={t}/>)}<LiveDot/>
+function OSDHeader({channel,program,visible}){
+  const[t,setT]=useState(new Date());
+  useEffect(()=>{const i=setInterval(()=>setT(new Date()),1000);return()=>clearInterval(i)},[]);
+  const ds=["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"];
+  if(!program||!channel) return null;
+  return <div style={{
+    position:"absolute",top:0,left:0,right:0,zIndex:10,
+    background:"linear-gradient(180deg, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.85) 70%, transparent 100%)",
+    padding:"20px 30px 40px",
+    transform:visible?"translateY(0)":"translateY(-100%)",
+    transition:"transform 0.6s ease",
+    pointerEvents:visible?"auto":"none",
+  }}>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+      {/* LEFT: Channel info */}
+      <div style={{display:"flex",alignItems:"center",gap:16}}>
+        <div style={{width:60,height:60,borderRadius:8,background:`${channel.cor}33`,border:`2px solid ${channel.cor}`,display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden"}}>
+          <ChLogo ch={channel} size={channel.logoType==="custom"?60:40}/>
         </div>
-        <div style={{fontSize:18,fontWeight:700,color:"#fff",marginBottom:4}}>{program.nome}</div>
-        <div style={{fontSize:12,color:"#999",marginBottom:8}}>{program.horarioTexto} - {program.horarioFimTexto}</div>
-        <PBar program={program}/>
+        <div>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:4}}>
+            <span style={{fontSize:28,fontWeight:800,color:"#fff"}}>{channel.numero}</span>
+            <span style={{fontSize:22,fontWeight:700,color:channel.cor}}>{channel.nome}</span>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:2}}>
+            <span style={{fontSize:20,fontWeight:700,color:"#fff"}}>{program.nome}</span>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginTop:4}}>
+            <span style={{fontSize:15,color:"#bbb"}}>{program.horarioTexto} - {program.horarioFimTexto}</span>
+            <Badge c={program.classificacao} big/>
+            {program.tags?.map(t=><Tag key={t} t={t}/>)}
+          </div>
+        </div>
       </div>
-      <Clock/>
-    </div>
-    {nextProgram && <div style={{marginTop:8,fontSize:11,color:"#666"}}>A seguir: <span style={{color:"#aaa"}}>{nextProgram.nome}</span> · {nextProgram.horarioTexto}</div>}
-    <div style={{display:"flex",justifyContent:"center",gap:10,marginTop:12}}>
-      <button onClick={onOpenEPG} style={{background:"rgba(255,255,255,0.1)",border:"1px solid rgba(255,255,255,0.15)",color:"#ccc",padding:"8px 20px",borderRadius:6,cursor:"pointer",fontSize:12,fontWeight:600}}>▲ Guia Rápido</button>
-      <button onClick={onOpenFull} style={{background:"rgba(26,115,232,0.2)",border:"1px solid rgba(26,115,232,0.3)",color:"#4fc3f7",padding:"8px 20px",borderRadius:6,cursor:"pointer",fontSize:12,fontWeight:600}}>📺 Programação Completa</button>
+      {/* RIGHT: Clock + TREND TV */}
+      <div style={{textAlign:"right",flexShrink:0}}>
+        <div style={{fontSize:32,fontWeight:800,color:"#fff",letterSpacing:1,lineHeight:1}}>
+          {String(t.getHours()).padStart(2,"0")}:{String(t.getMinutes()).padStart(2,"0")}
+        </div>
+        <div style={{fontSize:14,color:"#aaa",marginTop:4}}>
+          {ds[t.getDay()]} {t.getDate()}/{t.getMonth()+1}
+        </div>
+        <div style={{fontSize:16,fontWeight:800,color:"rgba(255,255,255,0.5)",letterSpacing:3,marginTop:8}}>TREND TV</div>
+      </div>
     </div>
   </div>;
 }
 
 // ============================================
-// EPG COMPACTO
+// OSD FOOTER (TV-style bottom bar)
+// ============================================
+function OSDFooter({program,nextProgram,onOpenEPG,onOpenFull,visible}){
+  const[el,setEl]=useState(0);
+  useEffect(()=>{
+    if(!program) return;
+    const u=()=>setEl(getElapsed(program)); u();
+    const i=setInterval(u,1000); return()=>clearInterval(i);
+  },[program]);
+  if(!program) return null;
+  const pct=Math.min((el/program.duracao)*100,100);
+  const nowH=fmtHM(getNow());
+  return <div style={{
+    position:"absolute",bottom:0,left:0,right:0,zIndex:10,
+    background:"linear-gradient(0deg, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.85) 70%, transparent 100%)",
+    padding:"40px 30px 20px",
+    transform:visible?"translateY(0)":"translateY(100%)",
+    transition:"transform 0.6s ease",
+    pointerEvents:visible?"auto":"none",
+  }}>
+    {/* Progress bar */}
+    <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:12}}>
+      <span style={{fontSize:15,fontWeight:700,color:"#fff",minWidth:55}}>{fmtHM(program.horarioInicio + el)}</span>
+      <div style={{flex:1,height:5,background:"rgba(255,255,255,0.15)",borderRadius:3,overflow:"hidden"}}>
+        <div style={{width:`${pct}%`,height:"100%",background:"linear-gradient(90deg,#1a73e8,#4fc3f7)",borderRadius:3,transition:"width 1s linear"}}/>
+      </div>
+      <span style={{fontSize:13,color:"#888",minWidth:55,textAlign:"right"}}>{program.horarioFimTexto}</span>
+    </div>
+    {/* Info row */}
+    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+      <div style={{display:"flex",alignItems:"center",gap:12}}>
+        <LiveDot big/>
+        {nextProgram && <span style={{fontSize:13,color:"#777"}}>A seguir: <span style={{color:"#bbb",fontWeight:600}}>{nextProgram.nome}</span> · {nextProgram.horarioTexto}</span>}
+      </div>
+      <div style={{display:"flex",gap:10}}>
+        <button onClick={e=>{e.stopPropagation();onOpenEPG()}} style={{background:"rgba(255,255,255,0.1)",border:"1px solid rgba(255,255,255,0.15)",color:"#ccc",padding:"10px 22px",borderRadius:6,cursor:"pointer",fontSize:14,fontWeight:600}}>▲ Guia Rápido</button>
+        <button onClick={e=>{e.stopPropagation();onOpenFull()}} style={{background:"rgba(26,115,232,0.2)",border:"1px solid rgba(26,115,232,0.3)",color:"#4fc3f7",padding:"10px 22px",borderRadius:6,cursor:"pointer",fontSize:14,fontWeight:600}}>📺 Programação</button>
+      </div>
+    </div>
+  </div>;
+}
+
+// ============================================
+// EPG COMPACTO (with clock + sticky names)
 // ============================================
 function EPGCompact({channels,allPrograms,currentChannelId,onSelectChannel,onSelectProgram,onOpenFull,onClose}){
   const now=getNow();
   const scrollRef=useRef(null);
-  const ROW_H=140, PX=400;
-  const nowPx = (now/86400) * PX * 24;
-  
+  const ROW_H=130, PX=400;
+  const totalW=PX*24;
+  const nowPx=(now/86400)*totalW;
+  const secToPx=(sec)=>(Number(sec)/86400)*totalW;
+  const[clock,setClock]=useState(new Date());
+  useEffect(()=>{const i=setInterval(()=>setClock(new Date()),1000);return()=>clearInterval(i)},[]);
+
   useEffect(()=>{
-    if(scrollRef.current) {
-      scrollRef.current.scrollLeft = Math.max(0, nowPx - 200);
-    }
-  },[nowPx]);
+    if(scrollRef.current) scrollRef.current.scrollLeft=Math.max(0,nowPx-300);
+  },[]);
 
-  const scroll = (dir) => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollLeft += dir * 300;
-    }
-  };
-  
-  const totalW = PX * 24; // 9600px = total width for 24h
-  const secToPx = (sec) => (Number(sec) / 86400) * totalW;
+  const scroll=(dir)=>{if(scrollRef.current)scrollRef.current.scrollLeft+=dir*400};
 
-  return <div style={{position:"absolute",bottom:0,left:0,right:0,zIndex:20,animation:"slideUp 0.3s ease"}}>
-    <div style={{background:"rgba(16,18,26,0.98)",borderTop:"1px solid rgba(255,255,255,0.1)",padding:"12px 20px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-      <div style={{display:"flex",alignItems:"center",gap:12}}><span style={{fontSize:18,fontWeight:700,color:"#fff",letterSpacing:1}}>GUIA</span><LiveDot/></div>
+  return <div onClick={e=>e.stopPropagation()} style={{position:"absolute",bottom:0,left:0,right:0,zIndex:20,animation:"slideUp 0.3s ease"}}>
+    <div style={{background:"rgba(10,12,18,0.98)",borderTop:"1px solid rgba(255,255,255,0.1)",padding:"10px 20px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+      <div style={{display:"flex",alignItems:"center",gap:14}}>
+        <span style={{fontSize:20,fontWeight:800,color:"#fff",letterSpacing:2}}>GUIA</span>
+        <LiveDot/>
+        <span style={{fontSize:20,fontWeight:700,color:"#4fc3f7",marginLeft:8}}>{String(clock.getHours()).padStart(2,"0")}:{String(clock.getMinutes()).padStart(2,"0")}:{String(clock.getSeconds()).padStart(2,"0")}</span>
+      </div>
       <div style={{display:"flex",gap:8}}>
         <button onClick={onOpenFull} style={{background:"rgba(26,115,232,0.15)",border:"1px solid rgba(26,115,232,0.3)",color:"#4fc3f7",padding:"8px 18px",borderRadius:4,cursor:"pointer",fontSize:13,fontWeight:600}}>📺 Ver Completa</button>
         <button onClick={onClose} style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",color:"#aaa",width:36,height:36,borderRadius:"50%",cursor:"pointer",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
       </div>
     </div>
-    <div style={{background:"rgba(16,18,26,0.98)",display:"flex",overflow:"hidden",maxHeight:ROW_H*Math.min(channels.length,5)+50}}>
+    <div style={{background:"rgba(10,12,18,0.98)",display:"flex",overflow:"hidden",maxHeight:ROW_H*Math.min(channels.length,5)+40}}>
       <div style={{minWidth:140,borderRight:"1px solid rgba(255,255,255,0.08)",flexShrink:0}}>
         <div style={{height:35}}/>
-        {channels.map(ch => <div key={ch.id} onClick={()=>onSelectChannel(ch.id)} style={{height:ROW_H,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",borderBottom:"1px solid rgba(255,255,255,0.05)",background:ch.id===currentChannelId?"rgba(26,115,232,0.1)":"transparent",transition:"background 0.2s"}}>
-          <div style={{textAlign:"center"}}><ChLogo ch={ch} size={40}/><div style={{fontSize:13,fontWeight:600,color:ch.id===currentChannelId?"#fff":"#999",marginTop:6}}>{ch.nome}</div></div>
+        {channels.map(ch=><div key={ch.id} onClick={()=>onSelectChannel(ch.id)} style={{height:ROW_H,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",borderBottom:"1px solid rgba(255,255,255,0.05)",background:ch.id===currentChannelId?"rgba(26,115,232,0.1)":"transparent"}}>
+          <div style={{textAlign:"center"}}><ChLogo ch={ch} size={36}/><div style={{fontSize:12,fontWeight:600,color:ch.id===currentChannelId?"#fff":"#888",marginTop:4}}>{ch.nome}</div></div>
         </div>)}
       </div>
-      <div ref={scrollRef} style={{flex:1,overflowX:"auto",overflowY:"hidden"}}>
-        {/* TIME RULER - absolute positioning */}
+      <div ref={scrollRef} style={{flex:1,overflowX:"auto",overflowY:"hidden",position:"relative"}}>
         <div style={{position:"relative",height:35,borderBottom:"1px solid rgba(255,255,255,0.1)",width:totalW}}>
-          {Array.from({length:25}).map((_,h) => {
-            const x = secToPx(h * 3600);
+          {Array.from({length:25}).map((_,h)=>{
+            const x=secToPx(h*3600);
             return <div key={h} style={{position:"absolute",left:x,top:0,bottom:0,borderLeft:"1px solid rgba(255,255,255,0.1)"}}>
-              <span style={{fontSize:14,color:"#ccc",fontWeight:600,padding:"8px 10px",whiteSpace:"nowrap",display:"inline-block"}}>{String(h).padStart(2,"0")}:00</span>
+              <span style={{fontSize:13,color:"#ccc",fontWeight:600,padding:"8px 8px",whiteSpace:"nowrap",display:"inline-block"}}>{String(h).padStart(2,"0")}:00</span>
             </div>;
           })}
-          {/* NOW line */}
           <div style={{position:"absolute",top:0,bottom:-ROW_H*channels.length,left:nowPx,width:3,background:"#ff3b3b",zIndex:5,boxShadow:"0 0 12px #ff3b3b",pointerEvents:"none"}}><div style={{width:10,height:10,borderRadius:"50%",background:"#ff3b3b",position:"absolute",top:-3,left:-3.5}}/></div>
         </div>
-        {/* CHANNEL ROWS - absolute positioning */}
-        {channels.map(ch => {
-          const sched = buildSchedule(allPrograms, ch.id);
-          const cur = getCurProg(sched);
+        {channels.map(ch=>{
+          const sched=buildSchedule(allPrograms,ch.id);
+          const cur=getCurProg(sched);
           return <div key={ch.id} style={{position:"relative",height:ROW_H,borderBottom:"1px solid rgba(255,255,255,0.05)",width:totalW}}>
-            {sched.filter(p=>Number(p.horarioFim)<=86400&&!p.isPlaceholder).map(prog => {
-              const startSec = Number(prog.horarioInicio);
-              const dur = Number(prog.duracao);
-              const left = secToPx(startSec);
-              const w = Math.max(secToPx(dur), 80);
-              const isNow = cur?.id === prog.id;
-              const isLong = dur > 3600;
-              const repeatCount = isLong ? Math.max(Math.floor(w / 300), 2) : 1;
+            {sched.filter(p=>Number(p.horarioFim)<=86400&&!p.isPlaceholder).map(prog=>{
+              const startSec=Number(prog.horarioInicio), dur=Number(prog.duracao);
+              const left=secToPx(startSec), w=Math.max(secToPx(dur),80);
+              const isNow=cur?.id===prog.id;
+              // Smart name repetition: start, middle, end for long blocks
+              const needsRepeat=w>500;
+              const needsTriple=w>900;
               return <div key={prog.id} onClick={()=>{onSelectChannel(ch.id);onSelectProgram(prog)}}
-                style={{position:"absolute",left,width:w,top:0,bottom:2,padding:"14px 16px",cursor:"pointer",overflow:"hidden",background:isNow?"rgba(40,44,60,0.95)":"rgba(30,32,44,0.6)",borderRight:"1px solid rgba(255,255,255,0.06)",borderLeft:"1px solid rgba(255,255,255,0.03)",boxSizing:"border-box",transition:"background 0.2s"}}
+                style={{position:"absolute",left,width:w,top:0,bottom:2,cursor:"pointer",overflow:"hidden",background:isNow?"rgba(40,44,60,0.95)":"rgba(30,32,44,0.6)",borderRight:"1px solid rgba(255,255,255,0.06)",borderLeft:"1px solid rgba(255,255,255,0.03)",boxSizing:"border-box",transition:"background 0.2s"}}
                 onMouseEnter={e=>e.currentTarget.style.background=isNow?"rgba(60,70,90,1)":"rgba(45,50,65,0.9)"}
                 onMouseLeave={e=>e.currentTarget.style.background=isNow?"rgba(40,44,60,0.95)":"rgba(30,32,44,0.6)"}>
-                <div style={{fontSize:12,color:"#aaa",marginBottom:6,fontWeight:500}}>{prog.horarioTexto}{isNow&&<span style={{marginLeft:8,fontSize:10,fontWeight:700,padding:"3px 8px",borderRadius:3,background:"#f44336",color:"#fff"}}>AO VIVO</span>}</div>
-                <div style={{display:"flex",gap:w>400?60:30,whiteSpace:"nowrap",overflow:"hidden"}}>
-                  {Array.from({length:repeatCount}).map((_,ri) => <span key={ri} style={{fontSize:16,fontWeight:700,color:isNow?"#fff":"#ddd",flexShrink:0}}>{prog.nome}</span>)}
+                {/* Name at START */}
+                <div style={{position:"absolute",left:12,top:10,right:12}}>
+                  <div style={{fontSize:11,color:"#aaa",marginBottom:4,fontWeight:500}}>{prog.horarioTexto}{isNow&&<span style={{marginLeft:6,fontSize:9,fontWeight:700,padding:"2px 6px",borderRadius:3,background:"#f44336",color:"#fff"}}>AO VIVO</span>}</div>
+                  <div style={{fontSize:15,fontWeight:700,color:isNow?"#fff":"#ddd",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{prog.nome}</div>
                 </div>
+                {/* Name at MIDDLE */}
+                {needsRepeat&&<div style={{position:"absolute",left:"50%",top:"50%",transform:"translate(-50%,-50%)",textAlign:"center"}}>
+                  <div style={{fontSize:15,fontWeight:700,color:isNow?"rgba(255,255,255,0.7)":"rgba(221,221,221,0.6)",whiteSpace:"nowrap"}}>{prog.nome}</div>
+                </div>}
+                {/* Name at END */}
+                {needsTriple&&<div style={{position:"absolute",right:12,bottom:10}}>
+                  <div style={{fontSize:14,fontWeight:600,color:isNow?"rgba(255,255,255,0.5)":"rgba(221,221,221,0.4)",whiteSpace:"nowrap",textAlign:"right"}}>{prog.nome}</div>
+                </div>}
               </div>;
             })}
-            {sched.length===0 && <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",color:"#555",fontSize:13}}>Sem programação</div>}
+            {sched.length===0&&<div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",color:"#555",fontSize:13}}>Sem programação</div>}
           </div>;
         })}
       </div>
     </div>
-    <div style={{background:"rgba(16,18,26,0.98)",padding:"10px 16px",borderTop:"1px solid rgba(255,255,255,0.06)",display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,color:"#666"}}>
-      <button onClick={()=>scroll(-1)} style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",color:"#aaa",padding:"6px 12px",borderRadius:4,cursor:"pointer",fontSize:12}}>← Anterior</button>
+    <div style={{background:"rgba(10,12,18,0.98)",padding:"10px 16px",borderTop:"1px solid rgba(255,255,255,0.06)",display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,color:"#666"}}>
+      <button onClick={()=>scroll(-1)} style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",color:"#aaa",padding:"8px 16px",borderRadius:4,cursor:"pointer",fontSize:13}}>← Anterior</button>
       <div style={{display:"flex",gap:24}}><span>↑↓ = Canal</span><span>ESC = Fechar</span><span>G = Guia</span></div>
-      <button onClick={()=>scroll(1)} style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",color:"#aaa",padding:"6px 12px",borderRadius:4,cursor:"pointer",fontSize:12}}>Próximo →</button>
+      <button onClick={()=>scroll(1)} style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",color:"#aaa",padding:"8px 16px",borderRadius:4,cursor:"pointer",fontSize:13}}>Próximo →</button>
     </div>
   </div>;
 }
@@ -287,26 +296,25 @@ function FullDay({channels,allPrograms,currentChannelId,onClose,onProgramClick})
   const sched=buildSchedule(allPrograms,viewCh);
   const ns=getNow();
   const ch=channels.find(c=>c.id===viewCh)||channels[0];
-
-  return <div onClick={onClose} style={{position:"fixed",inset:0,zIndex:50,background:"rgba(0,0,0,0.92)",overflowY:"auto"}}>
+  return <div onClick={e=>{e.stopPropagation();onClose()}} style={{position:"fixed",inset:0,zIndex:50,background:"rgba(0,0,0,0.92)",overflowY:"auto"}}>
     <div onClick={e=>e.stopPropagation()} style={{maxWidth:720,margin:"0 auto",padding:20,minHeight:"100vh"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20,position:"sticky",top:0,background:"rgba(0,0,0,0.95)",padding:"16px 0",zIndex:5}}>
         <div><div style={{fontSize:20,fontWeight:700,color:"#fff"}}>📺 Programação Completa</div><div style={{fontSize:12,color:"#888",marginTop:2}}>{new Date().toLocaleDateString("pt-BR",{weekday:"long",day:"numeric",month:"long"})}</div></div>
         <button onClick={onClose} style={{background:"rgba(255,255,255,0.1)",border:"none",color:"#fff",width:40,height:40,borderRadius:"50%",cursor:"pointer",fontSize:18}}>✕</button>
       </div>
       <div style={{display:"flex",gap:6,marginBottom:20,overflowX:"auto",paddingBottom:8}}>
-        {channels.map(c => <button key={c.id} onClick={()=>setVCh(c.id)} style={{padding:"10px 18px",borderRadius:6,cursor:"pointer",flexShrink:0,background:viewCh===c.id?`${c.cor}33`:"rgba(255,255,255,0.04)",border:viewCh===c.id?`1px solid ${c.cor}`:"1px solid rgba(255,255,255,0.08)",color:viewCh===c.id?"#fff":"#888",fontSize:13,fontWeight:600,display:"flex",alignItems:"center",gap:6}}><ChLogo ch={c} size={18}/> {c.nome}</button>)}
+        {channels.map(c=><button key={c.id} onClick={()=>setVCh(c.id)} style={{padding:"10px 18px",borderRadius:6,cursor:"pointer",flexShrink:0,background:viewCh===c.id?`${c.cor}33`:"rgba(255,255,255,0.04)",border:viewCh===c.id?`1px solid ${c.cor}`:"1px solid rgba(255,255,255,0.08)",color:viewCh===c.id?"#fff":"#888",fontSize:13,fontWeight:600,display:"flex",alignItems:"center",gap:6}}><ChLogo ch={c} size={18}/> {c.nome}</button>)}
       </div>
       <div style={{display:"flex",flexDirection:"column",gap:6}}>
-        {sched.length===0 && <div style={{padding:40,textAlign:"center",color:"#555"}}>Sem programação para este canal hoje. Adicione programas no <a href="/admin" style={{color:"#4fc3f7"}}>painel admin</a>.</div>}
-        {sched.filter(p=>p.horarioFim<=86400).map(prog => {
+        {sched.length===0&&<div style={{padding:40,textAlign:"center",color:"#555"}}>Sem programação para este canal hoje.</div>}
+        {sched.filter(p=>p.horarioFim<=86400).map(prog=>{
           const isNow=ns>=prog.horarioInicio&&ns<prog.horarioFim;
           const isPast=ns>=prog.horarioFim;
-          return <div key={prog.id} onClick={()=>onProgramClick(prog)} style={{display:"flex",gap:14,padding:"16px 18px",borderRadius:10,cursor:"pointer",background:isNow?"rgba(26,115,232,0.15)":isPast?"rgba(255,255,255,0.015)":"rgba(255,255,255,0.04)",border:isNow?"1px solid #1a73e8":"1px solid rgba(255,255,255,0.06)",opacity:isPast?0.45:1,transition:"all 0.2s"}}>
+          return <div key={prog.id} onClick={()=>onProgramClick(prog)} style={{display:"flex",gap:14,padding:"16px 18px",borderRadius:10,cursor:"pointer",background:isNow?"rgba(26,115,232,0.15)":isPast?"rgba(255,255,255,0.015)":"rgba(255,255,255,0.04)",border:isNow?"1px solid #1a73e8":"1px solid rgba(255,255,255,0.06)",opacity:isPast?0.4:1,transition:"all 0.2s"}}>
             <div style={{minWidth:75,textAlign:"center",paddingTop:2}}><div style={{fontSize:18,fontWeight:700,color:isNow?"#4fc3f7":"#fff"}}>{prog.horarioTexto}</div><div style={{fontSize:11,color:"#555",marginTop:2}}>{prog.horarioFimTexto}</div>{isNow&&<div style={{marginTop:6}}><LiveDot/></div>}</div>
             <div style={{width:3,borderRadius:2,background:isNow?ch.cor:"rgba(255,255,255,0.08)",flexShrink:0}}/>
             <div style={{flex:1,minWidth:0}}>
-              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:5,flexWrap:"wrap"}}><span style={{fontSize:16,fontWeight:600,color:isNow?"#fff":"#ccc"}}>{prog.nome}</span><Badge c={prog.classificacao}/>{prog.tags?.map(t => <Tag key={t} t={t}/>)}</div>
+              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:5,flexWrap:"wrap"}}><span style={{fontSize:16,fontWeight:600,color:isNow?"#fff":"#ccc"}}>{prog.nome}</span><Badge c={prog.classificacao}/>{prog.tags?.map(t=><Tag key={t} t={t}/>)}</div>
               <div style={{fontSize:13,color:"#999",lineHeight:1.6,marginBottom:6}}>{prog.sinopse}</div>
               <div style={{fontSize:11,color:"#666"}}>⏱ {fD(prog.duracao)}</div>
             </div>
@@ -332,19 +340,19 @@ function ProgModal({program,channel,onClose,onWatch}){
     <div onClick={e=>e.stopPropagation()} style={{background:"#1a1c24",borderRadius:10,maxWidth:500,width:"100%",border:"1px solid rgba(255,255,255,0.1)",overflow:"hidden"}}>
       <div style={{height:140,background:`linear-gradient(135deg,${channel?.cor||"#333"}33,#0a0c12)`,display:"flex",alignItems:"center",justifyContent:"center",position:"relative"}}>
         <ChLogo ch={channel||{logo:"📺"}} size={64}/>
-        <div style={{position:"absolute",top:12,right:12,display:"flex",gap:4}}><Badge c={program.classificacao}/>{program.tags?.map(t => <Tag key={t} t={t}/>)}</div>
-        {isNow&&<div style={{position:"absolute",top:12,left:12}}><LiveDot/></div>}
+        <div style={{position:"absolute",top:12,right:12,display:"flex",gap:4}}><Badge c={program.classificacao}/>{program.tags?.map(t=><Tag key={t} t={t}/>)}</div>
+        {isNow&&<div style={{position:"absolute",top:12,left:12}}><LiveDot big/></div>}
       </div>
       <div style={{padding:24}}>
-        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}><span style={{fontSize:12,color:channel?.cor}}>{channel?.nome}</span></div>
-        <div style={{fontSize:22,fontWeight:700,color:"#fff",marginBottom:8}}>{program.nome}</div>
-        <div style={{fontSize:13,color:"#999",lineHeight:1.6,marginBottom:16}}>{program.sinopse}</div>
-        <div style={{display:"flex",gap:16,fontSize:12,color:"#666",marginBottom:16}}><span>⏰ {program.horarioTexto} - {program.horarioFimTexto}</span><span>⏱ {fD(Number(program.duracao))}</span></div>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}><span style={{fontSize:14,color:channel?.cor,fontWeight:700}}>{channel?.nome}</span></div>
+        <div style={{fontSize:24,fontWeight:700,color:"#fff",marginBottom:8}}>{program.nome}</div>
+        <div style={{fontSize:14,color:"#999",lineHeight:1.6,marginBottom:16}}>{program.sinopse}</div>
+        <div style={{display:"flex",gap:16,fontSize:13,color:"#666",marginBottom:16}}><span>⏰ {program.horarioTexto} - {program.horarioFimTexto}</span><span>⏱ {fD(Number(program.duracao))}</span></div>
         <div style={{display:"flex",gap:8}}>
-          {isNow&&onWatch&&<button onClick={()=>{onWatch(program.canalId);onClose()}} style={{flex:1,padding:10,background:"linear-gradient(135deg,#f44336,#e91e63)",border:"none",borderRadius:6,color:"#fff",cursor:"pointer",fontSize:12,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>▶ Assistir Agora</button>}
-          <button onClick={()=>shareProgram(program,channel)} style={{flex:1,padding:10,background:"rgba(76,175,80,0.15)",border:"1px solid rgba(76,175,80,0.3)",borderRadius:6,color:"#4caf50",cursor:"pointer",fontSize:12,fontWeight:600}}>📤 Compartilhar</button>
-          {isFut&&<button onClick={()=>scheduleNotif(program,channel)} style={{flex:1,padding:10,background:"rgba(255,152,0,0.15)",border:"1px solid rgba(255,152,0,0.3)",borderRadius:6,color:"#ff9800",cursor:"pointer",fontSize:12,fontWeight:600}}>🔔 Lembrete</button>}
-          <button onClick={onClose} style={{flex:1,padding:10,background:"rgba(26,115,232,0.2)",border:"1px solid rgba(26,115,232,0.3)",borderRadius:6,color:"#4fc3f7",cursor:"pointer",fontSize:12,fontWeight:600}}>Fechar</button>
+          {isNow&&onWatch&&<button onClick={()=>{onWatch(program.canalId);onClose()}} style={{flex:1,padding:12,background:"linear-gradient(135deg,#f44336,#e91e63)",border:"none",borderRadius:6,color:"#fff",cursor:"pointer",fontSize:14,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>▶ Assistir Agora</button>}
+          <button onClick={()=>shareProgram(program,channel)} style={{flex:1,padding:12,background:"rgba(76,175,80,0.15)",border:"1px solid rgba(76,175,80,0.3)",borderRadius:6,color:"#4caf50",cursor:"pointer",fontSize:13,fontWeight:600}}>📤 Compartilhar</button>
+          {isFut&&<button onClick={()=>scheduleNotif(program,channel)} style={{flex:1,padding:12,background:"rgba(255,152,0,0.15)",border:"1px solid rgba(255,152,0,0.3)",borderRadius:6,color:"#ff9800",cursor:"pointer",fontSize:13,fontWeight:600}}>🔔 Lembrete</button>}
+          <button onClick={onClose} style={{flex:1,padding:12,background:"rgba(26,115,232,0.2)",border:"1px solid rgba(26,115,232,0.3)",borderRadius:6,color:"#4fc3f7",cursor:"pointer",fontSize:13,fontWeight:600}}>Fechar</button>
         </div>
       </div>
     </div>
@@ -361,236 +369,200 @@ export default function TVWeb(){
   const [curCh, setCurCh] = useState(null);
   const [showEPG, setEPG] = useState(false);
   const [showFull, setFull] = useState(false);
-  const [showInfo, setInfo] = useState(true);
+  const [showOSD, setOSD] = useState(true);
   const [selProg, setSP] = useState(null);
-  const [showBlur, setShowBlur] = useState(true);
   const [fade, setFade] = useState(false);
-  
-  useEffect(() => {
-    const timer = setTimeout(() => setShowBlur(false), 7000);
-    return () => clearTimeout(timer);
-  }, []);
-  const hRef=useRef(null); const cRef=useRef(null); const wRef=useRef(null);
+  const [muted, setMuted] = useState(true);
+  // Tick: forces re-render every 3s to auto-switch videos
+  const [tick, setTick] = useState(0);
+  useEffect(()=>{const i=setInterval(()=>setTick(t=>t+1),3000);return()=>clearInterval(i)},[]);
+
+  const hideTimer=useRef(null);
+  const cRef=useRef(null);
+  const wRef=useRef(null);
+  const lastClickTimeRef=useRef(0);
+  const ytKeyRef=useRef("");
+  const ytStartRef=useRef(0);
+  const prevProgIdRef=useRef(null);
 
   // ========== FIREBASE REAL-TIME ==========
   useEffect(() => {
     let loaded = { channels: false, programs: false };
-    const loadingTimeout = setTimeout(() => {
-      setLoading(false);
-    }, 5000); // Fallback: stop loading after 5 seconds
+    const fallbackTimer = setTimeout(()=>setLoading(false),5000);
+    const unsubCh = onSnapshot(collection(db,"channels"),(snap)=>{
+      const list=snap.docs.map(d=>({...d.data(),id:d.id}));
+      const sorted=list.sort((a,b)=>(a.numero||0)-(b.numero||0));
+      if(sorted.length>0){setChannels(sorted);setCurCh(prev=>prev||sorted[0].id)}
+      else{setChannels(FALLBACK_CHANNELS);setCurCh("_info")}
+      loaded.channels=true;
+      if(loaded.channels&&loaded.programs){setLoading(false);clearTimeout(fallbackTimer)}
+    },(err)=>{console.error("Firebase channels err:",err);setChannels(FALLBACK_CHANNELS);loaded.channels=true;if(loaded.channels&&loaded.programs)setLoading(false)});
+    const unsubPr = onSnapshot(collection(db,"programs"),(snap)=>{
+      const list=snap.docs.map(d=>({...d.data(),id:d.id}));
+      if(list.length>0)setAllPrograms(list); else setAllPrograms(FALLBACK_PROGRAMS);
+      loaded.programs=true;
+      if(loaded.channels&&loaded.programs){setLoading(false);clearTimeout(fallbackTimer)}
+    },(err)=>{console.error("Firebase programs err:",err);setAllPrograms(FALLBACK_PROGRAMS);loaded.programs=true;if(loaded.channels&&loaded.programs)setLoading(false)});
+    return()=>{unsubCh();unsubPr();clearTimeout(fallbackTimer)};
+  },[]);
 
-    const unsubCh = onSnapshot(collection(db, "channels"), (snap) => {
-      const list = snap.docs.map(d => ({ ...d.data(), id: d.id }));
-      const sorted = list.sort((a,b) => (a.numero||0) - (b.numero||0));
-      if (sorted.length > 0) {
-        setChannels(sorted);
-        setCurCh(prev => prev || sorted[0].id);
-      } else {
-        setChannels(FALLBACK_CHANNELS);
-        setCurCh("_info");
-      }
-      loaded.channels = true;
-      if (loaded.channels && loaded.programs) {
-        setLoading(false);
-        clearTimeout(loadingTimeout);
-      }
-    }, (err) => {
-      console.error("Erro ao carregar canais:", err);
-      setChannels(FALLBACK_CHANNELS);
-      loaded.channels = true;
-      if (loaded.channels && loaded.programs) setLoading(false);
-    });
+  // ========== DERIVED STATE (recalcs every tick) ==========
+  const CHANNELS=channels;
+  const ch=CHANNELS.find(c=>c.id===curCh)||CHANNELS[0];
+  const schedule=useMemo(()=>ch?buildSchedule(allPrograms,ch.id):[],[allPrograms,ch?.id,tick]);
+  const cp=getCurProg(schedule);
+  const ci=schedule.findIndex(p=>p.id===cp?.id);
+  const np=ci>=0?schedule[ci+1]:null;
 
-    const unsubPr = onSnapshot(collection(db, "programs"), (snap) => {
-      const list = snap.docs.map(d => ({ ...d.data(), id: d.id }));
-      if (list.length > 0) {
-        setAllPrograms(list);
-      } else {
-        setAllPrograms(FALLBACK_PROGRAMS);
-      }
-      loaded.programs = true;
-      if (loaded.channels && loaded.programs) {
-        setLoading(false);
-        clearTimeout(loadingTimeout);
-      }
-    }, (err) => {
-      console.error("Erro ao carregar programas:", err);
-      setAllPrograms(FALLBACK_PROGRAMS);
-      loaded.programs = true;
-      if (loaded.channels && loaded.programs) setLoading(false);
-    });
+  // ========== AUTO VIDEO SWITCH ==========
+  // When current program changes, update ytKey to force new iframe
+  useEffect(()=>{
+    if(cp&&cp.id!==prevProgIdRef.current){
+      prevProgIdRef.current=cp.id;
+      ytStartRef.current=Math.max(0,Math.floor(getElapsed(cp)));
+      ytKeyRef.current=`${curCh}_${cp.id}_${Date.now()}`;
+    }
+  },[cp?.id,curCh]);
 
-    return () => {
-      unsubCh();
-      unsubPr();
-      clearTimeout(loadingTimeout);
-    };
-  }, []);
+  const ytVideoId=cp?extractYTId(cp.youtubeId||cp.videos?.[0]?.youtubeUrl):null;
+  const ytSrc=ytVideoId
+    ?`https://www.youtube.com/embed/${ytVideoId}?autoplay=1&mute=${muted?1:0}&start=${ytStartRef.current}&controls=0&disablekb=1&modestbranding=1&rel=0&showinfo=0&iv_load_policy=3&fs=0&playsinline=1&enablejsapi=0`
+    :null;
 
-  // ========== DERIVED STATE ==========
-  const CHANNELS = channels;
-  const ch = CHANNELS.find(c=>c.id===curCh) || CHANNELS[0];
-  const schedule = ch ? buildSchedule(allPrograms, ch.id) : [];
-  const cp = getCurProg(schedule);
-  const ci = schedule.findIndex(p=>p.id===cp?.id);
-  const np = ci>=0 ? schedule[ci+1] : null;
+  // ========== OSD VISIBILITY (20 seconds) ==========
+  const showOSDNow=useCallback(()=>{
+    clearTimeout(hideTimer.current);
+    setOSD(true);
+    hideTimer.current=setTimeout(()=>{if(!showEPG&&!showFull)setOSD(false)},20000);
+  },[showEPG,showFull]);
 
-  // ========== YOUTUBE IFRAME (stable - only recalculates on program change) ==========
-  const ytVideoId = cp ? extractYTId(cp.youtubeId || cp.videos?.[0]?.youtubeUrl) : null;
-  const ytKey = `${curCh}_${cp?.id || "none"}_${allPrograms.length}`;
-  const [muted, setMuted] = useState(true);
+  useEffect(()=>{showOSDNow();return()=>clearTimeout(hideTimer.current)},[]);
 
-  const ytStartRef = useRef(0);
-  const ytKeyRef = useRef("");
-  const lastClickTimeRef = useRef(0);
+  // Keep OSD visible while EPG/Full are open
+  useEffect(()=>{if(showEPG||showFull)setOSD(true)},[showEPG,showFull]);
 
-  // Sync YouTube start position when program changes
-  useEffect(() => {
-    ytKeyRef.current = ytKey;
-    ytStartRef.current = cp ? Math.max(0, Math.floor(getElapsed(cp))) : 0;
-  }, [ytKey, cp]);
-
-  const ytSrc = ytVideoId
-    ? `https://www.youtube.com/embed/${ytVideoId}?autoplay=1&mute=${muted?1:0}&start=${ytStartRef.current}&controls=0&disablekb=1&modestbranding=1&rel=0&showinfo=0&iv_load_policy=3&fs=0&playsinline=1&enablejsapi=1`
-    : null;
-
-  // Unmute handler - recalculates start position
-  const handleUnmute = useCallback(() => {
-    if (cp) ytStartRef.current = Math.max(0, Math.floor(getElapsed(cp)));
-    ytKeyRef.current = ytKeyRef.current + "_unmuted";
+  // ========== UNMUTE ==========
+  const handleUnmute=useCallback(()=>{
+    if(cp)ytStartRef.current=Math.max(0,Math.floor(getElapsed(cp)));
+    ytKeyRef.current=ytKeyRef.current+"_unmuted";
     setMuted(false);
-  }, [cp]);
+  },[cp]);
 
   // ========== CHANNEL SWITCHING ==========
-  const swCh = useCallback(id => {
-    if(id===curCh) return;
+  const swCh=useCallback(id=>{
+    if(id===curCh)return;
     setFade(true);
     setTimeout(()=>{setCurCh(id);setFade(false)},300);
-    setInfo(true); rHide();
-  },[curCh]);
+    showOSDNow();
+  },[curCh,showOSDNow]);
 
-  const swDir = useCallback(dir => {
-    const i=CHANNELS.findIndex(c=>c.id===curCh);
-    if(i<0) return;
-    let n;
-    if(dir>0) n=i<CHANNELS.length-1?CHANNELS[i+1].id:CHANNELS[0].id;
-    else n=i>0?CHANNELS[i-1].id:CHANNELS[CHANNELS.length-1].id;
+  const swDir=useCallback(dir=>{
+    const i=CHANNELS.findIndex(c=>c.id===curCh);if(i<0)return;
+    const n=dir>0?(i<CHANNELS.length-1?CHANNELS[i+1].id:CHANNELS[0].id):(i>0?CHANNELS[i-1].id:CHANNELS[CHANNELS.length-1].id);
     swCh(n);
   },[curCh,CHANNELS,swCh]);
 
-  const rHide = useCallback(()=>{
-    clearTimeout(hRef.current);
-    setInfo(true);
-    hRef.current=setTimeout(()=>{if(!showEPG&&!showFull)setInfo(false)},5000);
-  },[showEPG,showFull]);
+  // ========== KEYBOARD ==========
+  useEffect(()=>{const h=e=>{
+    if(e.key==="ArrowUp")swDir(-1);
+    else if(e.key==="ArrowDown")swDir(1);
+    else if(e.key==="Escape"){setEPG(false);setFull(false);setSP(null)}
+    else if(e.key==="g"||e.key==="G"){if(showFull){setFull(false);setEPG(true)}else if(showEPG)setEPG(false);else setEPG(true)}
+    showOSDNow();
+  };window.addEventListener("keydown",h);return()=>window.removeEventListener("keydown",h)},[swDir,showOSDNow,showEPG,showFull]);
 
-  useEffect(()=>{rHide();return()=>clearTimeout(hRef.current)},[]);
+  // ========== MOUSE WHEEL ==========
+  const handleWheel=useCallback(e=>{
+    if(showEPG||showFull)return;
+    if(wRef.current)return;
+    wRef.current=setTimeout(()=>{wRef.current=null},400);
+    swDir(e.deltaY>0?1:-1);
+  },[swDir,showEPG,showFull]);
 
-  // Keyboard
-  useEffect(()=>{const h=e=>{if(e.key==="ArrowUp")swDir(-1);else if(e.key==="ArrowDown")swDir(1);else if(e.key==="Escape"){setEPG(false);setFull(false);setSP(null)}else if(e.key==="g"||e.key==="G"){if(showFull){setFull(false);setEPG(true)}else if(showEPG)setEPG(false);else setEPG(true)}rHide()};window.addEventListener("keydown",h);return()=>window.removeEventListener("keydown",h)},[swDir,rHide,showEPG,showFull]);
-
-  // Mouse wheel
-  const handleWheel=useCallback(e=>{if(showEPG||showFull)return;if(wRef.current)return;wRef.current=setTimeout(()=>{wRef.current=null},400);swDir(e.deltaY>0?1:-1)},[swDir,showEPG,showFull]);
-  
-  const handleClick = useCallback(() => {
-    const now = Date.now();
-    // Double click = fullscreen
-    if (now - lastClickTimeRef.current < 300) {
-      if (!document.fullscreenElement) cRef.current?.requestFullscreen?.();
+  // ========== CLICK HANDLER (on the video overlay only) ==========
+  const handleVideoClick=useCallback(()=>{
+    const now=Date.now();
+    if(now-lastClickTimeRef.current<300){
+      if(!document.fullscreenElement)cRef.current?.requestFullscreen?.();
       else document.exitFullscreen?.();
     }
-    lastClickTimeRef.current = now;
-    
-    // Any click unmutes or closes EPG
-    if (showEPG) { setEPG(false); return; }
-    if (muted) handleUnmute();
-    else rHide();
-  }, [showEPG, muted, handleUnmute, rHide]);
+    lastClickTimeRef.current=now;
+    if(muted)handleUnmute();
+    showOSDNow();
+  },[muted,handleUnmute,showOSDNow]);
 
   // ========== LOADING ==========
-  if (loading) return <div style={{width:"100%",height:"100vh",background:"#000",display:"flex",alignItems:"center",justifyContent:"center",color:"#888",fontFamily:"system-ui",fontSize:16}}>
+  if(loading) return <div style={{width:"100%",height:"100vh",background:"#000",display:"flex",alignItems:"center",justifyContent:"center",color:"#888",fontFamily:"system-ui",fontSize:16}}>
     <div style={{textAlign:"center"}}><div style={{fontSize:48,marginBottom:16}}>📺</div>Carregando TVWEB...</div>
   </div>;
-
-  if (!ch) return null;
+  if(!ch) return null;
 
   // ========== RENDER ==========
-  return <div ref={cRef} onWheel={handleWheel} onMouseMove={rHide}
+  return <div ref={cRef} onWheel={handleWheel} onMouseMove={showOSDNow}
     style={{width:"100%",height:"100vh",background:"#000",position:"relative",fontFamily:"'Segoe UI','Roboto',-apple-system,sans-serif",overflow:"hidden",cursor:"default",userSelect:"none"}}>
 
-    {/* TV SCREEN */}
-    <div onClick={handleClick} style={{position:"absolute",inset:0,background:"#000",transition:"opacity 0.5s",opacity:fade?0:1}}>
-      {/* YouTube Player */}
+    {/* ===== YOUTUBE PLAYER (completely isolated) ===== */}
+    <div style={{position:"absolute",inset:0,zIndex:1,opacity:fade?0:1,transition:"opacity 0.5s"}}>
       {ytSrc && !cp?.isPlaceholder ? (
-        <div style={{position:"absolute",inset:0}}>
-          <iframe
-            key={ytKeyRef.current}
-            src={ytSrc}
-            allow="autoplay; encrypted-media"
-            allowFullScreen={false}
-            style={{width:"100%",height:"100%",border:"none",pointerEvents:"none"}}
-            title={cp?.nome || "TVWEB"}
-          />
-          {/* Transparent overlay to block interaction (no pause/seek) */}
-          <div style={{position:"absolute",inset:0,zIndex:2}} />
-          {/* Unmute button */}
-          {muted && (
-            <button onClick={handleUnmute} style={{
-              position:"absolute",bottom:showInfo?200:30,left:"50%",transform:"translateX(-50%)",zIndex:5,
-              background:"rgba(0,0,0,0.8)",border:"1px solid rgba(255,255,255,0.2)",
-              color:"#fff",padding:"10px 24px",borderRadius:24,cursor:"pointer",
-              fontSize:13,fontWeight:600,display:"flex",alignItems:"center",gap:8,
-              animation:"pulseFull 2s ease infinite",
-            }}>🔇 Clique para ativar o som</button>
-          )}
-        </div>
+        <iframe
+          key={ytKeyRef.current}
+          src={ytSrc}
+          allow="autoplay; encrypted-media"
+          allowFullScreen={false}
+          style={{width:"100%",height:"100%",border:"none",pointerEvents:"none"}}
+          title={cp?.nome||"TVWEB"}
+        />
       ) : (
-        /* Fallback - "Voltamos já" or no channel */
-        <div style={{position:"absolute",inset:0,background:`radial-gradient(ellipse at center,${ch.cor||"#1a73e8"}15,#0a0c12 70%)`,display:"flex",alignItems:"center",justifyContent:"center"}}>
-          {cp?.isPlaceholder ? (
-            // "Voltamos já" slide
+        <div style={{width:"100%",height:"100%",background:`radial-gradient(ellipse at center,${ch.cor||"#1a73e8"}15,#0a0c12 70%)`,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          {cp?.isPlaceholder?(
             <div style={{textAlign:"center",maxWidth:600}}>
               <div style={{fontSize:140,marginBottom:30,opacity:0.8}}>📺</div>
               <div style={{fontSize:48,fontWeight:700,color:"#fff",marginBottom:16}}>Voltamos já!</div>
-              <div style={{fontSize:18,color:"#999",marginBottom:30}}>Programação em breve</div>
-              <div style={{display:"flex",gap:12,justifyContent:"center",fontSize:12,color:"#666"}}>
-                <span>⏱ {cp?.duracao ? fD(cp.duracao) : "em breve"}</span>
-              </div>
+              <div style={{fontSize:18,color:"#999"}}>Programação em breve</div>
             </div>
-          ) : (
-            // Channel logo fallback
-            <div style={{textAlign:"center",opacity:0.15}}><div style={{fontSize:100}}><ChLogo ch={ch} size={100}/></div><div style={{fontSize:24,color:"#fff",marginTop:8,fontWeight:700}}>{ch.nome}</div></div>
+          ):(
+            <div style={{textAlign:"center",opacity:0.15}}><ChLogo ch={ch} size={100}/><div style={{fontSize:24,color:"#fff",marginTop:8,fontWeight:700}}>{ch.nome}</div></div>
           )}
         </div>
       )}
-      {/* Watermark */}
-      <div style={{position:"absolute",top:16,right:20,fontSize:14,fontWeight:700,color:"rgba(255,255,255,0.15)",letterSpacing:2,zIndex:3,textShadow:"0 1px 3px rgba(0,0,0,0.8)"}}>TVWEB</div>
-      {/* Channel indicator - LARGER on channel change */}
-      {showInfo && <div style={{position:"absolute",top:20,left:20,background:"rgba(0,0,0,0.7)",padding:"8px 16px",borderRadius:6,border:"1px solid rgba(255,255,255,0.1)",display:"flex",alignItems:"center",gap:12,zIndex:3,animation:"slideDown 0.4s ease"}}><span style={{fontSize:32,fontWeight:700,color:"#fff"}}>{ch.numero}</span><div><div style={{fontSize:16,fontWeight:700,color:ch.cor}}>{ch.nome}</div><div style={{fontSize:12,color:"#aaa",marginTop:2}}>Canal {ch.numero}</div></div></div>}
     </div>
 
-    {showInfo && <FsBtn cRef={cRef}/>}
-    {showInfo&&!showEPG&&!showFull && <div style={{position:"absolute",left:20,top:"50%",transform:"translateY(-50%)",zIndex:15,display:"flex",flexDirection:"column",alignItems:"center",gap:4,opacity:0.5}}><span style={{fontSize:16,color:"#888"}}>▲</span><span style={{writingMode:"vertical-lr",letterSpacing:2,fontSize:9,color:"#888"}}>SCROLL</span><span style={{fontSize:16,color:"#888"}}>▼</span></div>}
-    {showInfo&&!showEPG&&!showFull && <InfoBar channel={ch} program={cp} nextProgram={np} onOpenEPG={()=>setEPG(true)} onOpenFull={()=>setFull(true)}/>}
+    {/* ===== CLICK BARRIER (completely above iframe, below menus) ===== */}
+    <div onClick={handleVideoClick} style={{position:"absolute",inset:0,zIndex:2}} />
 
-    <div style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",zIndex:15,display:"flex",flexDirection:"column",gap:4,opacity:showInfo&&!showEPG&&!showFull?0.7:0,transition:"opacity 0.3s"}}>
-      {CHANNELS.map(c => <div key={c.id} onClick={()=>swCh(c.id)} style={{width:36,height:36,borderRadius:4,background:c.id===curCh?"rgba(26,115,232,0.3)":"rgba(0,0,0,0.4)",border:c.id===curCh?"1px solid #1a73e8":"1px solid rgba(255,255,255,0.1)",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",overflow:"hidden"}}><ChLogo ch={c} size={c.logoType==="custom"?36:20}/></div>)}
+    {/* ===== WATERMARK ===== */}
+    <div style={{position:"absolute",top:16,right:20,fontSize:14,fontWeight:700,color:"rgba(255,255,255,0.12)",letterSpacing:2,zIndex:3,pointerEvents:"none"}}>TVWEB</div>
+
+    {/* ===== UNMUTE BUTTON ===== */}
+    {muted&&<button onClick={e=>{e.stopPropagation();handleUnmute()}} style={{
+      position:"absolute",bottom:"50%",left:"50%",transform:"translate(-50%,50%)",zIndex:15,
+      background:"rgba(0,0,0,0.85)",border:"1px solid rgba(255,255,255,0.2)",
+      color:"#fff",padding:"14px 32px",borderRadius:30,cursor:"pointer",
+      fontSize:16,fontWeight:700,display:"flex",alignItems:"center",gap:10,
+      animation:"pulseFull 2s ease infinite",
+    }}>🔇 Clique para ativar o som</button>}
+
+    {/* ===== OSD HEADER (TV-style, 20s) ===== */}
+    <OSDHeader channel={ch} program={cp} visible={showOSD&&!showEPG&&!showFull}/>
+
+    {/* ===== OSD FOOTER (TV-style, 20s) ===== */}
+    <OSDFooter program={cp} nextProgram={np} visible={showOSD&&!showEPG&&!showFull}
+      onOpenEPG={()=>setEPG(true)} onOpenFull={()=>setFull(true)}/>
+
+    {/* ===== CHANNEL SIDEBAR ===== */}
+    <div style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",zIndex:15,display:"flex",flexDirection:"column",gap:4,opacity:showOSD&&!showEPG&&!showFull?0.7:0,transition:"opacity 0.3s",pointerEvents:showOSD&&!showEPG&&!showFull?"auto":"none"}}>
+      {CHANNELS.map(c=><div key={c.id} onClick={e=>{e.stopPropagation();swCh(c.id)}} style={{width:40,height:40,borderRadius:4,background:c.id===curCh?"rgba(26,115,232,0.3)":"rgba(0,0,0,0.5)",border:c.id===curCh?"1px solid #1a73e8":"1px solid rgba(255,255,255,0.1)",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",overflow:"hidden"}}><ChLogo ch={c} size={c.logoType==="custom"?40:22}/></div>)}
     </div>
 
-    {/* Dark blur on top of screen - hides YouTube info */}
-    {showBlur && <div style={{position:"absolute",top:0,left:0,right:0,height:200,background:"linear-gradient(180deg, rgba(0,0,0,0.9) 0%, transparent 100%)",zIndex:6,transition:"opacity 0.5s",opacity:showBlur?1:0,pointerEvents:"none"}}/>}
-
-    {/* Dark blur behind EPG */}
-    {showBlur && showEPG && <div style={{position:"absolute",bottom:0,left:0,right:0,height:400,background:"rgba(0,0,0,0.7)",zIndex:19,transition:"opacity 0.5s",pointerEvents:"none"}}/>}
-
-    {showEPG && <EPGCompact channels={CHANNELS} allPrograms={allPrograms} currentChannelId={curCh} onSelectChannel={swCh} onSelectProgram={setSP} onOpenFull={()=>{setEPG(false);setFull(true)}} onClose={()=>setEPG(false)}/>}
-    {showFull && <FullDay channels={CHANNELS} allPrograms={allPrograms} currentChannelId={curCh} onClose={()=>setFull(false)} onProgramClick={setSP}/>}
-    {selProg && <ProgModal program={selProg} channel={CHANNELS.find(c=>buildSchedule(allPrograms,c.id).some(p=>p.id===selProg.id))||ch} onClose={()=>setSP(null)} onWatch={(chId)=>{swCh(chId);setEPG(false);setFull(false)}}/>}
+    {/* ===== EPG / FULL / MODAL (above everything) ===== */}
+    {showEPG&&<EPGCompact channels={CHANNELS} allPrograms={allPrograms} currentChannelId={curCh} onSelectChannel={id=>{swCh(id);setEPG(false)}} onSelectProgram={setSP} onOpenFull={()=>{setEPG(false);setFull(true)}} onClose={()=>setEPG(false)}/>}
+    {showFull&&<FullDay channels={CHANNELS} allPrograms={allPrograms} currentChannelId={curCh} onClose={()=>setFull(false)} onProgramClick={setSP}/>}
+    {selProg&&<ProgModal program={selProg} channel={CHANNELS.find(c=>buildSchedule(allPrograms,c.id).some(p=>p.id===selProg.id))||ch} onClose={()=>setSP(null)} onWatch={(chId)=>{swCh(chId);setEPG(false);setFull(false)}}/>}
 
     <style>{`
       @keyframes slideUp{from{transform:translateY(100%);opacity:0}to{transform:translateY(0);opacity:1}}
       @keyframes slideDown{from{transform:translateY(-20px);opacity:0}to{transform:translateY(0);opacity:1}}
-      @keyframes pulseFull{0%,100%{opacity:.6;transform:translateX(-50%) scale(1)}50%{opacity:1;transform:translateX(-50%) scale(1.05)}}
+      @keyframes pulseFull{0%,100%{opacity:.6;transform:translate(-50%,50%) scale(1)}50%{opacity:1;transform:translate(-50%,50%) scale(1.05)}}
       ::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:rgba(255,255,255,.02)}::-webkit-scrollbar-thumb{background:rgba(255,255,255,.1);border-radius:3px}
       *{box-sizing:border-box;margin:0;padding:0}
     `}</style>
