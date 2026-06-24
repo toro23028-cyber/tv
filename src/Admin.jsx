@@ -73,7 +73,7 @@ function ImgUploader({currentImage,imageType,onImageChange,label,shape="square"}
 // ============================================
 // TIMELINE WITH DRAG
 // ============================================
-function TimelineView({programs,channels,selectedChannel,onEdit,onDelete,onReorder,onClone}){
+function TimelineView({programs,channels,selectedChannel,onEdit,onDelete,onReorder,onToggleSelect,selectedProgs}){
   const filtered=programs.filter(p=>p.canalId===selectedChannel).sort((a,b)=>Number(a.horarioInicio)-Number(b.horarioInicio));
   const [dragIdx,setDragIdx]=useState(null);
   const [overIdx,setOverIdx]=useState(null);
@@ -136,7 +136,7 @@ function TimelineView({programs,channels,selectedChannel,onEdit,onDelete,onReord
           <div style={{fontSize:11,color:"#888"}}>{secTo(Number(prog.duracao)).h>0?`${secTo(Number(prog.duracao)).h}h`:""}{ secTo(Number(prog.duracao)).m>0?`${secTo(Number(prog.duracao)).m}min`:""}</div>
         </div>
         <button onClick={()=>onEdit(prog)} style={{background:"rgba(26,115,232,0.15)",border:"1px solid rgba(26,115,232,0.3)",color:"#4fc3f7",padding:"6px 12px",borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:600}}>✏️</button>
-        <button onClick={()=>onClone(prog)} style={{background:"rgba(76,175,80,0.1)",border:"1px solid rgba(76,175,80,0.3)",color:"#4caf50",padding:"6px 12px",borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:600}}>📋</button>
+        <input type="checkbox" checked={selectedProgs.has(prog.id)} onChange={()=>onToggleSelect(prog.id)} style={{width:18,height:18,cursor:"pointer",accentColor:"#4caf50"}}/>
         <button onClick={()=>onDelete(prog.id)} style={{background:"rgba(244,67,54,0.1)",border:"1px solid rgba(244,67,54,0.3)",color:"#f44336",padding:"6px 12px",borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:600}}>🗑️</button>
       </div>;
     })}
@@ -431,8 +431,9 @@ export default function AdminPanel(){
   const [showModal,setSM]=useState(false);
   const [editProg,setEP]=useState(null);
   const [showCloneModal,setShowCloneModal]=useState(false);
-  const [clonedProgram,setClonedProgram]=useState(null);
-  const [cloneData,setCloneData]=useState({channel:null,date:null,time:""});
+  const [cloneMenuProgs,setCloneMenuProgs]=useState([]);
+  const [selectedProgs,setSelectedProgs]=useState(new Set());
+  const [cloneData,setCloneData]=useState({channel:selCh,date:null,time:""});
   const [showDup,setSD]=useState(false);
   const [toast,setToast]=useState("");
 
@@ -579,22 +580,85 @@ export default function AdminPanel(){
     }
   };
 
-  // Task 5: Clone program function
-  const handleCloneProgram=async(sourceProgram)=>{
-    if(!cloneData.channel||!cloneData.date||!cloneData.time)return;
+  // Task 5: Clone program - QUICK clone (auto after last program on current channel)
+  const handleQuickClone=async()=>{
+    if(cloneMenuProgs.length===0)return;
     try {
-      const newProg={...sourceProgram,canalId:cloneData.channel,data:cloneData.date,horarioInicio:Number(cloneData.time)};
-      const endTime=Number(cloneData.time)+Number(sourceProgram.duracao);
-      newProg.horarioFim=endTime;
-      delete newProg.id;
-      await addDoc(collection(db,"programs"),newProg);
-      setShowCloneModal(false);
-      setCloneData({channel:null,date:null,time:""});
-      notify("✅ Programa clonado com sucesso!");
+      const today=getToday();
+      const channelProgsToday=programs.filter(p=>p.canalId===selCh&&p.data===today).sort((a,b)=>Number(b.horarioFim)-Number(a.horarioFim));
+      let startTime=channelProgsToday.length>0?Number(channelProgsToday[0].horarioFim):0;
+      
+      for(const sourceProgram of cloneMenuProgs){
+        const endTime=startTime+Number(sourceProgram.duracao);
+        const newProg={
+          nome:sourceProgram.nome,
+          canalId:selCh,
+          data:today,
+          horarioInicio:startTime,
+          horarioFim:endTime,
+          duracao:sourceProgram.duracao,
+          youtubeId:sourceProgram.youtubeId,
+          videos:sourceProgram.videos,
+          sinopse:sourceProgram.sinopse,
+          classificacao:sourceProgram.classificacao,
+          tags:sourceProgram.tags||[],
+          thumbnailType:sourceProgram.thumbnailType,
+          thumbnailUrl:sourceProgram.thumbnailUrl
+        };
+        await addDoc(collection(db,"programs"),newProg);
+        startTime=endTime;
+      }
+      setCloneMenuProgs([]);
+      setSelectedProgs(new Set());
+      notify(`✅ ${cloneMenuProgs.length} programa(s) clonado(s)!`);
     } catch(err) {
       console.error("Erro ao clonar programa:",err);
       notify("❌ Erro ao clonar programa");
     }
+  };
+
+  // Task 5: Clone program - ADVANCED clone (to another channel/date)
+  const handleAdvancedClone=async()=>{
+    if(!cloneData.channel||cloneMenuProgs.length===0)return;
+    try {
+      let startTime=Number(cloneData.time)||0;
+      
+      for(const sourceProgram of cloneMenuProgs){
+        const endTime=startTime+Number(sourceProgram.duracao);
+        const newProg={
+          nome:sourceProgram.nome,
+          canalId:cloneData.channel,
+          data:cloneData.date||getToday(),
+          horarioInicio:startTime,
+          horarioFim:endTime,
+          duracao:sourceProgram.duracao,
+          youtubeId:sourceProgram.youtubeId,
+          videos:sourceProgram.videos,
+          sinopse:sourceProgram.sinopse,
+          classificacao:sourceProgram.classificacao,
+          tags:sourceProgram.tags||[],
+          thumbnailType:sourceProgram.thumbnailType,
+          thumbnailUrl:sourceProgram.thumbnailUrl
+        };
+        await addDoc(collection(db,"programs"),newProg);
+        startTime=endTime;
+      }
+      setShowCloneModal(false);
+      setCloneMenuProgs([]);
+      setSelectedProgs(new Set());
+      setCloneData({channel:selCh,date:null,time:""});
+      notify(`✅ ${cloneMenuProgs.length} programa(s) clonado(s)!`);
+    } catch(err) {
+      console.error("Erro ao clonar programa:",err);
+      notify("❌ Erro ao clonar programa");
+    }
+  };
+
+  const toggleProgSelect=(progId)=>{
+    const newSel=new Set(selectedProgs);
+    if(newSel.has(progId))newSel.delete(progId);
+    else newSel.add(progId);
+    setSelectedProgs(newSel);
   };
 
   // Task 4: Improved date filter - show only last hour + now + next programs
@@ -661,7 +725,9 @@ export default function AdminPanel(){
         <div style={{marginBottom:8,fontSize:11,color:"#555",display:"flex",alignItems:"center",gap:6}}>⠿ Arraste para reordenar programas</div>
 
         <TimelineView programs={dayProgs} channels={channels} selectedChannel={selCh}
-          onEdit={p=>{setEP(p);setSM(true)}} onDelete={handleDel} onReorder={handleReorder} onClone={p=>{setClonedProgram(p);setShowCloneModal(true)}}/>
+          onEdit={p=>{setEP(p);setSM(true)}} onDelete={handleDel} onReorder={handleReorder} onToggleSelect={toggleProgSelect} selectedProgs={selectedProgs}/>
+
+        {selectedProgs.size>0&&<button onClick={()=>{const selected=dayProgs.filter(p=>selectedProgs.has(p.id));setCloneMenuProgs(selected)}} style={{marginTop:12,width:"100%",padding:12,borderRadius:8,cursor:"pointer",background:"linear-gradient(135deg,#4caf50,#81c784)",border:"none",color:"#fff",fontSize:14,fontWeight:700}}>📋 Clonar {selectedProgs.size} selecionado{selectedProgs.size>1?"s":""}</button>}
 
         <button onClick={()=>{setEP(null);setSM(true)}} style={{marginTop:16,width:"100%",padding:14,borderRadius:8,cursor:"pointer",background:"linear-gradient(135deg,#1a73e8,#4fc3f7)",border:"none",color:"#fff",fontSize:14,fontWeight:700}}>+ Adicionar Programa</button>
       </>}
@@ -674,38 +740,51 @@ export default function AdminPanel(){
 
     {showModal&&<ProgramModal mode={editProg?"edit":"add"} program={editProg} channels={channels} selectedChannel={selCh} selectedDate={selDate} existingPrograms={programs} onSave={handleSave} onClose={()=>{setSM(false);setEP(null)}}/>}
 
-    {showCloneModal&&clonedProgram&&<div onClick={()=>setShowCloneModal(false)} style={{position:"fixed",inset:0,zIndex:100,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+    {/* Clone menu - appears near clone button */}
+    {cloneMenuProgs.length>0&&<div onClick={()=>setCloneMenuProgs([])} style={{position:"fixed",inset:0,zIndex:100}}>
+      <div style={{position:"fixed",bottom:200,right:40,background:"#1a1c24",border:"1px solid rgba(255,255,255,0.2)",borderRadius:8,boxShadow:"0 4px 16px rgba(0,0,0,0.6)",zIndex:101,minWidth:200}} onClick={e=>e.stopPropagation()}>
+        <div style={{padding:"8px 0"}}>
+          <button onClick={()=>{handleQuickClone(cloneMenuProg);setCloneMenuProgs([])}} style={{width:"100%",padding:"12px 16px",textAlign:"left",background:"transparent",border:"none",color:"#4caf50",cursor:"pointer",fontSize:13,fontWeight:600,borderBottom:"0.5px solid rgba(255,255,255,0.1)",transition:"background 0.2s"}} onMouseEnter={e=>e.target.style.background="rgba(76,175,80,0.1)"} onMouseLeave={e=>e.target.style.background="transparent"}>
+            ✓ Clonar aqui
+          </button>
+          <button onClick={()=>{setCloneData({...cloneData,channel:selCh});setShowCloneModal(true);setCloneMenuProgs([])}} style={{width:"100%",padding:"12px 16px",textAlign:"left",background:"transparent",border:"none",color:"#4fc3f7",cursor:"pointer",fontSize:13,fontWeight:600,transition:"background 0.2s"}} onMouseEnter={e=>e.target.style.background="rgba(79,195,247,0.1)"} onMouseLeave={e=>e.target.style.background="transparent"}>
+            → Clonar em outro...
+          </button>
+        </div>
+      </div>
+    </div>}
+
+    {/* Clone in another channel/date modal */}
+    {showCloneModal&&cloneMenuProgs.length>0&&<div onClick={()=>setShowCloneModal(false)} style={{position:"fixed",inset:0,zIndex:100,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
       <div onClick={e=>e.stopPropagation()} style={{background:"#1a1c24",borderRadius:8,maxWidth:500,width:"100%",border:"1px solid rgba(255,255,255,0.1)",padding:24}}>
-        <div style={{fontSize:18,fontWeight:700,color:"#fff",marginBottom:16}}>📋 Clonar Programa</div>
-        <div style={{fontSize:14,color:"#ccc",marginBottom:20}}>{clonedProgram.nome}</div>
+        <div style={{fontSize:18,fontWeight:700,color:"#fff",marginBottom:4}}>📋 Clonar em outro...</div>
+        <div style={{fontSize:13,color:"#888",marginBottom:20}}>{cloneMenuProgs.length} programa(s) selecionado(s)</div>
         
         {/* Canal selector */}
         <div style={{marginBottom:16}}>
-          <label style={{fontSize:12,color:"#888",fontWeight:600,marginBottom:6,display:"block"}}>Canal de Destino</label>
-          <select value={cloneData.channel||""} onChange={e=>setCloneData({...cloneData,channel:e.target.value})} style={{width:"100%",padding:"8px 12px",borderRadius:4,background:"#14161e",border:"1px solid rgba(255,255,255,0.1)",color:"#fff",fontSize:13,cursor:"pointer"}}>
-            <option value="">Selecione um canal</option>
+          <label style={{fontSize:12,color:"#888",fontWeight:600,marginBottom:6,display:"block"}}>Canal</label>
+          <select value={cloneData.channel||selCh} onChange={e=>setCloneData({...cloneData,channel:e.target.value})} style={{width:"100%",padding:"8px 12px",borderRadius:4,background:"#14161e",border:"1px solid rgba(255,255,255,0.1)",color:"#fff",fontSize:13,cursor:"pointer"}}>
             {channels.filter(c=>!c.isInfo).map(c=><option key={c.id} value={c.id}>{c.nome} ({c.numero})</option>)}
           </select>
         </div>
 
         {/* Data selector */}
         <div style={{marginBottom:16}}>
-          <label style={{fontSize:12,color:"#888",fontWeight:600,marginBottom:6,display:"block"}}>Data de Destino</label>
+          <label style={{fontSize:12,color:"#888",fontWeight:600,marginBottom:6,display:"block"}}>Data</label>
           <select value={cloneData.date||""} onChange={e=>setCloneData({...cloneData,date:e.target.value})} style={{width:"100%",padding:"8px 12px",borderRadius:4,background:"#14161e",border:"1px solid rgba(255,255,255,0.1)",color:"#fff",fontSize:13,cursor:"pointer"}}>
-            <option value="">Selecione uma data</option>
+            <option value="">Auto (após último programa)</option>
             {dates.map(d=><option key={d} value={d}>{getDayLabel(d)}</option>)}
           </select>
         </div>
 
-        {/* Hora selector */}
-        <div style={{marginBottom:16}}>
-          <label style={{fontSize:12,color:"#888",fontWeight:600,marginBottom:6,display:"block"}}>Hora de Início (segundos do dia)</label>
-          <input type="number" value={cloneData.time} onChange={e=>setCloneData({...cloneData,time:e.target.value})} min="0" max="86399" style={{width:"100%",padding:"8px 12px",borderRadius:4,background:"#14161e",border:"1px solid rgba(255,255,255,0.1)",color:"#fff",fontSize:13}} placeholder="ex: 28800 (8h)"/>
-          <div style={{fontSize:11,color:"#666",marginTop:4}}>Dica: 3600 = 1h, 86400 = 24h</div>
-        </div>
+        {/* Hora - opcional, se não escolher data fica auto */}
+        {cloneData.date&&<div style={{marginBottom:16}}>
+          <label style={{fontSize:12,color:"#888",fontWeight:600,marginBottom:6,display:"block"}}>Hora (opcional)</label>
+          <input type="number" value={cloneData.time} onChange={e=>setCloneData({...cloneData,time:e.target.value})} min="0" max="86399" style={{width:"100%",padding:"8px 12px",borderRadius:4,background:"#14161e",border:"1px solid rgba(255,255,255,0.1)",color:"#fff",fontSize:13}} placeholder="deixe em branco para auto"/>
+        </div>}
 
         <div style={{display:"flex",gap:10}}>
-          <button onClick={()=>handleCloneProgram(clonedProgram)} style={{flex:1,padding:12,background:"linear-gradient(135deg,#4caf50,#81c784)",border:"none",borderRadius:6,color:"#fff",cursor:"pointer",fontSize:13,fontWeight:700}}>✓ Clonar</button>
+          <button onClick={()=>handleAdvancedClone(cloneMenuProg)} style={{flex:1,padding:12,background:"linear-gradient(135deg,#4caf50,#81c784)",border:"none",borderRadius:6,color:"#fff",cursor:"pointer",fontSize:13,fontWeight:700}}>✓ Clonar</button>
           <button onClick={()=>setShowCloneModal(false)} style={{flex:1,padding:12,background:"rgba(255,255,255,0.1)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:6,color:"#ccc",cursor:"pointer",fontSize:13,fontWeight:600}}>Cancelar</button>
         </div>
       </div>
