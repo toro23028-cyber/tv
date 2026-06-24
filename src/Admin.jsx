@@ -1,32 +1,14 @@
-import { useState, useEffect, useCallback, useRef } from "react";
-import {
-  db
-} from "./firebase";
+import { useState, useEffect } from "react";
+import { db } from "./firebase";
 
 import {
   collection,
   addDoc,
   setDoc,
   doc,
-  getDocs,
-  deleteDoc
+  deleteDoc,
+  onSnapshot
 } from "firebase/firestore";
-
-/* =========================
-   CONSTANTES (mantidas)
-========================= */
-
-const DURATION_PRESETS = [
-  { label:"15min", value:900 },{ label:"30min", value:1800 },{ label:"40min", value:2400 },
-  { label:"45min", value:2700 },{ label:"1h", value:3600 },{ label:"1h30", value:5400 },
-  { label:"2h", value:7200 },{ label:"Custom", value:0 },
-];
-
-const CLASSIF_OPTIONS = ["L","10","12","14","16","18"];
-
-const CC = {
-  L:"#0f0","10":"#00bfff","12":"#ff0","14":"#f80","16":"#f00","18":"#111"
-};
 
 /* =========================
    HELPERS
@@ -34,15 +16,7 @@ const CC = {
 
 function fmtSec(s){
   const h=Math.floor(s/3600),m=Math.floor((s%3600)/60);
-  return`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`
-}
-
-function secTo(s){
-  return{h:Math.floor(s/3600),m:Math.floor((s%3600)/60)}
-}
-
-function parseDur(h,m){
-  return(parseInt(h)||0)*3600+(parseInt(m)||0)*60
+  return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`;
 }
 
 function genDates(n){
@@ -51,9 +25,9 @@ function genDates(n){
   for(let i=0;i<n;i++){
     const d=new Date(now);
     d.setDate(now.getDate()+i);
-    ds.push(d.toISOString().split("T")[0])
+    ds.push(d.toISOString().split("T")[0]);
   }
-  return ds
+  return ds;
 }
 
 /* =========================
@@ -62,35 +36,32 @@ function genDates(n){
 
 export default function AdminPanel(){
 
-  const dates=genDates(30);
+  const dates = genDates(30);
 
-  const [tab,setTab]=useState("schedule");
   const [selDate,setSelDate]=useState(dates[0]);
   const [selCh,setSelCh]=useState(1);
 
   const [programs,setProgs]=useState([]);
-  const [channels,setCh]=useState([
-    {id:1,numero:1,nome:"Canal 1",cor:"#2196F3"},
-    {id:2,numero:2,nome:"Canal 2",cor:"#E91E63"}
-  ]);
-
   const [showModal,setSM]=useState(false);
   const [editProg,setEP]=useState(null);
 
   const notify = (m) => alert(m);
 
   /* =========================
-     🔥 LOAD FIRESTORE
+     🔥 REALTIME LOAD FIRESTORE
   ========================= */
 
   useEffect(() => {
-    async function load() {
-      const snap = await getDocs(collection(db, "programs"));
-      const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      setProgs(data);
-    }
+    const unsub = onSnapshot(collection(db, "programs"), (snap) => {
+      const data = snap.docs.map(d => ({
+        id: d.id,
+        ...d.data()
+      }));
 
-    load();
+      setProgs(data);
+    });
+
+    return () => unsub();
   }, []);
 
   /* =========================
@@ -99,26 +70,34 @@ export default function AdminPanel(){
 
   const handleSave = async (p) => {
 
-    if (editProg) {
-      await setDoc(doc(db, "programs", p.id), p);
+    try {
+      if (editProg) {
 
-      setProgs(programs.map(x =>
-        x.id === p.id ? p : x
-      ));
+        await setDoc(doc(db, "programs", p.id), p);
 
-    } else {
-      const ref = await addDoc(collection(db, "programs"), p);
+        setProgs(prev =>
+          prev.map(x => x.id === p.id ? p : x)
+        );
 
-      setProgs([
-        ...programs,
-        { ...p, id: ref.id }
-      ]);
+      } else {
+
+        const ref = await addDoc(collection(db, "programs"), p);
+
+        setProgs(prev => [
+          ...prev,
+          { ...p, id: ref.id }
+        ]);
+      }
+
+      notify("Salvo no Firebase");
+
+      setSM(false);
+      setEP(null);
+
+    } catch (err) {
+      console.error(err);
+      alert("Erro ao salvar");
     }
-
-    notify(editProg ? "Atualizado no Firebase" : "Salvo no Firebase");
-
-    setSM(false);
-    setEP(null);
   };
 
   /* =========================
@@ -126,9 +105,19 @@ export default function AdminPanel(){
   ========================= */
 
   const handleDel = async (id) => {
-    await deleteDoc(doc(db, "programs", id));
-    setProgs(programs.filter(p => p.id !== id));
-    notify("Removido do Firebase");
+    try {
+      await deleteDoc(doc(db, "programs", id));
+
+      setProgs(prev =>
+        prev.filter(p => p.id !== id)
+      );
+
+      notify("Removido");
+
+    } catch (err) {
+      console.error(err);
+      alert("Erro ao deletar");
+    }
   };
 
   /* =========================
@@ -140,13 +129,13 @@ export default function AdminPanel(){
   );
 
   /* =========================
-     UI SIMPLIFICADA (mantém sua base)
+     UI
   ========================= */
 
   return (
     <div style={{padding:20,fontFamily:"Arial"}}>
 
-      <h2>TV Admin (Firebase conectado)</h2>
+      <h2>TV Admin (Firebase ativo)</h2>
 
       <button onClick={()=>setSM(true)}>
         + Novo Programa
@@ -154,17 +143,34 @@ export default function AdminPanel(){
 
       <hr/>
 
-      {dayProgs.map(p=>(
-        <div key={p.id} style={{padding:10,border:"1px solid #ccc",marginBottom:8}}>
-          <b>{p.nome}</b><br/>
-          {fmtSec(p.horarioInicio)} - {fmtSec(p.horarioFim)}
+      {dayProgs.length === 0 && (
+        <p>Nenhum programa nesse dia/canal</p>
+      )}
+
+      {dayProgs.map(p => (
+        <div key={p.id} style={{
+          padding:10,
+          border:"1px solid #ccc",
+          marginBottom:8
+        }}>
+          <b>{p.nome}</b>
+
+          <div>
+            {fmtSec(p.horarioInicio)} - {fmtSec(p.horarioFim)}
+          </div>
 
           <div style={{marginTop:6}}>
-            <button onClick={()=>{setEP(p);setSM(true)}}>
+            <button onClick={()=>{
+              setEP(p);
+              setSM(true);
+            }}>
               Editar
             </button>
 
-            <button onClick={()=>handleDel(p.id)} style={{marginLeft:8}}>
+            <button
+              onClick={()=>handleDel(p.id)}
+              style={{marginLeft:8}}
+            >
               Deletar
             </button>
           </div>
@@ -175,15 +181,19 @@ export default function AdminPanel(){
         <ProgramModal
           program={editProg}
           onSave={handleSave}
-          onClose={()=>{setSM(false);setEP(null)}}
+          onClose={()=>{
+            setSM(false);
+            setEP(null);
+          }}
         />
       )}
+
     </div>
   );
 }
 
 /* =========================
-   MODAL SIMPLIFICADO
+   MODAL
 ========================= */
 
 function ProgramModal({program,onSave,onClose}){
@@ -192,12 +202,12 @@ function ProgramModal({program,onSave,onClose}){
 
   const save=()=>{
     onSave({
-      id:program?.id || `prog_${Date.now()}`,
+      id: program?.id || `prog_${Date.now()}`,
       nome,
-      data:"2026-06-24",
-      canalId:1,
-      horarioInicio:0,
-      horarioFim:3600
+      data: "2026-06-24",
+      canalId: 1,
+      horarioInicio: 0,
+      horarioFim: 3600
     });
   };
 
@@ -210,8 +220,12 @@ function ProgramModal({program,onSave,onClose}){
       alignItems:"center",
       justifyContent:"center"
     }}>
+      <div style={{
+        background:"#fff",
+        padding:20,
+        borderRadius:8
+      }}>
 
-      <div style={{background:"#fff",padding:20}}>
         <h3>Programa</h3>
 
         <input
@@ -231,7 +245,6 @@ function ProgramModal({program,onSave,onClose}){
         </button>
 
       </div>
-
     </div>
   );
 }
