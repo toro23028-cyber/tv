@@ -463,6 +463,10 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
   const [sinopse,setSinopse]=useState(program?.sinopse||"");
   const [gcMensagem,setGcMsg]=useState(program?.gcMensagem||"");
   const [gcPosicao,setGcPos]=useState(program?.gcPosicao||"ambos");
+  const [gcMinuto,setGcMinuto]=useState(program?.gcMinuto||0);
+  const [gcDuracao,setGcDurSeg]=useState(program?.gcDuracao||20);
+  const [gcFonte,setGcFonte]=useState(program?.gcFonte||"normal");
+  const [gcEstilo,setGcEstilo]=useState(program?.gcEstilo||"borda");
   const [durationPreset,setDP]=useState(0);
   const [customH,setCH]=useState(program?Math.floor(program.duracao/3600):1);
   const [customM,setCM]=useState(program?Math.floor((program.duracao%3600)/60):0);
@@ -510,7 +514,11 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
         videos: videos.filter(v => v.youtubeUrl.trim()),
         thumbnailType, thumbnailUrl,
         gcMensagem: gcMensagem.trim() || null,
-        gcPosicao: gcMensagem.trim() ? gcPosicao : null,
+        gcPosicao:  gcMensagem.trim() ? gcPosicao  : null,
+        gcMinuto:   gcMensagem.trim() && gcPosicao==="minuto" ? gcMinuto : null,
+        gcDuracao:  gcMensagem.trim() && gcPosicao==="minuto" ? gcDuracao : null,
+        gcFonte:    gcMensagem.trim() ? gcFonte : null,
+        gcEstilo:   gcMensagem.trim() ? gcEstilo : null,
       };
       if (isEdit) payload.id = program.id;
       // await garante que o Firestore confirmou antes de fechar o modal
@@ -656,14 +664,48 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
         {/* GC Mensagem */}
         <div style={{background:"rgba(255,152,0,0.06)",border:"1px solid rgba(255,152,0,0.15)",borderRadius:6,padding:"12px 14px"}}>
           <label style={{...lS,color:"#ffb74d",marginBottom:8}}>📺 MENSAGEM GC (opcional)</label>
-          <input value={gcMensagem} onChange={e=>setGcMsg(e.target.value)} placeholder='Ex: "Veja a seguir" ou "Classificação: 14 anos"'
-            style={{...iS,width:"100%",marginBottom:gcMensagem?8:0}}/>
-          {gcMensagem&&<div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-            {[["inicio","Só no início (seg 2-25)"],["final","Só no final (últimos 20s)"],["ambos","Início e final"]].map(([val,label])=>
-              <button key={val} onClick={()=>setGcPos(val)} style={{padding:"5px 11px",borderRadius:4,cursor:"pointer",fontSize:11,background:gcPosicao===val?"#ff980022":"rgba(255,255,255,0.04)",border:gcPosicao===val?"1px solid #ff9800":"1px solid rgba(255,255,255,0.08)",color:gcPosicao===val?"#ff9800":"#888",fontWeight:600}}>{label}</button>
-            )}
-          </div>}
-          {gcMensagem&&<div style={{marginTop:6,fontSize:10,color:"#888"}}>A mensagem aparecerá no canto superior esquerdo da tela nos momentos configurados.</div>}
+          <input value={gcMensagem} onChange={e=>setGcMsg(e.target.value)} placeholder='Ex: "Veja a seguir" ou "Não recomendado para < 14 anos"'
+            style={{...iS,width:"100%",marginBottom:8}}/>
+          {gcMensagem&&<>
+            {/* Posição */}
+            <div style={{marginBottom:8}}>
+              <div style={{fontSize:10,color:"#aaa",fontWeight:600,marginBottom:4,letterSpacing:0.5}}>QUANDO EXIBIR</div>
+              <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                {[["inicio","Início (seg 2-25)"],["final","Final (últ. 20s)"],["ambos","Início e final"],["minuto","Minuto específico"]].map(([val,label])=>
+                  <button key={val} onClick={()=>setGcPos(val)} style={{padding:"5px 10px",borderRadius:4,cursor:"pointer",fontSize:11,background:gcPosicao===val?"#ff980022":"rgba(255,255,255,0.04)",border:gcPosicao===val?"1px solid #ff9800":"1px solid rgba(255,255,255,0.08)",color:gcPosicao===val?"#ff9800":"#888",fontWeight:600}}>{label}</button>
+                )}
+              </div>
+              {gcPosicao==="minuto"&&<div style={{display:"flex",gap:8,alignItems:"center",marginTop:8}}>
+                <span style={{fontSize:11,color:"#888"}}>Exibir no minuto</span>
+                <input type="number" min="0" max="999" value={gcMinuto||0} onChange={e=>setGcMinuto(parseInt(e.target.value)||0)}
+                  style={{...iS,width:60,textAlign:"center"}}/>
+                <span style={{fontSize:11,color:"#888"}}>por</span>
+                <input type="number" min="5" max="120" value={gcDuracao||20} onChange={e=>setGcDurSeg(parseInt(e.target.value)||20)}
+                  style={{...iS,width:60,textAlign:"center"}}/>
+                <span style={{fontSize:11,color:"#888"}}>segundos</span>
+              </div>}
+            </div>
+            {/* Fonte */}
+            <div style={{marginBottom:8}}>
+              <div style={{fontSize:10,color:"#aaa",fontWeight:600,marginBottom:4,letterSpacing:0.5}}>TAMANHO DA FONTE</div>
+              <div style={{display:"flex",gap:5}}>
+                {[["pequena","Pequena"],["normal","Normal"],["grande","Grande"],["destaque","Destaque"]].map(([val,label])=>
+                  <button key={val} onClick={()=>setGcFonte(val)} style={{padding:"4px 10px",borderRadius:4,cursor:"pointer",fontSize:11,background:gcFonte===val?"rgba(255,152,0,0.2)":"rgba(255,255,255,0.04)",border:gcFonte===val?"1px solid #ff9800":"1px solid rgba(255,255,255,0.08)",color:gcFonte===val?"#ff9800":"#888",fontWeight:gcFonte===val?700:400}}>{label}</button>
+                )}
+              </div>
+            </div>
+            {/* Estilo */}
+            <div style={{marginBottom:8}}>
+              <div style={{fontSize:10,color:"#aaa",fontWeight:600,marginBottom:4,letterSpacing:0.5}}>ESTILO</div>
+              <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                {[["escuro","Fundo escuro"],["canal","Cor do canal"],["borda","Borda colorida"],["simples","Só texto"]].map(([val,label])=>
+                  <button key={val} onClick={()=>setGcEstilo(val)} style={{padding:"4px 10px",borderRadius:4,cursor:"pointer",fontSize:11,background:gcEstilo===val?"rgba(255,152,0,0.2)":"rgba(255,255,255,0.04)",border:gcEstilo===val?"1px solid #ff9800":"1px solid rgba(255,255,255,0.08)",color:gcEstilo===val?"#ff9800":"#888"}}>{label}</button>
+                )}
+              </div>
+            </div>
+            {/* Preview do GC */}
+            <GCPreview mensagem={gcMensagem} fonte={gcFonte} estilo={gcEstilo} cor={channels.find(c=>c.id===canalId)?.cor||"#1a73e8"}/>
+          </>}
         </div>
 
         {/* Preview */}
@@ -756,6 +798,14 @@ function ChannelEditor({channels,onAdd,onDelete}){
           </div>
           {tipo==="musica"&&<div style={{marginTop:6,fontSize:10,color:"#9c27b0",padding:"4px 8px",background:"rgba(156,39,176,0.08)",borderRadius:4,border:"1px solid rgba(156,39,176,0.2)"}}>🎵 GC "Você está ouvindo" será exibido automaticamente neste canal</div>}
         </div>
+        {/* GCs do canal por horário */}
+        {editing&&channels.find(c=>c.id===editing)&&(
+          <ChannelGCEditor
+            channel={{...channels.find(c=>c.id===editing),cor,tipo,gcFaixas:channels.find(c=>c.id===editing)?.gcFaixas||[]}}
+            channels={channels}
+            onSave={()=>{}}
+          />
+        )}
         <div style={{padding:12,background:"rgba(26,115,232,0.08)",borderRadius:8,border:"1px solid rgba(26,115,232,0.2)"}}>
           <div style={{fontSize:11,color:"#4fc3f7",fontWeight:700,marginBottom:8}}>👁️ PREVIEW</div>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
@@ -1205,6 +1255,151 @@ DATA: 2026-06-25
   );
 }
 
+// ─────────────────────────────────────────────────────────────
+// GCPreview — mini-preview visual do GC no Admin
+// ─────────────────────────────────────────────────────────────
+function GCPreview({ mensagem, fonte, estilo, cor }) {
+  const sizes = { pequena:10, normal:13, grande:16, destaque:20 };
+  const fs    = sizes[fonte] || 13;
+  const bold  = fonte === "destaque";
+
+  const boxStyle = {
+    display:"inline-block", marginTop:8, maxWidth:"100%",
+    fontSize:fs, fontWeight:bold?700:500,
+    ...(estilo==="escuro"   && { background:"rgba(0,0,0,0.75)", color:"#fff", padding:"6px 12px", borderRadius:4 }),
+    ...(estilo==="canal"    && { background:`${cor}cc`, color:"#fff", padding:"6px 12px", borderRadius:4 }),
+    ...(estilo==="borda"    && { background:"rgba(0,0,0,0.72)", color:"#fff", padding:"6px 12px 6px 10px", borderLeft:`4px solid ${cor}`, borderRadius:"0 4px 4px 0" }),
+    ...(estilo==="simples"  && { color:"#fff", textShadow:"0 1px 4px rgba(0,0,0,0.9)", padding:"4px 0" }),
+  };
+  return (
+    <div style={{background:"#000",borderRadius:4,padding:"12px 14px",marginTop:6,position:"relative",minHeight:60,display:"flex",alignItems:"flex-end"}}>
+      <div style={{fontSize:9,color:"#444",position:"absolute",top:6,left:8}}>PREVIEW</div>
+      <div style={boxStyle}>{mensagem}</div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// GC DO CANAL — configuração de GCs por horário do dia
+// Salvo em channel.gcFaixas: [{ id, mensagem, tipo, horario,
+//   duracao, fonte, estilo, canalIds }]
+// tipo: "manha"|"tarde"|"noite"|"absoluto"
+// ─────────────────────────────────────────────────────────────
+function ChannelGCEditor({ channel, channels, onSave }) {
+  const [faixas, setFaixas] = useState(channel.gcFaixas || []);
+  const [saving, setSaving] = useState(false);
+
+  const TIPOS = [
+    { val:"manha",    label:"🌅 Manhã",    hint:"06:00 – 12:00" },
+    { val:"tarde",    label:"☀️ Tarde",    hint:"12:00 – 18:00" },
+    { val:"noite",    label:"🌙 Noite",    hint:"18:00 – 00:00" },
+    { val:"absoluto", label:"🕐 Horário fixo", hint:"Hora específica" },
+  ];
+
+  const addFaixa = () => setFaixas(f => [...f, {
+    id: Date.now().toString(),
+    mensagem:"", tipo:"manha", horario:"", duracao:20,
+    fonte:"normal", estilo:"borda",
+  }]);
+
+  const updFaixa = (id, key, val) =>
+    setFaixas(f => f.map(x => x.id===id ? {...x,[key]:val} : x));
+
+  const delFaixa = (id) => setFaixas(f => f.filter(x => x.id!==id));
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await updateDoc(doc(db,"channels",channel.id), { gcFaixas: faixas });
+      onSave();
+    } catch(e) { alert("Erro ao salvar GC do canal: " + e.message); }
+    setSaving(false);
+  };
+
+  return (
+    <div style={{marginTop:16,background:"rgba(255,152,0,0.04)",border:"1px solid rgba(255,152,0,0.15)",borderRadius:8,padding:"14px 16px"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+        <div style={{fontSize:12,fontWeight:700,color:"#ffb74d"}}>📺 GCs do Canal</div>
+        <button onClick={addFaixa} style={{padding:"4px 12px",borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:600,background:"rgba(255,152,0,0.15)",border:"1px solid rgba(255,152,0,0.3)",color:"#ffb74d"}}>+ Adicionar</button>
+      </div>
+
+      {faixas.length===0 && <div style={{fontSize:11,color:"#555",textAlign:"center",padding:"12px 0"}}>Nenhum GC configurado. Clique em "+ Adicionar".</div>}
+
+      {faixas.map((f, fi) => (
+        <div key={f.id} style={{marginBottom:12,background:"rgba(255,255,255,0.02)",borderRadius:6,padding:"10px 12px",border:"1px solid rgba(255,255,255,0.06)"}}>
+          <div style={{display:"flex",gap:6,alignItems:"flex-start",marginBottom:8}}>
+            <textarea value={f.mensagem} onChange={e=>updFaixa(f.id,"mensagem",e.target.value)}
+              placeholder='Mensagem do GC...'
+              rows={2} style={{...iS,flex:1,resize:"none",fontFamily:"inherit",fontSize:12}}/>
+            <button onClick={()=>delFaixa(f.id)} style={{background:"none",border:"none",color:"#f44336",cursor:"pointer",fontSize:16,padding:"4px",flexShrink:0}}>✕</button>
+          </div>
+          {/* Tipo de horário */}
+          <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:6}}>
+            {TIPOS.map(t=>(
+              <button key={t.val} onClick={()=>updFaixa(f.id,"tipo",t.val)}
+                style={{padding:"4px 9px",borderRadius:3,cursor:"pointer",fontSize:10,
+                  background:f.tipo===t.val?"rgba(255,152,0,0.2)":"rgba(255,255,255,0.04)",
+                  border:f.tipo===t.val?"1px solid #ff9800":"1px solid rgba(255,255,255,0.08)",
+                  color:f.tipo===t.val?"#ff9800":"#888",fontWeight:f.tipo===t.val?700:400}}>
+                {t.label} <span style={{opacity:0.5,fontSize:9}}>{t.hint}</span>
+              </button>
+            ))}
+          </div>
+          {/* Horário absoluto */}
+          {f.tipo==="absoluto"&&(
+            <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:6}}>
+              <span style={{fontSize:11,color:"#888"}}>Às</span>
+              <input type="time" value={f.horario} onChange={e=>updFaixa(f.id,"horario",e.target.value)}
+                style={{...iS,width:90}}/>
+              <span style={{fontSize:11,color:"#888"}}>por</span>
+              <input type="number" min={5} max={120} value={f.duracao} onChange={e=>updFaixa(f.id,"duracao",parseInt(e.target.value)||20)}
+                style={{...iS,width:55,textAlign:"center"}}/>
+              <span style={{fontSize:11,color:"#888"}}>segundos</span>
+            </div>
+          )}
+          {/* Fonte + Estilo */}
+          <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+            <div>
+              <div style={{fontSize:9,color:"#666",marginBottom:3,fontWeight:600}}>FONTE</div>
+              <div style={{display:"flex",gap:3}}>
+                {[["pequena","P"],["normal","N"],["grande","G"],["destaque","D"]].map(([v,l])=>(
+                  <button key={v} onClick={()=>updFaixa(f.id,"fonte",v)}
+                    style={{width:26,height:26,borderRadius:3,cursor:"pointer",fontSize:10,fontWeight:700,
+                      background:f.fonte===v?"rgba(255,152,0,0.2)":"rgba(255,255,255,0.04)",
+                      border:f.fonte===v?"1px solid #ff9800":"1px solid rgba(255,255,255,0.08)",
+                      color:f.fonte===v?"#ff9800":"#888"}}>{l}</button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <div style={{fontSize:9,color:"#666",marginBottom:3,fontWeight:600}}>ESTILO</div>
+              <div style={{display:"flex",gap:3}}>
+                {[["borda","Borda"],["escuro","Escuro"],["canal","Canal"],["simples","Simples"]].map(([v,l])=>(
+                  <button key={v} onClick={()=>updFaixa(f.id,"estilo",v)}
+                    style={{padding:"3px 7px",borderRadius:3,cursor:"pointer",fontSize:10,
+                      background:f.estilo===v?"rgba(255,152,0,0.2)":"rgba(255,255,255,0.04)",
+                      border:f.estilo===v?"1px solid #ff9800":"1px solid rgba(255,255,255,0.08)",
+                      color:f.estilo===v?"#ff9800":"#888"}}>{l}</button>
+                ))}
+              </div>
+            </div>
+          </div>
+          {f.mensagem && <GCPreview mensagem={f.mensagem} fonte={f.fonte} estilo={f.estilo} cor={channel.cor}/>}
+        </div>
+      ))}
+
+      {faixas.length>0&&(
+        <button onClick={handleSave} disabled={saving}
+          style={{width:"100%",padding:"9px 0",borderRadius:5,border:"none",cursor:"pointer",
+            background:"linear-gradient(135deg,#ff9800,#f57c00)",color:"#fff",
+            fontSize:12,fontWeight:700,opacity:saving?0.6:1}}>
+          {saving?"⏳ Salvando...":"💾 Salvar GCs do Canal"}
+        </button>
+      )}
+    </div>
+  );
+}
+
 // ============================================
 // DUP MODAL
 // ============================================
@@ -1329,6 +1524,71 @@ export default function AdminPanel({ onLogout }){
         ? `📋 ${fp.length} programa(s) duplicado(s)!`
         : `⚠️ ${fp.length - failed} copiados, ${failed} falharam`, failed > 0 ? "error" : "success");
     } catch(err) { console.error("Erro ao duplicar:", err); notify("❌ Erro ao duplicar", "error"); }
+  };
+
+  // ── Preencher 24h com reprises ────────────────────────────────
+  const handleFill24h = async () => {
+    const progs = dayProgs.filter(p => p.canalId === selCh)
+      .sort((a,b) => Number(a.horarioInicio) - Number(b.horarioInicio));
+    if (progs.length === 0) { notify("Adicione ao menos 1 programa antes de preencher","error"); return; }
+
+    // Descobre os gaps e calcula quantas reprises serão criadas
+    const toCreate = [];
+    let cursor = 0;
+
+    // Varre todos os slots do dia e preenche gaps com reprises em sequência
+    let progIdx = 0;
+    const existing = [...progs];
+
+    // Mapeia horários já ocupados
+    const occupied = new Set();
+    existing.forEach(p => {
+      for(let s=Number(p.horarioInicio);s<Number(p.horarioFim);s++) occupied.add(s);
+    });
+
+    // Avança cursor pelos gaps e insere reprises
+    cursor = 0;
+    let repIdx = 0; // qual programa repetir (cicla em sequência)
+    let safety = 0;
+    while (cursor < 86400 && safety < 500) {
+      safety++;
+      // Se cursor está num horário ocupado, avança até o próximo gap
+      if (occupied.has(cursor)) { cursor++; continue; }
+      // Encontra fim do gap atual
+      let gapEnd = cursor;
+      while (gapEnd < 86400 && !occupied.has(gapEnd)) gapEnd++;
+
+      const gapDur = gapEnd - cursor;
+      if (gapDur < 60) { cursor = gapEnd; continue; } // gap < 1min, ignora
+
+      // Preenche o gap com reprises do programa atual
+      let fill = cursor;
+      while (fill < gapEnd) {
+        const src   = progs[repIdx % progs.length];
+        const dur   = Number(src.duracao);
+        const end   = Math.min(fill + dur, gapEnd);
+        const acDur = end - fill;
+        if (acDur < 60) break;
+        toCreate.push({ ...src, horarioInicio:fill, horarioFim:end, duracao:acDur,
+          tags:[...(src.tags||[]).filter(t=>t!=="INÉDITO"),"REPRISE"] });
+        fill = end;
+        repIdx++;
+      }
+      cursor = gapEnd;
+    }
+
+    if (toCreate.length === 0) { notify("A grade já está completa (24h preenchidas)!","info"); return; }
+
+    const totalMin = Math.round(toCreate.reduce((s,p)=>s+p.duracao,0)/60);
+    if (!confirm(`Criar ${toCreate.length} reprise(s) totalizando ${Math.floor(totalMin/60)}h${totalMin%60}min?\nIsso preencherá os gaps do dia até completar 24h.`)) return;
+
+    try {
+      await Promise.allSettled(toCreate.map(p => {
+        const { id:_id, ...data } = p;
+        return addDoc(collection(db,"programs"), { ...data, data:selDate });
+      }));
+      notify(`✅ ${toCreate.length} reprise(s) criadas!`, "success");
+    } catch(e) { notify("❌ Erro ao criar reprises","error"); }
   };
 
   // ── Embaralhar grade do dia ──────────────────────────────────
@@ -1539,6 +1799,10 @@ export default function AdminPanel({ onLogout }){
             <span style={{fontSize:11,color:"#555"}}>⠿ Arraste para reordenar</span>
           </div>
           <div style={{display:"flex",gap:6}}>
+            <button onClick={handleFill24h}
+              style={{padding:"6px 12px",borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:600,background:"rgba(76,175,80,0.1)",border:"1px solid rgba(76,175,80,0.25)",color:"#4caf50"}}>
+              📅 Preencher 24h
+            </button>
             <button onClick={handleShuffleDay}
               style={{padding:"6px 12px",borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:600,background:"rgba(156,39,176,0.1)",border:"1px solid rgba(156,39,176,0.25)",color:"#ce93d8"}}>
               🔀 Embaralhar dia

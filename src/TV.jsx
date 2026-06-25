@@ -259,48 +259,57 @@ const CLASS_COLOR = {
 // Baseado no tempo decorrido no VÍDEO atual (não no programa)
 // Retorna: "intro" | "outro" | null
 // ─────────────────────────────────────────────────────────────
-function useGCTimer(cp, videoIndex, playerState) {
-  const [phase, setPhase] = useState(null); // "intro"|"outro"|null
+function useGCTimer(cp, videoIndex) {
+  // phase: "intro"|"outro"|"minuto"|null  (para o GC do programa)
+  const [phase, setPhase] = useState(null);
+  // channelPhase: true|false  (para os GCs do canal por horário)
+  const [channelPhaseIdx, setChannelPhaseIdx] = useState(-1);
 
   useEffect(() => {
     if (!cp || cp.isPlaceholder) { setPhase(null); return; }
 
-    const tick = () => {
+    const evaluate = () => {
       const now       = getNow();
-      const progStart = cp.horarioInicio;
-      const progEnd   = cp.horarioFim;
-      const progDur   = cp.duracao || (progEnd - progStart);
-
-      // Tempo decorrido DENTRO do programa (segundos)
-      const elapsed = Math.max(0, now - progStart);
-      // Tempo restante no programa
+      const progStart = Number(cp.horarioInicio);
+      const progEnd   = Number(cp.horarioFim);
+      const elapsed   = Math.max(0, now - progStart);
       const remaining = Math.max(0, progEnd - now);
 
-      // Intro: segundos 2-25 do início do VÍDEO atual
-      // Para playlists, reseta a cada vídeo (elapsed calculado no vídeo)
+      // Tempo no vídeo atual (reseta em playlists)
       const videoList = cp.videos || [];
       let videoElapsed = elapsed;
       if (videoList.length > 1 && videoIndex > 0) {
-        // Subtrai a duração dos vídeos anteriores
         let acc = 0;
         for (let i = 0; i < videoIndex && i < videoList.length; i++) {
           acc += Number(videoList[i].duracao || 0);
         }
-        videoElapsed = elapsed - acc;
+        videoElapsed = Math.max(0, elapsed - acc);
       }
 
       const inIntro  = videoElapsed >= 2 && videoElapsed <= 25;
       const inOutro  = remaining <= 20 && remaining > 5;
+      // minuto personalizado: seg gcMinuto*60 a gcMinuto*60+gcDuracao
+      const gcMin = cp.gcMinuto != null ? Number(cp.gcMinuto) : -1;
+      const gcDur = Number(cp.gcDuracao || 20);
+      const inMin = gcMin >= 0 && elapsed >= gcMin*60 && elapsed < gcMin*60 + gcDur;
 
-      if (inIntro)       setPhase("intro");
-      else if (inOutro)  setPhase("outro");
-      else               setPhase(null);
+      let next = null;
+      if      (cp.gcPosicao === "minuto"  && inMin)   next = "minuto";
+      else if (cp.gcPosicao === "inicio"  && inIntro)  next = "intro";
+      else if (cp.gcPosicao === "final"   && inOutro)  next = "outro";
+      else if (cp.gcPosicao === "ambos"   && inIntro)  next = "intro";
+      else if (cp.gcPosicao === "ambos"   && inOutro)  next = "outro";
+      else if (!cp.gcPosicao && inIntro)               next = "intro";
+      else if (!cp.gcPosicao && inOutro)               next = "outro";
+
+      setPhase(prev => prev !== next ? next : prev);
     };
 
-    tick();
-    const i = setInterval(tick, 1000);
+    evaluate();
+    const i = setInterval(evaluate, 1000);
     return () => clearInterval(i);
-  }, [cp?.id, cp?.horarioInicio, videoIndex]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cp?.id, cp?.horarioInicio, cp?.horarioFim, videoIndex]);
 
   return phase;
 }
@@ -309,101 +318,127 @@ function useGCTimer(cp, videoIndex, playerState) {
 // GCOverlay — o GC em si
 // zIndex: 3 (acima do click barrier:2, abaixo do OSD:10)
 // ─────────────────────────────────────────────────────────────
-function GCOverlay({ channel, program, nextProgram, videoIndex, playerState }) {
-  const phase = useGCTimer(program, videoIndex, playerState);
-  const [visible, setVisible] = useState(false);
+// ─── Renderiza um bloco GC com fonte e estilo ─────────────────
+function GCBlock({ mensagem, fonte, estilo, cor, extra }) {
+  const sizes = { pequena:10, normal:13, grande:16, destaque:20 };
+  const fs    = sizes[fonte] || 13;
+  const bold  = fonte === "destaque";
+  const base  = { backdropFilter:"blur(4px)", borderRadius:"0 6px 6px 0",
+    fontSize:fs, fontWeight:bold?700:500, lineHeight:1.4 };
+  const styles = {
+    escuro:  { ...base, background:"rgba(0,0,0,0.75)", color:"#fff", padding:"6px 12px 6px 10px" },
+    canal:   { ...base, background:`${cor}dd`, color:"#fff", padding:"6px 12px 6px 10px" },
+    borda:   { ...base, background:"rgba(0,0,0,0.72)", color:"#fff", padding:"6px 12px 6px 10px", borderLeft:`4px solid ${cor}` },
+    simples: { fontSize:fs, fontWeight:bold?700:500, color:"#fff", textShadow:"0 1px 6px rgba(0,0,0,0.9)", padding:"4px 0", lineHeight:1.4 },
+  };
+  return (
+    <div style={styles[estilo] || styles.borda}>
+      {mensagem}
+      {extra}
+    </div>
+  );
+}
 
-  // Fade suave ao entrar/sair
+function GCOverlay({ channel, program, nextProgram, videoIndex }) {
+  const phase = useGCTimer(program, videoIndex);
+  const [visible, setVisible] = useState(false);
+  // GC do canal por horário — avalia a cada segundo
+  const [activeChannelGC, setActiveChannelGC] = useState(null);
+
   useEffect(() => {
-    if (phase) {
-      setVisible(true);
-    } else {
-      const t = setTimeout(() => setVisible(false), 600);
-      return () => clearTimeout(t);
-    }
+    if (phase) setVisible(true);
+    else { const t=setTimeout(()=>setVisible(false),600); return()=>clearTimeout(t); }
   }, [phase]);
 
-  if (!visible && !phase) return null;
+  // Avalia GCs do canal (gcFaixas) por horário
+  useEffect(() => {
+    const faixas = channel?.gcFaixas || [];
+    if (!faixas.length) { setActiveChannelGC(null); return; }
+    const evaluate = () => {
+      const now    = getNow();
+      const h      = Math.floor(now/3600);
+      let found    = null;
+      for (const f of faixas) {
+        if (!f.mensagem) continue;
+        if (f.tipo === "manha"    && h >= 6  && h < 12) { found=f; break; }
+        if (f.tipo === "tarde"    && h >= 12 && h < 18) { found=f; break; }
+        if (f.tipo === "noite"    && (h >= 18 || h < 0)) { found=f; break; }
+        if (f.tipo === "absoluto" && f.horario) {
+          const [fh,fm] = f.horario.split(":").map(Number);
+          const fStart  = fh*3600 + fm*60;
+          const fDur    = Number(f.duracao || 20);
+          if (now >= fStart && now < fStart+fDur) { found=f; break; }
+        }
+      }
+      setActiveChannelGC(prev =>
+        JSON.stringify(prev) !== JSON.stringify(found) ? found : prev
+      );
+    };
+    evaluate();
+    const i = setInterval(evaluate, 1000);
+    return () => clearInterval(i);
+  }, [channel?.gcFaixas, channel?.id]);
+
+  const showProg = visible || !!phase;
+  const showCh   = !!activeChannelGC;
+  if (!showProg && !showCh) return null;
   if (!program || program.isPlaceholder) return null;
 
-  const cor       = channel?.cor || "#1a73e8";
-  const isMusica  = channel?.tipo === "musica";
-  const classif   = program.classificacao || "L";
+  const cor        = channel?.cor || "#1a73e8";
+  const isMusica   = channel?.tipo === "musica";
+  const classif    = program.classificacao || "L";
   const classColor = CLASS_COLOR[classif] || "#666";
-  const showClass  = classif !== "L"; // mostra classificação apenas se não for Livre
+  const showClass  = classif !== "L";
 
-  // Para canal de música: extrai título do episódio atual
   const videoList  = program.videos || [];
   const curVideo   = videoList[videoIndex] || null;
   const curTitle   = curVideo?.titulo || program.nome || "";
-  const nextVideo  = videoList[videoIndex + 1] || null;
-  const nextTitle  = nextVideo?.titulo || nextProgram?.nome || null;
+  const nextVid    = videoList[videoIndex + 1] || null;
+  const nextTitle  = nextVid?.titulo || nextProgram?.nome || null;
 
   return (
     <div style={{
       position:"absolute", top:80, left:20, zIndex:3,
-      opacity: phase ? 1 : 0,
-      transition: "opacity 0.6s ease",
-      pointerEvents: "none",
-      display: "flex", flexDirection: "column", gap: 8,
-      maxWidth: "clamp(200px, 35vw, 380px)",
+      pointerEvents:"none",
+      display:"flex", flexDirection:"column", gap:8,
+      maxWidth:"clamp(200px, 35vw, 400px)",
     }}>
       {/* Classificação indicativa */}
-      {showClass && (
-        <div style={{
-          display:"flex", alignItems:"center", gap:8,
-          background:"rgba(0,0,0,0.72)", backdropFilter:"blur(4px)",
-          borderLeft:`4px solid ${classColor}`,
-          borderRadius:"0 6px 6px 0",
-          padding:"6px 12px 6px 10px",
-        }}>
-          <div style={{
-            width:28, height:28, borderRadius:4, flexShrink:0,
-            background:classColor, display:"flex",
-            alignItems:"center", justifyContent:"center",
-            fontSize:13, fontWeight:900,
-            color: classif==="L"||classif==="18" ? "#fff" : "#000",
-          }}>{classif}</div>
-          <div style={{fontSize:11, color:"rgba(255,255,255,0.8)", lineHeight:1.3}}>
-            {CLASS_DESC[classif]}
-          </div>
+      {showProg && showClass && (
+        <div style={{display:"flex",alignItems:"center",gap:8,background:"rgba(0,0,0,0.72)",backdropFilter:"blur(4px)",borderLeft:`4px solid ${classColor}`,borderRadius:"0 6px 6px 0",padding:"6px 12px 6px 10px",opacity:phase?1:0,transition:"opacity 0.6s"}}>
+          <div style={{width:28,height:28,borderRadius:4,flexShrink:0,background:classColor,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:900,color:classif==="L"||classif==="18"?"#fff":"#000"}}>{classif}</div>
+          <div style={{fontSize:11,color:"rgba(255,255,255,0.85)",lineHeight:1.3}}>{CLASS_DESC[classif]}</div>
         </div>
       )}
 
       {/* GC Musical */}
-      {isMusica && curTitle && (
-        <div style={{
-          background:"rgba(0,0,0,0.75)", backdropFilter:"blur(4px)",
-          borderLeft:`4px solid ${cor}`,
-          borderRadius:"0 6px 6px 0",
-          padding:"8px 12px 8px 10px",
-        }}>
-          <div style={{fontSize:10, color:"rgba(255,255,255,0.5)", marginBottom:3, fontWeight:600, letterSpacing:0.5}}>
-            🎵 VOCÊ ESTÁ OUVINDO
-          </div>
-          <div style={{fontSize:14, fontWeight:700, color:"#fff", lineHeight:1.3, marginBottom: nextTitle ? 6 : 0}}>
-            {curTitle}
-          </div>
-          {nextTitle && (
-            <div style={{fontSize:10, color:"rgba(255,255,255,0.5)", borderTop:"1px solid rgba(255,255,255,0.1)", paddingTop:5, marginTop:2}}>
-              <span style={{color:"rgba(255,255,255,0.35)"}}>A SEGUIR </span>
-              <span style={{color:"rgba(255,255,255,0.65)"}}>{nextTitle}</span>
-            </div>
-          )}
+      {showProg && isMusica && curTitle && (
+        <div style={{background:"rgba(0,0,0,0.75)",backdropFilter:"blur(4px)",borderLeft:`4px solid ${cor}`,borderRadius:"0 6px 6px 0",padding:"8px 12px 8px 10px",opacity:phase?1:0,transition:"opacity 0.6s"}}>
+          <div style={{fontSize:10,color:"rgba(255,255,255,0.5)",marginBottom:3,fontWeight:600,letterSpacing:0.5}}>🎵 VOCÊ ESTÁ OUVINDO</div>
+          <div style={{fontSize:14,fontWeight:700,color:"#fff",lineHeight:1.3,marginBottom:nextTitle?6:0}}>{curTitle}</div>
+          {nextTitle&&<div style={{fontSize:10,color:"rgba(255,255,255,0.5)",borderTop:"1px solid rgba(255,255,255,0.1)",paddingTop:5}}>
+            <span style={{color:"rgba(255,255,255,0.35)"}}>A SEGUIR </span>
+            <span style={{color:"rgba(255,255,255,0.65)"}}>{nextTitle}</span>
+          </div>}
         </div>
       )}
 
-      {/* GC genérico (campo gcMensagem do programa) */}
-      {program.gcMensagem && (
-        <div style={{
-          background:"rgba(0,0,0,0.72)", backdropFilter:"blur(4px)",
-          borderLeft:`4px solid ${cor}`,
-          borderRadius:"0 6px 6px 0",
-          padding:"7px 12px 7px 10px",
-          fontSize:12, color:"rgba(255,255,255,0.85)", fontWeight:600,
-        }}>
-          {program.gcMensagem}
+      {/* GC do programa (genérico) */}
+      {showProg && program.gcMensagem && phase && (
+        <div style={{opacity:phase?1:0,transition:"opacity 0.6s"}}>
+          <GCBlock mensagem={program.gcMensagem}
+            fonte={program.gcFonte||"normal"}
+            estilo={program.gcEstilo||"borda"}
+            cor={cor}/>
         </div>
+      )}
+
+      {/* GC do canal (por horário) */}
+      {showCh && activeChannelGC && (
+        <GCBlock mensagem={activeChannelGC.mensagem}
+          fonte={activeChannelGC.fonte||"normal"}
+          estilo={activeChannelGC.estilo||"borda"}
+          cor={cor}/>
       )}
     </div>
   );
@@ -1363,7 +1398,6 @@ export default function TVWeb(){
         program={cp}
         nextProgram={np}
         videoIndex={videoIndex}
-        playerState={playerState}
       />
 
       {/* ===== WATERMARK + HOME BUTTON ===== */}
