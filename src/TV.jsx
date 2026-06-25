@@ -277,42 +277,41 @@ function OSDFooter({program,nextProgram,onOpenEPG,onOpenFull,onFullscreen,visibl
 // ============================================
 function EPGCompact({channels,allPrograms,currentChannelId,onSelectChannel,onSelectProgram,onOpenFull,onClose}){
   const scrollRef = useRef(null);
-  const ROW_H = 130, PX = 400;
-  const totalW = PX * 24;
+  // 300px por hora — escala mais densa e legível
+  const PX_PER_HOUR = 300;
+  const ROW_H = 130;
+  const totalW = PX_PER_HOUR * 24; // largura total do dia inteiro (00h→24h)
 
-  // Relógio reativo — atualiza a cada segundo para mover a linha vermelha
+  // Relógio reativo — atualiza a cada segundo
   const [clock, setClock] = useState(new Date());
   useEffect(() => {
     const i = setInterval(() => setClock(new Date()), 1000);
     return () => clearInterval(i);
   }, []);
 
-  // "now" derivado do clock reativo, não de uma const estática
-  const now    = clock.getHours() * 3600 + clock.getMinutes() * 60 + clock.getSeconds();
-  const nowPx  = (now / 86400) * totalW;
+  const now     = clock.getHours() * 3600 + clock.getMinutes() * 60 + clock.getSeconds();
+  const nowPx   = (now / 86400) * totalW;
   const secToPx = (sec) => (Number(sec) / 86400) * totalW;
 
-  // ✅ FIX: scroll inicial trava exatamente na linha "AGORA" à esquerda
+  // Scroll inicial: linha "AGORA" fica a 160px da borda esquerda da viewport
   useEffect(() => {
     if (scrollRef.current) {
-      // Posiciona a linha vermelha a ~200px da borda esquerda da viewport
-      scrollRef.current.scrollLeft = Math.max(0, nowPx - 200);
+      scrollRef.current.scrollLeft = Math.max(0, nowPx - 160);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ✅ FIX: impede scroll para antes do "agora"
+  // Trava scroll: não permite ir para antes de "agora - 160px"
   const handleScroll = useCallback(() => {
     if (!scrollRef.current) return;
-    const minScroll = Math.max(0, nowPx - 200);
+    const minScroll = Math.max(0, nowPx - 160);
     if (scrollRef.current.scrollLeft < minScroll) {
       scrollRef.current.scrollLeft = minScroll;
     }
   }, [nowPx]);
 
-  // ✅ FIX: botão "Próximo" só avança — sem botão "Anterior"
   const scrollNext = () => {
-    if (scrollRef.current) scrollRef.current.scrollLeft += 400;
+    if (scrollRef.current) scrollRef.current.scrollLeft += PX_PER_HOUR;
   };
 
   const sortedChannels = useMemo(() => [
@@ -337,12 +336,15 @@ function EPGCompact({channels,allPrograms,currentChannelId,onSelectChannel,onSel
     </div>
 
     <div style={{background:"rgba(10,12,18,0.98)",display:"flex",overflow:"hidden",maxHeight:"60vh",minHeight:320}}>
-      {/* Lista de canais (esquerda) */}
+      {/* Lista de canais — coluna esquerda fixa */}
       <div style={{minWidth:140,borderRight:"1px solid rgba(255,255,255,0.08)",flexShrink:0,overflowY:"auto"}}>
         <div style={{height:35}}/>
         {sortedChannels.map(ch =>
           <div key={ch.id} onClick={()=>onSelectChannel(ch.id)}
-            style={{height:ROW_H,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",borderBottom:"1px solid rgba(255,255,255,0.05)",background:ch.id===currentChannelId?"rgba(26,115,232,0.15)":"transparent",borderLeft:ch.id===currentChannelId?"3px solid #1a73e8":"none"}}>
+            style={{height:ROW_H,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",
+              borderBottom:"1px solid rgba(255,255,255,0.05)",
+              background:ch.id===currentChannelId?"rgba(26,115,232,0.15)":"transparent",
+              borderLeft:ch.id===currentChannelId?"3px solid #1a73e8":"none"}}>
             <div style={{textAlign:"center"}}>
               <ChLogo ch={ch} size={36}/>
               <div style={{fontSize:12,fontWeight:600,color:ch.id===currentChannelId?"#fff":"#888",marginTop:4}}>{ch.nome}</div>
@@ -351,118 +353,159 @@ function EPGCompact({channels,allPrograms,currentChannelId,onSelectChannel,onSel
         )}
       </div>
 
-      {/* Grid de programas (direita) — scroll travado no passado */}
-      <div
-        ref={scrollRef}
-        onScroll={handleScroll}
-        style={{flex:1,overflowX:"auto",overflowY:"hidden",position:"relative"}}
-      >
-        {/* Régua de horas */}
-        <div style={{position:"relative",height:35,borderBottom:"1px solid rgba(255,255,255,0.1)",width:totalW}}>
-          {Array.from({length:25}).map((_,h) => {
+      {/* Grid scrollável — régua + programas */}
+      <div ref={scrollRef} onScroll={handleScroll}
+        style={{flex:1,overflowX:"auto",overflowY:"hidden",position:"relative"}}>
+
+        {/* === RÉGUA DE HORAS (00h → 23h, sempre todas visíveis) === */}
+        <div style={{position:"relative",height:35,borderBottom:"1px solid rgba(255,255,255,0.1)",width:totalW,flexShrink:0}}>
+
+          {/* Todas as marcações horárias — passado em cinza escuro, futuro em branco */}
+          {Array.from({length:24}).map((_,h) => {
             const x = secToPx(h * 3600);
-            // ✅ FIX: não renderiza labels de horas passadas
-            if (x < nowPx - 50) return null;
-            return <div key={h} style={{position:"absolute",left:x,top:0,bottom:0,borderLeft:"1px solid rgba(255,255,255,0.1)"}}>
-              <span style={{fontSize:13,color:"#ccc",fontWeight:600,padding:"8px 8px",whiteSpace:"nowrap",display:"inline-block"}}>{String(h).padStart(2,"0")}:00</span>
+            const isPast = x < nowPx;
+            return <div key={h} style={{position:"absolute",left:x,top:0,bottom:0,
+              borderLeft:`1px solid ${isPast?"rgba(255,255,255,0.04)":"rgba(255,255,255,0.12)"}`}}>
+              <span style={{fontSize:12,fontWeight:600,padding:"8px 6px",whiteSpace:"nowrap",display:"inline-block",
+                color:isPast?"rgba(255,255,255,0.2)":"#ccc"}}>
+                {String(h).padStart(2,"0")}:00
+              </span>
             </div>;
           })}
 
-          {/* Linha vermelha AGORA */}
-          <div style={{position:"absolute",top:0,bottom:-ROW_H*channels.length,left:nowPx,width:3,background:"#ff3b3b",zIndex:5,boxShadow:"0 0 12px #ff3b3b",pointerEvents:"none"}}>
-            <div style={{width:10,height:10,borderRadius:"50%",background:"#ff3b3b",position:"absolute",top:-3,left:-3.5}}/>
-            {/* Label "AGORA" abaixo do ponto */}
-            <div style={{position:"absolute",top:14,left:-18,fontSize:9,fontWeight:800,color:"#ff3b3b",whiteSpace:"nowrap",letterSpacing:1}}>AGORA</div>
+          {/* Linha vermelha AGORA — atravessa régua e todos os canais */}
+          <div style={{position:"absolute",top:0,left:nowPx,width:2,
+            bottom:-(ROW_H * sortedChannels.length),
+            background:"#ff3b3b",zIndex:6,boxShadow:"0 0 8px #ff3b3b",pointerEvents:"none"}}>
+            {/* Ponto no topo */}
+            <div style={{width:10,height:10,borderRadius:"50%",background:"#ff3b3b",
+              position:"absolute",top:-3,left:-4,boxShadow:"0 0 6px #ff3b3b"}}/>
+            {/* Label AGORA */}
+            <div style={{position:"absolute",top:16,left:-22,fontSize:8,fontWeight:900,
+              color:"#ff3b3b",letterSpacing:1,whiteSpace:"nowrap",
+              background:"rgba(10,12,18,0.9)",padding:"2px 4px",borderRadius:3}}>
+              AGORA
+            </div>
           </div>
 
-          {/* ✅ FIX: máscara cinza cobre tudo à esquerda da linha "AGORA" */}
-          <div style={{position:"absolute",top:0,left:0,width:nowPx,bottom:-ROW_H*channels.length,background:"rgba(0,0,0,0.55)",zIndex:4,pointerEvents:"none"}}/>
+          {/* Máscara sobre a RÉGUA apenas (não sobre os programas) — escurece passado */}
+          <div style={{position:"absolute",top:0,left:0,width:nowPx,height:"100%",
+            background:"rgba(0,0,0,0.4)",zIndex:5,pointerEvents:"none"}}/>
         </div>
 
-        {/* Programas por canal */}
-        {sortedChannels.map(ch => {
-          const sched  = buildSchedule(allPrograms, ch.id);
-          const cur    = getCurProg(sched);
+        {/* === LINHAS DE CANAL + PROGRAMAS === */}
+        {sortedChannels.map((ch, chIdx) => {
+          const sched     = buildSchedule(allPrograms, ch.id);
+          const cur       = getCurProg(sched);
           const isCurrent = ch.id === currentChannelId;
 
-          // ✅ FIX: mostra apenas programas que ainda não terminaram
+          // Mostra: programa atual (ao vivo) + todos os futuros do dia
           const visible = sched.filter(p =>
             !p.isPlaceholder &&
             Number(p.horarioFim) <= 86400 &&
-            Number(p.horarioFim) > now          // exclui completamente encerrados
+            Number(p.horarioFim) > now
           );
 
-          return <div key={ch.id} style={{position:"relative",height:ROW_H,borderBottom:"1px solid rgba(255,255,255,0.05)",borderLeft:isCurrent?"3px solid #1a73e8":"none",width:totalW,background:isCurrent?"rgba(26,115,232,0.08)":"transparent"}}>
+          return <div key={ch.id} style={{
+            position:"relative", height:ROW_H, width:totalW,
+            borderBottom:"1px solid rgba(255,255,255,0.05)",
+            borderLeft:isCurrent?"3px solid #1a73e8":"none",
+            background:isCurrent?"rgba(26,115,232,0.05)":"transparent",
+          }}>
+
+            {/* Máscara do passado sobre a faixa do canal */}
+            <div style={{position:"absolute",top:0,left:0,width:nowPx,height:"100%",
+              background:"rgba(0,0,0,0.45)",zIndex:3,pointerEvents:"none"}}/>
 
             {visible.map(prog => {
               const startSec = Number(prog.horarioInicio);
               const endSec   = Number(prog.horarioFim);
-              const dur      = Number(prog.duracao);
               const isNow    = cur?.id === prog.id;
 
-              // ✅ FIX: programa atual começa no pixel de "agora", não no início real
-              // Isso faz o bloco "ao vivo" aparecer colado à linha vermelha pela esquerda
-              const visualStart = isNow ? nowPx : secToPx(startSec);
-              const visualEnd   = secToPx(endSec);
-              const left  = visualStart;
-              const w     = Math.max(visualEnd - visualStart, 60); // largura residual
-
-              const needsRepeat = w > 500;
-              const needsTriple = w > 900;
+              // Bloco ao vivo começa na linha AGORA visualmente,
+              // mas exibe o horário real de início no texto
+              const visualLeft = isNow ? nowPx : secToPx(startSec);
+              const visualW    = Math.max(secToPx(endSec) - visualLeft, 56);
+              const needsRepeat = visualW > 460;
+              const needsTriple = visualW > 860;
 
               return <div key={prog.id}
                 onClick={() => { onSelectChannel(ch.id); onSelectProgram(prog); }}
                 style={{
-                  position:"absolute", left, width:w, top:0, bottom:2,
-                  cursor:"pointer", overflow:"hidden",
+                  position:"absolute", left:visualLeft, width:visualW,
+                  top:2, bottom:2, zIndex:4,
+                  cursor:"pointer", overflow:"hidden", borderRadius:3,
                   background: isNow
-                    ? isCurrent ? "rgba(60,70,90,0.95)" : "rgba(40,44,60,0.95)"
-                    : isCurrent ? "rgba(35,40,55,0.7)"  : "rgba(30,32,44,0.6)",
-                  borderRight:"1px solid rgba(255,255,255,0.06)",
-                  borderLeft: isNow ? "3px solid #ff3b3b" : "1px solid rgba(255,255,255,0.03)",
-                  boxSizing:"border-box", transition:"background 0.2s",
+                    ? isCurrent ? "rgba(55,68,92,0.98)" : "rgba(38,44,62,0.98)"
+                    : isCurrent ? "rgba(32,38,54,0.85)"  : "rgba(26,30,44,0.75)",
+                  borderRight:"1px solid rgba(255,255,255,0.07)",
+                  borderLeft: isNow ? "3px solid #ff3b3b" : "1px solid rgba(255,255,255,0.04)",
+                  boxSizing:"border-box", transition:"background 0.15s",
                 }}
                 onMouseEnter={e => e.currentTarget.style.background = isNow
-                  ? isCurrent ? "rgba(70,85,110,1)" : "rgba(60,70,90,1)"
-                  : isCurrent ? "rgba(50,60,75,0.9)" : "rgba(45,50,65,0.9)"}
+                  ? isCurrent ? "rgba(72,90,118,1)" : "rgba(55,65,90,1)"
+                  : isCurrent ? "rgba(48,58,78,0.95)" : "rgba(42,50,70,0.95)"}
                 onMouseLeave={e => e.currentTarget.style.background = isNow
-                  ? isCurrent ? "rgba(60,70,90,0.95)" : "rgba(40,44,60,0.95)"
-                  : isCurrent ? "rgba(35,40,55,0.7)"  : "rgba(30,32,44,0.6)"}
+                  ? isCurrent ? "rgba(55,68,92,0.98)" : "rgba(38,44,62,0.98)"
+                  : isCurrent ? "rgba(32,38,54,0.85)"  : "rgba(26,30,44,0.75)"}
               >
-                <div style={{position:"absolute",left:10,top:10,right:8}}>
-                  <div style={{fontSize:11,color:"#aaa",marginBottom:4,fontWeight:500}}>
-                    {/* ✅ Programa ao vivo: mostra hora real de início, não nowPx */}
-                    {fmtHM(startSec)}
-                    {isNow && <span style={{marginLeft:6,fontSize:9,fontWeight:700,padding:"2px 6px",borderRadius:3,background:"#f44336",color:"#fff"}}>AO VIVO</span>}
+                {/* Info principal — canto superior esquerdo */}
+                <div style={{position:"absolute",left:10,top:9,right:8}}>
+                  <div style={{fontSize:10,color:"#999",marginBottom:3,fontWeight:500,display:"flex",alignItems:"center",gap:5}}>
+                    <span>{fmtHM(startSec)}</span>
+                    <span style={{color:"#666"}}>→</span>
+                    <span>{fmtHM(endSec)}</span>
+                    {isNow && <span style={{fontSize:9,fontWeight:800,padding:"1px 5px",borderRadius:3,background:"#f44336",color:"#fff",marginLeft:2}}>AO VIVO</span>}
                   </div>
-                  <div style={{fontSize:15,fontWeight:700,color:isNow?"#fff":"#ddd",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{prog.nome}</div>
+                  <div style={{fontSize:14,fontWeight:700,color:isNow?"#fff":"#ddd",
+                    whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                    {prog.nome}
+                  </div>
                 </div>
-                {needsRepeat && <div style={{position:"absolute",left:"50%",top:"50%",transform:"translate(-50%,-50%)",textAlign:"center"}}>
-                  <div style={{fontSize:15,fontWeight:700,color:isNow?"rgba(255,255,255,0.7)":"rgba(221,221,221,0.6)",whiteSpace:"nowrap"}}>{prog.nome}</div>
+                {/* Repetição central para blocos longos */}
+                {needsRepeat && <div style={{position:"absolute",left:"50%",top:"50%",
+                  transform:"translate(-50%,-50%)",textAlign:"center",pointerEvents:"none"}}>
+                  <div style={{fontSize:13,fontWeight:600,
+                    color:isNow?"rgba(255,255,255,0.55)":"rgba(200,200,200,0.45)",
+                    whiteSpace:"nowrap"}}>{prog.nome}</div>
                 </div>}
-                {needsTriple && <div style={{position:"absolute",right:12,bottom:10}}>
-                  <div style={{fontSize:14,fontWeight:600,color:isNow?"rgba(255,255,255,0.5)":"rgba(221,221,221,0.4)",whiteSpace:"nowrap",textAlign:"right"}}>{prog.nome}</div>
+                {needsTriple && <div style={{position:"absolute",right:10,bottom:8,pointerEvents:"none"}}>
+                  <div style={{fontSize:12,fontWeight:600,
+                    color:isNow?"rgba(255,255,255,0.35)":"rgba(200,200,200,0.3)",
+                    whiteSpace:"nowrap"}}>{prog.nome}</div>
                 </div>}
               </div>;
             })}
 
-            {sched.length === 0 && <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",color:"#555",fontSize:13}}>Sem programação</div>}
+            {sched.length === 0 && (
+              <div style={{position:"absolute",inset:0,zIndex:4,display:"flex",
+                alignItems:"center",justifyContent:"center",color:"#444",fontSize:12}}>
+                Sem programação
+              </div>
+            )}
           </div>;
         })}
       </div>
     </div>
 
-    {/* Footer — sem botão Anterior */}
-    <div style={{background:"rgba(10,12,18,0.98)",padding:"10px 16px",borderTop:"1px solid rgba(255,255,255,0.06)",display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,color:"#666"}}>
-      <div style={{display:"flex",gap:24,marginLeft:8}}>
+    {/* Footer */}
+    <div style={{background:"rgba(10,12,18,0.98)",padding:"10px 20px",
+      borderTop:"1px solid rgba(255,255,255,0.06)",
+      display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,color:"#666"}}>
+      <div style={{display:"flex",gap:20}}>
         <span>↑↓ = Canal</span>
         <span>ESC = Fechar</span>
         <span>G = Guia</span>
       </div>
-      <button onClick={scrollNext} style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",color:"#aaa",padding:"8px 20px",borderRadius:4,cursor:"pointer",fontSize:13}}>Próximo →</button>
+      <button onClick={scrollNext}
+        style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",
+          color:"#bbb",padding:"8px 22px",borderRadius:4,cursor:"pointer",fontSize:13,fontWeight:600}}>
+        Próximo →
+      </button>
     </div>
   </div>;
 }
+
 
 // ============================================
 // FULL DAY SCHEDULE
