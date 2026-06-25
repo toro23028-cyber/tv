@@ -798,14 +798,7 @@ function ChannelEditor({channels,onAdd,onDelete}){
           </div>
           {tipo==="musica"&&<div style={{marginTop:6,fontSize:10,color:"#9c27b0",padding:"4px 8px",background:"rgba(156,39,176,0.08)",borderRadius:4,border:"1px solid rgba(156,39,176,0.2)"}}>🎵 GC "Você está ouvindo" será exibido automaticamente neste canal</div>}
         </div>
-        {/* GCs do canal por horário */}
-        {editing&&channels.find(c=>c.id===editing)&&(
-          <ChannelGCEditor
-            channel={{...channels.find(c=>c.id===editing),cor,tipo,gcFaixas:channels.find(c=>c.id===editing)?.gcFaixas||[]}}
-            channels={channels}
-            onSave={()=>{}}
-          />
-        )}
+
         <div style={{padding:12,background:"rgba(26,115,232,0.08)",borderRadius:8,border:"1px solid rgba(26,115,232,0.2)"}}>
           <div style={{fontSize:11,color:"#4fc3f7",fontWeight:700,marginBottom:8}}>👁️ PREVIEW</div>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
