@@ -1,0 +1,107 @@
+/* ═══════════════════════════════════════════════════
+   TVWEB — Mobile & Tablet Responsive Styles
+   Aplicado via import em main.jsx
+   ═══════════════════════════════════════════════════ */
+
+/* Reset global */
+*, *::before, *::after { box-sizing: border-box; }
+
+/* ── Scrollbar fina ── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: rgba(255,255,255,0.02); }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 2px; }
+
+/* ══════════════════════════════════════
+   PLAYER — OSD adaptado para mobile
+   ══════════════════════════════════════ */
+
+/* Em telas pequenas, botões do OSD ficam menores e empilhados */
+@media (max-width: 600px) {
+  /* OSD Footer buttons */
+  .osd-footer-btns {
+    flex-wrap: wrap !important;
+    gap: 6px !important;
+  }
+  .osd-footer-btns button {
+    padding: 8px 12px !important;
+    font-size: 12px !important;
+  }
+
+  /* OSD Header — esconde texto longo */
+  .osd-header-synopsis { display: none !important; }
+  .osd-header-title    { font-size: 16px !important; }
+  .osd-header-clock    { font-size: 22px !important; }
+
+  /* Sidebar de canais — esconde em mobile */
+  .channel-sidebar { display: none !important; }
+
+  /* Unmute button — menor */
+  .unmute-btn {
+    padding: 10px 20px !important;
+    font-size: 13px !important;
+  }
+}
+
+/* ══════════════════════════════════════
+   EPG COMPACT — mobile view
+   ══════════════════════════════════════ */
+@media (max-width: 700px) {
+  /* Em mobile o EPG horizontal vira lista vertical */
+  .epg-grid-scroll  { display: none !important; }
+  .epg-mobile-list  { display: flex !important; }
+  .epg-channel-col  { min-width: 90px !important; width: 90px !important; }
+}
+
+/* Esconde a lista mobile em desktop */
+.epg-mobile-list { display: none; }
+
+/* ══════════════════════════════════════
+   LANDING PAGE — responsivo
+   ══════════════════════════════════════ */
+@media (max-width: 480px) {
+  /* Hero title menor */
+  .hero-title { font-size: 22px !important; }
+  /* Botões CTA empilhados */
+  .hero-ctas  { flex-direction: column !important; }
+  .hero-ctas button { width: 100% !important; justify-content: center !important; }
+}
+
+/* ══════════════════════════════════════
+   ADMIN — mobile friendly
+   ══════════════════════════════════════ */
+@media (max-width: 640px) {
+  /* Timeline de datas: scroll horizontal já existe, só ajusta padding */
+  .admin-date-strip { padding-bottom: 12px !important; }
+
+  /* Stats em coluna */
+  .admin-stats { flex-direction: column !important; gap: 6px !important; }
+
+  /* Modais ocupam tela inteira */
+  .modal-container {
+    max-width: 100% !important;
+    margin: 0 !important;
+    border-radius: 12px 12px 0 0 !important;
+    max-height: 95vh !important;
+  }
+}
+
+/* ══════════════════════════════════════
+   TOUCH — remove hover effects irritantes
+   ══════════════════════════════════════ */
+@media (hover: none) {
+  /* Evita que estados :hover fiquem "grudados" após toque */
+  button:hover { opacity: 1 !important; }
+}
+
+/* ══════════════════════════════════════
+   SAFE AREA — iPhone com notch
+   ══════════════════════════════════════ */
+@supports (padding: env(safe-area-inset-bottom)) {
+  .tv-root {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  nav, footer {
+    padding-left:  max(12px, env(safe-area-inset-left));
+    padding-right: max(12px, env(safe-area-inset-right));
+  }
+}
