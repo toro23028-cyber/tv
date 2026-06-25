@@ -201,18 +201,38 @@ function buildMultiDaySchedule(programs, channelId, days = 3) {
   return result;
 }
 
-// ============================================================
-// ✅ FIX 2: getVideoList — extrai lista ordenada de vídeos
-// Prioriza o array videos[], fallback para youtubeId antigo.
-// ============================================================
+// ─────────────────────────────────────────────────────────────
+// getVideoList — retorna lista de { id, titulo, duracao }
+// Prioriza videos[], fallback para youtubeId.
+// ─────────────────────────────────────────────────────────────
 function getVideoList(prog) {
   if (!prog) return [];
   const fromArray = (prog.videos || [])
-    .map(v => extractYTId(v?.youtubeUrl || v?.url || ""))
-    .filter(Boolean);
+    .map(v => ({
+      id:     extractYTId(v?.youtubeUrl || v?.url || ""),
+      titulo: v?.titulo || "",
+      duracao: Number(v?.duracao || 0),
+    }))
+    .filter(v => v.id);
   if (fromArray.length > 0) return fromArray;
   const single = extractYTId(prog.youtubeId);
-  return single ? [single] : [];
+  return single ? [{ id: single, titulo: prog.nome || "", duracao: Number(prog.duracao || 0) }] : [];
+}
+
+// Dado o tempo decorrido no programa e a lista de vídeos,
+// retorna { index, startInVideo } — qual vídeo está tocando e em que segundo.
+function resolveVideoIndex(videoList, elapsedInProg) {
+  if (!videoList.length) return { index: 0, startInVideo: 0 };
+  let acc = 0;
+  for (let i = 0; i < videoList.length; i++) {
+    const dur = videoList[i].duracao || 0;
+    // Se não há duração cadastrada (0), assume que está no i-ésimo vídeo
+    if (dur === 0 || elapsedInProg < acc + dur || i === videoList.length - 1) {
+      return { index: i, startInVideo: Math.max(0, elapsedInProg - acc) };
+    }
+    acc += dur;
+  }
+  return { index: videoList.length - 1, startInVideo: 0 };
 }
 
 // ============================================
@@ -240,7 +260,7 @@ function scheduleNotif(prog,ch,min=5){ const ns=getNow();const ts=prog.horarioIn
 // ============================================
 // OSD HEADER
 // ============================================
-function OSDHeader({channel,program,visible,videoIndex,videoTotal}){
+function OSDHeader({channel,program,visible,videoIndex,videoTotal,episodioTitulo}){
   const[t,setT]=useState(new Date());
   useEffect(()=>{const i=setInterval(()=>setT(new Date()),1000);return()=>clearInterval(i)},[]);
   const ds=["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"];
@@ -263,15 +283,23 @@ function OSDHeader({channel,program,visible,videoIndex,videoTotal}){
             <span style={{fontSize:28,fontWeight:800,color:"#fff"}}>{channel.numero}</span>
             <span style={{fontSize:22,fontWeight:700,color:channel.cor}}>{channel.nome}</span>
           </div>
-          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:2}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:2,flexWrap:"wrap"}}>
             <span style={{fontSize:20,fontWeight:700,color:"#fff"}}>{program.nome}</span>
-            {/* ✅ FIX 2: Indicador de vídeo atual quando há múltiplos */}
             {videoTotal > 1 && (
-              <span style={{fontSize:12,fontWeight:700,padding:"3px 8px",borderRadius:4,background:"rgba(156,39,176,0.4)",border:"1px solid rgba(156,39,176,0.6)",color:"#ce93d8"}}>
-                {videoIndex + 1}/{videoTotal}
+              <span style={{fontSize:12,fontWeight:700,padding:"3px 9px",borderRadius:4,
+                background:"rgba(156,39,176,0.45)",border:"1px solid rgba(156,39,176,0.7)",
+                color:"#e1bee7",letterSpacing:0.3}}>
+                Ep {videoIndex + 1}/{videoTotal}
               </span>
             )}
           </div>
+          {/* Título do episódio (quando diferente do nome do programa) */}
+          {videoTotal > 1 && episodioTitulo && episodioTitulo !== program.nome && (
+            <div style={{fontSize:14,color:"#ce93d8",marginBottom:2,
+              maxWidth:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+              {episodioTitulo}
+            </div>
+          )}
           <div style={{display:"flex",alignItems:"center",gap:10,marginTop:4}}>
             <span style={{fontSize:15,color:"#bbb"}}>{program.horarioTexto} - {program.horarioFimTexto}</span>
             <Badge c={program.classificacao} big/>
@@ -785,79 +813,79 @@ function ProgModal({program,channel,onClose,onWatch}){
   </div>;
 }
 
-// ============================================================
-// ✅ FIX 3: PLAYER STATE — gerencia qual vídeo está tocando
-// Separado do componente principal para evitar re-renders
-// desnecessários causados pelo tick de 3s.
-// ============================================================
+// ─────────────────────────────────────────────────────────────
+// usePlayerState — playlist-aware
+// • Ao trocar de programa: usa resolveVideoIndex para descobrir
+//   qual episódio está no ar agora (usando duração de cada vídeo)
+// • nextVideo: avança para o próximo episódio
+// • updateMuted: recarrega sem trocar de vídeo
+// ─────────────────────────────────────────────────────────────
 function usePlayerState(cp, curCh) {
-  const videoListRef  = useRef([]);
+  const videoListRef  = useRef([]);   // [{ id, titulo, duracao }]
   const videoIndexRef = useRef(0);
   const prevProgIdRef = useRef(null);
   const ytKeyRef      = useRef("");
-  const ytStartRef    = useRef(0);
   const [playerState, setPlayerState] = useState({
-    ytKey: "", src: null, videoIndex: 0, videoTotal: 0,
+    ytKey: "", src: null, videoIndex: 0, videoTotal: 0, episodioTitulo: "",
   });
 
   const buildSrc = useCallback((videoId, startSec, muted) => {
     if (!videoId) return null;
-    return `https://www.youtube.com/embed/${videoId}?autoplay=1&mute=${muted?1:0}&start=${Math.floor(startSec)}&controls=0&disablekb=1&modestbranding=1&rel=0&showinfo=0&iv_load_policy=3&fs=0&playsinline=1&enablejsapi=0`;
+    return `https://www.youtube.com/embed/${videoId}?autoplay=1&mute=${muted?1:0}&start=${Math.floor(Math.max(0,startSec))}&controls=0&disablekb=1&modestbranding=1&rel=0&showinfo=0&iv_load_policy=3&fs=0&playsinline=1&enablejsapi=0`;
   }, []);
 
-  // Chamado quando o programa muda
+  // Chamado quando o programa muda — descobre qual episódio está no ar
   const onProgramChange = useCallback((prog, muted) => {
-    const list = getVideoList(prog);
-    videoListRef.current  = list;
-    videoIndexRef.current = 0;
-    prevProgIdRef.current = prog.id;
-
-    // Calcula o vídeo correto baseado no tempo decorrido
-    // Se há múltiplos vídeos e duração conhecida de cada um,
-    // poderíamos calcular qual está no ar. Por ora, começa do 0
-    // com o start correto dentro do programa.
+    const list    = getVideoList(prog);
     const elapsed = getElapsed(prog);
-    ytStartRef.current = elapsed;
-    ytKeyRef.current   = `${curCh}_${prog.id}_0_${Date.now()}`;
+    // resolveVideoIndex usa a duração individual de cada vídeo
+    // para calcular exatamente qual episódio deve estar tocando
+    const { index, startInVideo } = resolveVideoIndex(list, elapsed);
 
-    const videoId = list[0] || null;
+    videoListRef.current  = list;
+    videoIndexRef.current = index;
+    prevProgIdRef.current = prog.id;
+    ytKeyRef.current      = `${curCh}_${prog.id}_${index}_${Date.now()}`;
+
     setPlayerState({
-      ytKey: ytKeyRef.current,
-      src: buildSrc(videoId, elapsed, muted),
-      videoIndex: 0,
-      videoTotal: list.length,
+      ytKey:          ytKeyRef.current,
+      src:            buildSrc(list[index]?.id, startInVideo, muted),
+      videoIndex:     index,
+      videoTotal:     list.length,
+      episodioTitulo: list[index]?.titulo || "",
     });
   }, [curCh, buildSrc]);
 
-  // Avança para o próximo vídeo na lista
+  // Avança para o próximo episódio (manual ou automático)
   const nextVideo = useCallback((muted) => {
     const list = videoListRef.current;
     const next = videoIndexRef.current + 1;
-    if (next >= list.length) return false; // não há próximo
+    if (next >= list.length) return false;
 
     videoIndexRef.current = next;
     ytKeyRef.current = `${curCh}_${prevProgIdRef.current}_${next}_${Date.now()}`;
 
     setPlayerState(prev => ({
       ...prev,
-      ytKey: ytKeyRef.current,
-      src: buildSrc(list[next], 0, muted),
-      videoIndex: next,
+      ytKey:          ytKeyRef.current,
+      src:            buildSrc(list[next]?.id, 0, muted),
+      videoIndex:     next,
+      episodioTitulo: list[next]?.titulo || "",
     }));
     return true;
   }, [curCh, buildSrc]);
 
-  // Atualiza src quando muted muda (sem trocar vídeo)
+  // Recarrega src ao desmutar sem trocar de episódio
   const updateMuted = useCallback((muted) => {
-    const list = videoListRef.current;
-    const idx  = videoIndexRef.current;
-    const videoId = list[idx] || null;
+    const list    = videoListRef.current;
+    const idx     = videoIndexRef.current;
+    const videoId = list[idx]?.id;
     if (!videoId) return;
     ytKeyRef.current = ytKeyRef.current + "_um";
     setPlayerState(prev => ({
       ...prev,
       ytKey: ytKeyRef.current,
-      src: buildSrc(videoId, 0, muted),
+      src:   buildSrc(videoId, 0, muted),
     }));
   }, [buildSrc]);
 
@@ -1104,7 +1132,7 @@ export default function TVWeb(){
   );
   if (!ch) return null;
 
-  const { src: ytSrc, ytKey, videoIndex, videoTotal } = playerState;
+  const { src: ytSrc, ytKey, videoIndex, videoTotal, episodioTitulo } = playerState;
   const showPlayer = ytSrc && !cp?.isPlaceholder;
 
   // ============================================
@@ -1176,16 +1204,22 @@ export default function TVWeb(){
       {videoTotal > 1 && showOSD && !showEPG && !showFull && (
         <button
           onClick={e => { e.stopPropagation(); handleNextVideo(); }}
+          title={`Próximo episódio (${videoIndex + 2}/${videoTotal})`}
           style={{
             position:"absolute",top:"50%",right:80,transform:"translateY(-50%)",zIndex:15,
-            background:"rgba(0,0,0,0.7)",border:"1px solid rgba(156,39,176,0.5)",
-            color:"#ce93d8",padding:"10px 18px",borderRadius:8,cursor:"pointer",
-            fontSize:13,fontWeight:700,display:"flex",flexDirection:"column",
-            alignItems:"center",gap:4,
+            background:"rgba(0,0,0,0.75)",border:"1px solid rgba(156,39,176,0.5)",
+            color:"#ce93d8",padding:"10px 16px",borderRadius:8,cursor:"pointer",
+            display:"flex",flexDirection:"column",alignItems:"center",gap:3,
           }}
         >
-          <span style={{fontSize:20}}>⏭</span>
-          <span>{videoIndex + 1}/{videoTotal}</span>
+          <span style={{fontSize:22}}>⏭</span>
+          <span style={{fontSize:11,fontWeight:700}}>Ep {videoIndex + 1}/{videoTotal}</span>
+          {videoIndex + 1 < videoTotal && (
+            <span style={{fontSize:9,color:"#9c27b0",maxWidth:80,
+              overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",textAlign:"center"}}>
+              próximo
+            </span>
+          )}
         </button>
       )}
 
@@ -1195,6 +1229,7 @@ export default function TVWeb(){
         visible={showOSD && !showEPG && !showFull}
         videoIndex={videoIndex}
         videoTotal={videoTotal}
+        episodioTitulo={episodioTitulo}
       />
 
       {/* ===== OSD FOOTER ===== */}
