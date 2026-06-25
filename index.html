@@ -2,17 +2,118 @@
 <html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#000000" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+
+    <!-- ── SEO ── -->
+    <title>TREND TV — Assista TV ao Vivo Online</title>
+    <meta name="description"
+      content="Assista TV ao vivo diretamente no navegador. Canais variados com guia de programação completo, 24 horas por dia." />
+    <meta name="keywords"
+      content="TV ao vivo, televisão online, canais ao vivo, streaming grátis, guia de programação" />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="https://trendtv.vercel.app/" />
+
+    <!-- ── PWA ── -->
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#0a0c12" />
+    <meta name="mobile-web-app-capable" content="yes" />
+
+    <!-- iOS PWA -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="TREND TV" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <link rel="apple-touch-startup-image" href="/icons/icon-512.png" />
+
+    <!-- ── Open Graph (compartilhamento social) ── -->
+    <meta property="og:type"        content="website" />
+    <meta property="og:url"         content="https://trendtv.vercel.app/" />
+    <meta property="og:title"       content="TREND TV — TV ao Vivo Online" />
+    <meta property="og:description" content="Assista TV ao vivo no navegador com guia de programação completo." />
+    <meta property="og:image"       content="https://trendtv.vercel.app/og-image.jpg" />
+    <meta property="og:locale"      content="pt_BR" />
+    <meta property="og:site_name"   content="TREND TV" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card"        content="summary_large_image" />
+    <meta name="twitter:title"       content="TREND TV — TV ao Vivo Online" />
+    <meta name="twitter:description" content="Assista TV ao vivo no navegador gratuitamente." />
+    <meta name="twitter:image"       content="https://trendtv.vercel.app/og-image.jpg" />
+
+    <!-- ── Favicon ── -->
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <title>TVWEB</title>
-    <style>
-      * { margin: 0; padding: 0; box-sizing: border-box; }
-      body { background: #000; font-family: 'Segoe UI', 'Roboto', -apple-system, sans-serif; }
-    </style>
+    <link rel="icon" type="image/png"     href="/icons/icon-192.png" sizes="192x192" />
+
+    <!-- ── Preconnect para performance ── -->
+    <link rel="preconnect" href="https://www.youtube.com" />
+    <link rel="preconnect" href="https://img.youtube.com" />
+    <link rel="preconnect" href="https://firestore.googleapis.com" />
+    <link rel="dns-prefetch" href="https://www.youtube.com" />
+
+    <!-- ── JSON-LD Structured Data ── -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      "name": "TREND TV",
+      "url": "https://trendtv.vercel.app/",
+      "description": "Assista TV ao vivo online com guia de programação completo.",
+      "potentialAction": {
+        "@type": "SearchAction",
+        "target": "https://trendtv.vercel.app/?q={search_term_string}",
+        "query-input": "required name=search_term_string"
+      }
+    }
+    </script>
   </head>
+
   <body>
     <div id="root"></div>
+
+    <!-- Entrada do app React -->
     <script type="module" src="/src/main.jsx"></script>
+
+    <!-- ── Registro do Service Worker (PWA) ── -->
+    <script>
+      if ("serviceWorker" in navigator) {
+        window.addEventListener("load", () => {
+          navigator.serviceWorker
+            .register("/sw.js", { scope: "/" })
+            .then((reg) => {
+              console.log("[SW] registrado:", reg.scope);
+              // Notifica o usuário quando há update disponível
+              reg.addEventListener("updatefound", () => {
+                const newSW = reg.installing;
+                newSW?.addEventListener("statechange", () => {
+                  if (newSW.state === "installed" && navigator.serviceWorker.controller) {
+                    console.log("[SW] Nova versão disponível — recarregue para atualizar");
+                  }
+                });
+              });
+            })
+            .catch((err) => console.warn("[SW] falha no registro:", err));
+        });
+      }
+    </script>
+
+    <!-- ── Prompt de instalação PWA ── -->
+    <script>
+      let deferredPrompt = null;
+      window.addEventListener("beforeinstallprompt", (e) => {
+        e.preventDefault();
+        deferredPrompt = e;
+        // Dispara evento custom para o React exibir o banner
+        window.dispatchEvent(new CustomEvent("pwa-installable", { detail: e }));
+      });
+      // Expõe função global para o React chamar
+      window.installPWA = async () => {
+        if (!deferredPrompt) return;
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        console.log("[PWA] resultado da instalação:", outcome);
+        deferredPrompt = null;
+        window.dispatchEvent(new CustomEvent("pwa-installed"));
+      };
+    </script>
   </body>
 </html>
