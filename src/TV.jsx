@@ -130,6 +130,77 @@ function getCurProg(schedule) {
 }
 function getElapsed(prog) { return Math.max(0, getNow() - prog.horarioInicio) }
 
+// ─────────────────────────────────────────────────────────────────
+// buildMultiDaySchedule — gera programação contínua de DAYS dias
+// a partir de hoje, em "segundos absolutos" (dia 0 = hoje 00:00).
+// Retorna itens com: absStart, absEnd, dateLabel (ex: "Qua 25/6")
+// ─────────────────────────────────────────────────────────────────
+function addDays(dateStr, n) {
+  const d = new Date(dateStr + "T00:00:00");
+  d.setDate(d.getDate() + n);
+  return d.toISOString().split("T")[0];
+}
+function dayLabel(dateStr) {
+  const d = new Date(dateStr + "T00:00:00");
+  const ds = ["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"];
+  return `${ds[d.getDay()]} ${d.getDate()}/${d.getMonth()+1}`;
+}
+function buildMultiDaySchedule(programs, channelId, days = 3) {
+  const today = getToday();
+  const result = [];
+  for (let d = 0; d < days; d++) {
+    const dateStr  = addDays(today, d);
+    const offset   = d * 86400; // segundos do início deste dia no timeline absoluto
+    const dayProgs = programs
+      .filter(p => p.canalId === channelId && p.data === dateStr)
+      .sort((a,b) => Number(a.horarioInicio) - Number(b.horarioInicio))
+      .map(p => ({
+        ...p,
+        horarioInicio: Number(p.horarioInicio),
+        horarioFim:    Number(p.horarioFim),
+        duracao:       Number(p.duracao),
+        absStart:      offset + Number(p.horarioInicio),
+        absEnd:        offset + Number(p.horarioFim),
+        horarioTexto:  fmtHM(Number(p.horarioInicio)),
+        horarioFimTexto: fmtHM(Number(p.horarioFim)),
+        dateLabel:     dayLabel(dateStr),
+        dayOffset:     d,
+      }));
+    // Preenche gaps com "Voltamos já"
+    const withGaps = [];
+    let cur = 0;
+    for (let i = 0; i < dayProgs.length; i++) {
+      while (cur < dayProgs[i].horarioInicio) {
+        const gapEnd = Math.min(cur + 600, dayProgs[i].horarioInicio);
+        withGaps.push({ ...VOLTAMOS_JA,
+          id:`_gap_${d}_${cur}`, isPlaceholder:true,
+          horarioInicio:cur, horarioFim:gapEnd, duracao:gapEnd-cur,
+          absStart:offset+cur, absEnd:offset+gapEnd,
+          horarioTexto:fmtHM(cur), horarioFimTexto:fmtHM(gapEnd),
+          dateLabel:dayLabel(dateStr), dayOffset:d,
+        });
+        cur = gapEnd;
+      }
+      withGaps.push(dayProgs[i]);
+      cur = dayProgs[i].horarioFim;
+    }
+    // Gap final até meia-noite
+    while (cur < 86400) {
+      const gapEnd = Math.min(cur + 600, 86400);
+      withGaps.push({ ...VOLTAMOS_JA,
+        id:`_gap_${d}_end_${cur}`, isPlaceholder:true,
+        horarioInicio:cur, horarioFim:gapEnd, duracao:gapEnd-cur,
+        absStart:offset+cur, absEnd:offset+gapEnd,
+        horarioTexto:fmtHM(cur), horarioFimTexto:fmtHM(gapEnd),
+        dateLabel:dayLabel(dateStr), dayOffset:d,
+      });
+      cur = gapEnd;
+    }
+    result.push(...withGaps);
+  }
+  return result;
+}
+
 // ============================================================
 // ✅ FIX 2: getVideoList — extrai lista ordenada de vídeos
 // Prioriza o array videos[], fallback para youtubeId antigo.
@@ -276,42 +347,42 @@ function OSDFooter({program,nextProgram,onOpenEPG,onOpenFull,onFullscreen,visibl
 // EPG COMPACTO
 // ============================================
 function EPGCompact({channels,allPrograms,currentChannelId,onSelectChannel,onSelectProgram,onOpenFull,onClose}){
-  const scrollRef   = useRef(null);
-  const RULER_H     = 36;   // altura da régua de horas
-  const ROW_H       = 82;   // altura de cada linha de canal (estilo Globoplay)
-  const PX_PER_SEC  = 0.11; // pixels por segundo ≈ 396px/hora — escala densa
+  const scrollRef  = useRef(null);
+  const RULER_H    = 36;
+  const ROW_H      = 82;
+  const PX_PER_SEC = 0.11;  // ~396px/hora
+  const EPG_DAYS   = 3;     // hoje + amanhã + depois
 
-  // ─── Relógio reativo ────────────────────────────────────────────
+  // Relógio reativo
   const [clock, setClock] = useState(new Date());
   useEffect(() => {
     const i = setInterval(() => setClock(new Date()), 1000);
     return () => clearInterval(i);
   }, []);
 
-  // Segundos desde meia-noite (local)
-  const nowSec = clock.getHours()*3600 + clock.getMinutes()*60 + clock.getSeconds();
+  // Segundos desde meia-noite LOCAL (hoje = dia 0)
+  const nowSec    = clock.getHours()*3600 + clock.getMinutes()*60 + clock.getSeconds();
+  // "Agora" em segundos absolutos no timeline multi-dia
+  const nowAbs    = nowSec; // dia 0 começa em 0, dia 1 em 86400, etc.
 
-  // ── A régua começa 20 min antes do "agora" e vai até 23:59 ──────
-  // Isso elimina a área preta gigante do passado.
-  const LOOK_BACK   = 20 * 60;   // 20 minutos de contexto passado visível
-  const rulerStart  = Math.max(0, nowSec - LOOK_BACK); // ex: 21:22
-  const rulerEnd    = 86400;                            // sempre até meia-noite
-  const rulerSpan   = rulerEnd - rulerStart;            // duração visível em seg
+  // A régua começa 20 min antes do agora e vai até EPG_DAYS*86400
+  const LOOK_BACK  = 20 * 60;
+  const rulerStart = Math.max(0, nowAbs - LOOK_BACK);
+  const rulerEnd   = EPG_DAYS * 86400;
+  const totalW     = (rulerEnd - rulerStart) * PX_PER_SEC;
 
-  // Converte segundos absolutos (desde 00:00) para pixels dentro da régua
-  const secToPx = (sec) => (Number(sec) - rulerStart) * PX_PER_SEC;
-  const totalW  = rulerSpan * PX_PER_SEC; // largura total do grid
+  // Converte segundos absolutos → pixels
+  const absToPx = (abs) => (Number(abs) - rulerStart) * PX_PER_SEC;
+  // Pixel da linha AGORA
+  const nowPx   = absToPx(nowAbs);
 
-  // Pixel da linha "AGORA" dentro do grid (= LOOK_BACK * PX_PER_SEC)
-  const nowPx = (nowSec - rulerStart) * PX_PER_SEC;
-
-  // Scroll inicial: coloca "AGORA" bem no início da viewport (20px de margem)
+  // Scroll inicial: AGORA fica na borda esquerda
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollLeft = 0;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Trava scroll: nunca permite retroceder além do início da régua
+  // Trava scroll para não voltar antes do rulerStart
   const handleScroll = useCallback(() => {
     if (scrollRef.current && scrollRef.current.scrollLeft < 0)
       scrollRef.current.scrollLeft = 0;
@@ -326,9 +397,29 @@ function EPGCompact({channels,allPrograms,currentChannelId,onSelectChannel,onSel
     ...channels.filter(ch => ch.id !== currentChannelId),
   ], [channels, currentChannelId]);
 
-  // Horas inteiras dentro da janela visível (rulerStart → 23:00)
-  const rulerHours = Array.from({length: 24}, (_, h) => h)
-    .filter(h => h * 3600 >= rulerStart && h * 3600 < rulerEnd);
+  // Marcações horárias: uma por hora no range visível
+  // Inclui meia-hora como marcação menor
+  const rulerMarks = useMemo(() => {
+    const marks = [];
+    // Começa na hora cheia seguinte ao rulerStart
+    const firstHour = Math.ceil(rulerStart / 3600);
+    for (let abs = firstHour * 3600; abs < rulerEnd; abs += 1800) {
+      const isFullHour = abs % 3600 === 0;
+      const dayNum     = Math.floor(abs / 86400);
+      const secInDay   = abs % 86400;
+      marks.push({ abs, isFullHour, dayNum, secInDay });
+    }
+    return marks;
+  }, [rulerStart, rulerEnd]);
+
+  // Separadores de dia (meia-noite de cada dia seguinte)
+  const daySeparators = useMemo(() => {
+    const seps = [];
+    for (let d = 1; d < EPG_DAYS; d++) {
+      seps.push({ abs: d * 86400, label: dayLabel(addDays(getToday(), d)) });
+    }
+    return seps;
+  }, []);
 
   return (
     <div onClick={e => e.stopPropagation()}
@@ -344,7 +435,11 @@ function EPGCompact({channels,allPrograms,currentChannelId,onSelectChannel,onSel
             {String(clock.getHours()).padStart(2,"0")}:{String(clock.getMinutes()).padStart(2,"0")}:{String(clock.getSeconds()).padStart(2,"0")}
           </span>
         </div>
-        <div style={{display:"flex",gap:8}}>
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          {/* Indicador de dias visíveis */}
+          <span style={{fontSize:11,color:"#555",marginRight:4}}>
+            Hoje · Amanhã · {dayLabel(addDays(getToday(), 2)).split(" ")[0]}
+          </span>
           <button onClick={onOpenFull}
             style={{background:"rgba(26,115,232,0.15)",border:"1px solid rgba(26,115,232,0.3)",
               color:"#4fc3f7",padding:"7px 16px",borderRadius:4,cursor:"pointer",fontSize:12,fontWeight:600}}>
@@ -357,29 +452,27 @@ function EPGCompact({channels,allPrograms,currentChannelId,onSelectChannel,onSel
         </div>
       </div>
 
-      {/* ── CORPO: coluna de canais + grid scrollável ── */}
+      {/* ── CORPO ── */}
       <div style={{background:"rgba(10,12,18,0.98)",display:"flex",
         overflow:"hidden",maxHeight:"58vh",minHeight:280}}>
 
         {/* Coluna fixa de canais */}
         <div style={{width:130,borderRight:"1px solid rgba(255,255,255,0.08)",
-          flexShrink:0,overflowY:"hidden",background:"rgba(10,12,18,0.98)"}}>
-          {/* Espaço da régua */}
+          flexShrink:0,background:"rgba(10,12,18,0.98)"}}>
           <div style={{height:RULER_H,borderBottom:"1px solid rgba(255,255,255,0.07)"}}/>
           {sortedChannels.map(ch => {
             const isCur = ch.id === currentChannelId;
             return (
               <div key={ch.id} onClick={() => onSelectChannel(ch.id)}
                 style={{height:ROW_H,display:"flex",alignItems:"center",justifyContent:"center",
-                  cursor:"pointer",gap:8,
+                  cursor:"pointer",
                   borderBottom:"1px solid rgba(255,255,255,0.05)",
                   background:isCur?"rgba(26,115,232,0.13)":"rgba(14,16,24,0.6)",
-                  borderLeft:isCur?"3px solid #1a73e8":"3px solid transparent",
-                  transition:"background 0.15s"}}>
+                  borderLeft:isCur?"3px solid #1a73e8":"3px solid transparent"}}>
                 <div style={{textAlign:"center"}}>
                   <ChLogo ch={ch} size={32}/>
                   <div style={{fontSize:10,fontWeight:600,marginTop:3,
-                    color:isCur?"#fff":"#777",maxWidth:90,overflow:"hidden",
+                    color:isCur?"#fff":"#666",maxWidth:90,overflow:"hidden",
                     textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ch.nome}</div>
                 </div>
               </div>
@@ -389,49 +482,69 @@ function EPGCompact({channels,allPrograms,currentChannelId,onSelectChannel,onSel
 
         {/* Grid scrollável */}
         <div ref={scrollRef} onScroll={handleScroll}
-          style={{flex:1,overflowX:"auto",overflowY:"hidden",position:"relative",
-            /* Firefox */ scrollbarWidth:"thin",
-            /* Webkit via CSS abaixo */ }}>
+          style={{flex:1,overflowX:"auto",overflowY:"hidden",position:"relative"}}>
 
-          {/* ── RÉGUA DE HORAS ── */}
+          {/* ── RÉGUA ── */}
           <div style={{position:"relative",height:RULER_H,width:totalW,
             borderBottom:"1px solid rgba(255,255,255,0.08)",
             background:"rgba(10,12,18,0.98)",flexShrink:0}}>
 
-            {rulerHours.map(h => {
-              const x = secToPx(h * 3600);
+            {/* Separadores de dia na régua — faixa colorida + label */}
+            {daySeparators.map(({abs, label}) => {
+              const x = absToPx(abs);
               return (
-                <div key={h} style={{position:"absolute",left:x,top:0,bottom:0,
-                  borderLeft:"1px solid rgba(255,255,255,0.08)"}}>
-                  <span style={{fontSize:11,fontWeight:600,color:"#aaa",
-                    padding:"0 6px",lineHeight:`${RULER_H}px`,whiteSpace:"nowrap",display:"block"}}>
-                    {String(h).padStart(2,"0")}:00
+                <div key={abs} style={{position:"absolute",left:x,top:0,bottom:0,
+                  borderLeft:"2px solid rgba(26,115,232,0.5)",zIndex:3,pointerEvents:"none"}}>
+                  <div style={{position:"absolute",top:0,left:3,
+                    fontSize:10,fontWeight:700,color:"#4fc3f7",
+                    background:"rgba(10,12,18,0.95)",padding:"2px 6px",
+                    borderRadius:"0 0 4px 0",whiteSpace:"nowrap",lineHeight:`${RULER_H}px`}}>
+                    {label}
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* Marcações horárias */}
+            {rulerMarks.map(({abs, isFullHour, secInDay}) => {
+              const x = absToPx(abs);
+              // Não renderiza label se colidirá com separador de dia (< 40px de distância)
+              const nearSep = daySeparators.some(s => Math.abs(absToPx(s.abs) - x) < 45);
+              return (
+                <div key={abs} style={{position:"absolute",left:x,top:0,bottom:0,
+                  borderLeft:isFullHour
+                    ? "1px solid rgba(255,255,255,0.1)"
+                    : "1px solid rgba(255,255,255,0.04)"}}>
+                  {isFullHour && !nearSep && (
+                    <span style={{fontSize:11,fontWeight:600,
+                      color:"rgba(255,255,255,0.45)",
+                      padding:"0 5px",lineHeight:`${RULER_H}px`,
+                      whiteSpace:"nowrap",display:"block"}}>
+                      {String(Math.floor(secInDay/3600)).padStart(2,"0")}:00
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+
+            {/* Marcação de meia-hora em cinza muito sutil */}
+            {rulerMarks.filter(m => !m.isFullHour).map(({abs, secInDay}) => {
+              const x = absToPx(abs);
+              return (
+                <div key={`hf_${abs}`} style={{position:"absolute",left:x,top:"60%",bottom:0}}>
+                  <span style={{fontSize:8,color:"rgba(255,255,255,0.2)",
+                    padding:"0 3px",display:"block",whiteSpace:"nowrap"}}>
+                    {String(Math.floor(secInDay/3600)).padStart(2,"0")}:30
                   </span>
                 </div>
               );
             })}
 
-            {/* Marcação de meia-hora */}
-            {rulerHours.map(h => {
-              const x = secToPx(h * 3600 + 1800);
-              if (x < 0) return null;
-              return (
-                <div key={`h${h}30`} style={{position:"absolute",left:x,top:"55%",bottom:0,
-                  borderLeft:"1px solid rgba(255,255,255,0.04)"}}>
-                  <span style={{fontSize:9,color:"rgba(255,255,255,0.25)",
-                    padding:"0 4px",whiteSpace:"nowrap",display:"block"}}>
-                    {String(h).padStart(2,"0")}:30
-                  </span>
-                </div>
-              );
-            })}
-
-            {/* ── LINHA VERMELHA "AGORA" (traversa régua + todos canais) ── */}
+            {/* Linha vermelha AGORA */}
             <div style={{position:"absolute",top:0,left:nowPx,width:2,
               bottom:-(ROW_H * sortedChannels.length),
               background:"#e53935",zIndex:10,
-              boxShadow:"0 0 6px rgba(229,57,53,0.8)",pointerEvents:"none"}}>
-              {/* Triângulo/pino no topo */}
+              boxShadow:"0 0 6px rgba(229,57,53,0.7)",pointerEvents:"none"}}>
               <div style={{position:"absolute",top:-6,left:-5,width:0,height:0,
                 borderLeft:"6px solid transparent",borderRight:"6px solid transparent",
                 borderTop:"8px solid #e53935"}}/>
@@ -440,15 +553,15 @@ function EPGCompact({channels,allPrograms,currentChannelId,onSelectChannel,onSel
 
           {/* ── LINHAS DE CANAL ── */}
           {sortedChannels.map(ch => {
-            const sched     = buildSchedule(allPrograms, ch.id);
-            const cur       = getCurProg(sched);
-            const isCurrent = ch.id === currentChannelId;
+            const isCurrent  = ch.id === currentChannelId;
+            const multiSched = buildMultiDaySchedule(allPrograms, ch.id, EPG_DAYS);
+            const cur        = getCurProg(buildSchedule(allPrograms, ch.id));
 
-            // Apenas programas que ainda não terminaram
-            const visible = sched.filter(p =>
+            // Filtra: só programas visíveis no range (não placeholders, não encerrados)
+            const visible = multiSched.filter(p =>
               !p.isPlaceholder &&
-              Number(p.horarioFim) <= 86400 &&
-              Number(p.horarioFim) > nowSec
+              p.absEnd > nowAbs &&
+              p.absStart < rulerEnd
             );
 
             return (
@@ -457,22 +570,27 @@ function EPGCompact({channels,allPrograms,currentChannelId,onSelectChannel,onSel
                 borderBottom:"1px solid rgba(255,255,255,0.05)",
                 background:isCurrent?"rgba(26,115,232,0.04)":"rgba(12,14,22,0.5)",
               }}>
+
+                {/* Separadores de dia nas faixas de canal */}
+                {daySeparators.map(({abs, label}) => {
+                  const x = absToPx(abs);
+                  return (
+                    <div key={abs} style={{position:"absolute",left:x,top:0,bottom:0,
+                      width:2,background:"rgba(26,115,232,0.25)",zIndex:5,pointerEvents:"none"}}/>
+                  );
+                })}
+
                 {visible.map(prog => {
-                  const startSec = Number(prog.horarioInicio);
-                  const endSec   = Number(prog.horarioFim);
-                  const isNow    = cur?.id === prog.id;
+                  const isNow      = cur?.id === prog.id || cur?.id === prog.id?.replace(/_rep\d+$/, "");
+                  const visualLeft = isNow ? nowPx : Math.max(0, absToPx(prog.absStart));
+                  const visualW    = Math.max(absToPx(prog.absEnd) - visualLeft, 48);
 
-                  // Borda esquerda do bloco: programa ao vivo começa na linha AGORA
-                  const visualLeft = isNow
-                    ? nowPx
-                    : Math.max(0, secToPx(startSec));
-                  const visualRight = secToPx(endSec);
-                  const visualW = Math.max(visualRight - visualLeft, 48);
-
-                  // Mostrar barra de progresso no bloco ao vivo
                   const pct = isNow
-                    ? Math.min(100, ((nowSec - startSec) / (endSec - startSec)) * 100)
+                    ? Math.min(100, ((nowAbs - prog.absStart) / (prog.absEnd - prog.absStart)) * 100)
                     : 0;
+
+                  // Mostra o label do dia dentro do bloco se ele atravessa a meia-noite
+                  const showDayLabel = prog.dayOffset > 0 && absToPx(prog.absStart) >= 0;
 
                   return (
                     <div key={prog.id}
@@ -482,53 +600,70 @@ function EPGCompact({channels,allPrograms,currentChannelId,onSelectChannel,onSel
                         top:3,bottom:3,
                         cursor:"pointer",overflow:"hidden",borderRadius:3,
                         background: isNow
-                          ? isCurrent?"rgba(48,62,88,1)":"rgba(32,40,60,1)"
-                          : isCurrent?"rgba(28,34,50,0.9)":"rgba(20,24,38,0.85)",
+                          ? isCurrent ? "rgba(48,62,88,1)" : "rgba(32,40,60,1)"
+                          : prog.dayOffset === 1
+                            ? isCurrent ? "rgba(26,34,52,0.9)" : "rgba(18,22,38,0.85)"
+                            : prog.dayOffset === 2
+                              ? isCurrent ? "rgba(22,28,46,0.85)" : "rgba(15,18,32,0.8)"
+                              : isCurrent ? "rgba(28,34,50,0.9)"  : "rgba(20,24,38,0.85)",
                         borderLeft: isNow
                           ? "3px solid #e53935"
                           : "1px solid rgba(255,255,255,0.05)",
-                        borderTop:"1px solid rgba(255,255,255,0.06)",
+                        borderTop:"1px solid rgba(255,255,255,0.05)",
                         borderRight:"1px solid rgba(255,255,255,0.04)",
-                        borderBottom:"1px solid rgba(255,255,255,0.04)",
+                        borderBottom:"1px solid rgba(255,255,255,0.03)",
                         boxSizing:"border-box",transition:"background 0.12s",
                       }}
                       onMouseEnter={e => e.currentTarget.style.background = isNow
                         ? "rgba(60,78,112,1)"
                         : "rgba(38,46,68,0.95)"}
                       onMouseLeave={e => e.currentTarget.style.background = isNow
-                        ? isCurrent?"rgba(48,62,88,1)":"rgba(32,40,60,1)"
-                        : isCurrent?"rgba(28,34,50,0.9)":"rgba(20,24,38,0.85)"}
+                        ? isCurrent ? "rgba(48,62,88,1)" : "rgba(32,40,60,1)"
+                        : prog.dayOffset === 1
+                          ? isCurrent ? "rgba(26,34,52,0.9)" : "rgba(18,22,38,0.85)"
+                          : prog.dayOffset === 2
+                            ? isCurrent ? "rgba(22,28,46,0.85)" : "rgba(15,18,32,0.8)"
+                            : isCurrent ? "rgba(28,34,50,0.9)"  : "rgba(20,24,38,0.85)"}
                     >
-                      {/* Barra de progresso no fundo do bloco ao vivo */}
+                      {/* Barra de progresso no bloco ao vivo */}
                       {isNow && (
                         <div style={{position:"absolute",bottom:0,left:0,height:2,
                           width:`${pct}%`,background:"#e53935",
                           transition:"width 1s linear",borderRadius:"0 1px 0 0"}}/>
                       )}
 
-                      {/* Conteúdo do bloco */}
-                      <div style={{padding:"6px 8px 4px 9px"}}>
-                        {/* Linha de horários */}
-                        <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:3}}>
+                      <div style={{padding:"5px 8px 4px 9px"}}>
+                        {/* Horário */}
+                        <div style={{display:"flex",alignItems:"center",gap:4,marginBottom:2}}>
                           <span style={{fontSize:10,fontWeight:600,
-                            color:isNow?"#e57373":"#888"}}>
-                            {fmtHM(startSec)}
+                            color:isNow?"#ef9a9a":"#777"}}>
+                            {prog.horarioTexto}
                           </span>
-                          <span style={{fontSize:9,color:"#555"}}>–</span>
-                          <span style={{fontSize:10,fontWeight:500,color:"#666"}}>
-                            {fmtHM(endSec)}
+                          <span style={{fontSize:9,color:"#444"}}>–</span>
+                          <span style={{fontSize:10,color:"#555"}}>
+                            {prog.horarioFimTexto}
                           </span>
                           {isNow && (
                             <span style={{fontSize:8,fontWeight:800,
                               padding:"1px 4px",borderRadius:2,
-                              background:"#c62828",color:"#fff",letterSpacing:0.5}}>
+                              background:"#c62828",color:"#fff",letterSpacing:0.3}}>
                               AO VIVO
                             </span>
                           )}
+                          {/* Badge do dia no bloco (amanhã / depois) */}
+                          {!isNow && prog.dayOffset > 0 && visualW > 120 && (
+                            <span style={{fontSize:8,fontWeight:700,
+                              padding:"1px 4px",borderRadius:2,
+                              background:"rgba(26,115,232,0.3)",
+                              border:"1px solid rgba(26,115,232,0.4)",
+                              color:"#90caf9",marginLeft:2}}>
+                              {prog.dayOffset === 1 ? "amanhã" : prog.dateLabel.split(" ")[0]}
+                            </span>
+                          )}
                         </div>
-                        {/* Nome do programa */}
+                        {/* Nome */}
                         <div style={{fontSize:13,fontWeight:isNow?700:600,
-                          color:isNow?"#fff":"#ccc",
+                          color:isNow?"#fff":prog.dayOffset>0?"#aaa":"#ccc",
                           whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",
                           lineHeight:1.25}}>
                           {prog.nome}
@@ -538,7 +673,7 @@ function EPGCompact({channels,allPrograms,currentChannelId,onSelectChannel,onSel
                   );
                 })}
 
-                {sched.length === 0 && (
+                {buildSchedule(allPrograms, ch.id).length === 0 && (
                   <div style={{position:"absolute",inset:0,display:"flex",
                     alignItems:"center",paddingLeft:12,color:"#333",fontSize:11}}>
                     Sem programação
