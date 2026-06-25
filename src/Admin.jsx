@@ -744,6 +744,7 @@ function ChannelEditor({channels,onAdd,onDelete}){
   const [logoType,setLT]=useState("emoji");
   const [logoUrl,setLU]=useState(null);
   const [cor,setCor]=useState("");
+  const [tipo,setTipo]=useState("geral");
   const [saving,setSaving]=useState(false);
 
   const startEdit=(ch)=>{setEditing(ch.id);setNome(ch.nome);setLogo(ch.logo);setLT(ch.logoType||"emoji");setLU(ch.logoUrl||null);setCor(ch.cor);setNumber(ch.numero||0);setTipo(ch.tipo||"geral")};
