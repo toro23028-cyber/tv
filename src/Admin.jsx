@@ -485,6 +485,425 @@ function ChannelEditor({channels,onAdd,onDelete}){
 }
 
 // ============================================
+// IMPORT MODAL
+// ============================================
+/*
+  FORMATOS ACEITOS NO TXT:
+  ─────────────────────────────────────────────
+  Formato 1 — bloco por data (recomendado):
+    CANAL: NomeDoCanal
+    DATA: 2026-06-25
+    00:00 | Nome do Programa | https://youtu.be/xxx
+    01:30 | Outro Programa   | dQw4w9WgXcQ
+    ...
+
+  Formato 2 — uma linha com tudo:
+    2026-06-25 | NomeDoCanal | 00:00 | Nome do Programa | https://youtu.be/xxx
+
+  Regras:
+  - Separador: | (pipe) ou TAB
+  - Horário: HH:MM ou H:MM
+  - YouTube: URL completa ou só o ID (11 chars)
+  - Classificação opcional no fim: L, 10, 12, 14, 16, 18
+  - Tags opcionais: HD, DUB, LEG, 4K, 5.1
+  ─────────────────────────────────────────────
+*/
+function parseImportTxt(txt, channels) {
+  const lines  = txt.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const items  = [];
+  const errors = [];
+
+  let curCanal = null;
+  let curData  = null;
+
+  const hmToSec = (hm) => {
+    const [h, m] = hm.split(":").map(Number);
+    return (h || 0) * 3600 + (m || 0) * 60;
+  };
+
+  const extractId = (s) => {
+    if (!s) return null;
+    const patterns = [
+      /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/,
+      /^([a-zA-Z0-9_-]{11})$/,
+    ];
+    for (const p of patterns) { const m = s.match(p); if (m) return m[1]; }
+    return null;
+  };
+
+  const resolveChannel = (name) => {
+    if (!name) return null;
+    const n = name.trim().toLowerCase();
+    return channels.find(c =>
+      c.nome.toLowerCase() === n ||
+      c.nome.toLowerCase().includes(n) ||
+      n.includes(c.nome.toLowerCase())
+    ) || null;
+  };
+
+  const CLASSIFS = ["L","10","12","14","16","18"];
+  const TAGS_OK  = ["HD","SD","4K","DUB","LEG","5.1","ORIG","INÉDITO","REPRISE"];
+
+  const parseLine = (line, lineNum) => {
+    // Tenta formato 2: DATA | CANAL | HH:MM | NOME | URL [| CLASSIF] [| TAGS]
+    const sep  = line.includes("|") ? "|" : "\t";
+    const cols = line.split(sep).map(c => c.trim()).filter(Boolean);
+
+    // Detecta se primeira coluna é uma data
+    if (cols.length >= 5 && /^\d{4}-\d{2}-\d{2}$/.test(cols[0])) {
+      const [data, canalNome, horario, nome, url, ...rest] = cols;
+      const ch    = resolveChannel(canalNome);
+      const ytId  = extractId(url);
+      const sec   = hmToSec(horario);
+      const classif = rest.find(r => CLASSIFS.includes(r)) || "L";
+      const tags    = rest.filter(r => TAGS_OK.includes(r));
+      if (!ch)   { errors.push(`Linha ${lineNum}: canal "${canalNome}" não encontrado`); return; }
+      if (!ytId) { errors.push(`Linha ${lineNum}: URL/ID YouTube inválido — "${url}"`); return; }
+      if (!nome) { errors.push(`Linha ${lineNum}: nome do programa vazio`); return; }
+      items.push({ data, canalId:ch.id, canalNome:ch.nome, horario, nome, ytId, sec, classif, tags });
+      return;
+    }
+
+    // Formato 1: HH:MM | NOME | URL [| CLASSIF] [| TAGS]
+    if (cols.length >= 3 && /^\d{1,2}:\d{2}$/.test(cols[0])) {
+      if (!curCanal) { errors.push(`Linha ${lineNum}: horário sem CANAL: definido antes`); return; }
+      if (!curData)  { errors.push(`Linha ${lineNum}: horário sem DATA: definida antes`);  return; }
+      const [horario, nome, url, ...rest] = cols;
+      const ytId    = extractId(url);
+      const sec     = hmToSec(horario);
+      const classif = rest.find(r => CLASSIFS.includes(r)) || "L";
+      const tags    = rest.filter(r => TAGS_OK.includes(r));
+      if (!ytId) { errors.push(`Linha ${lineNum}: URL/ID YouTube inválido — "${url}"`); return; }
+      if (!nome) { errors.push(`Linha ${lineNum}: nome vazio`); return; }
+      items.push({ data:curData, canalId:curCanal.id, canalNome:curCanal.nome, horario, nome, ytId, sec, classif, tags });
+      return;
+    }
+
+    // Diretiva CANAL:
+    if (/^canal:/i.test(line)) {
+      const nome = line.replace(/^canal:/i, "").trim();
+      curCanal = resolveChannel(nome);
+      if (!curCanal) errors.push(`Linha ${lineNum}: canal "${nome}" não existe no sistema`);
+      return;
+    }
+
+    // Diretiva DATA:
+    if (/^data:/i.test(line)) {
+      curData = line.replace(/^data:/i, "").trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(curData))
+        errors.push(`Linha ${lineNum}: data inválida "${curData}" (use AAAA-MM-DD)`);
+      return;
+    }
+
+    // Comentário (#) — ignora silenciosamente
+    if (line.startsWith("#")) return;
+
+    errors.push(`Linha ${lineNum}: não reconhecida — "${line.slice(0, 60)}"`);
+  };
+
+  lines.forEach((line, i) => parseLine(line, i + 1));
+
+  // Calcula horários fim baseado no próximo item (ou +1h como fallback)
+  // Agrupa por canal+data para calcular sequência
+  const groups = {};
+  items.forEach(it => {
+    const k = `${it.canalId}__${it.data}`;
+    if (!groups[k]) groups[k] = [];
+    groups[k].push(it);
+  });
+
+  const result = [];
+  Object.values(groups).forEach(grp => {
+    grp.sort((a,b) => a.sec - b.sec);
+    grp.forEach((it, i) => {
+      const nextSec = i < grp.length - 1 ? grp[i+1].sec : it.sec + 3600;
+      const dur     = Math.max(nextSec - it.sec, 300);
+      result.push({
+        id:           `import_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+        nome:         it.nome,
+        canalId:      it.canalId,
+        data:         it.data,
+        duracao:      dur,
+        horarioInicio: it.sec,
+        horarioFim:   it.sec + dur,
+        youtubeId:    it.ytId,
+        videos:       [{ youtubeUrl: it.ytId, titulo: it.nome }],
+        classificacao: it.classif,
+        tags:         it.tags.length ? it.tags : ["HD"],
+        sinopse:      "",
+        thumbnailType:"youtube",
+        thumbnailUrl: null,
+        _preview:     { canalNome: it.canalNome, horario: it.horario },
+      });
+    });
+  });
+
+  return { items: result, errors };
+}
+
+function ImportModal({ channels, dates, existingPrograms, onClose, onImport }) {
+  const [txt, setTxt]         = useState("");
+  const [parsed, setParsed]   = useState(null);   // { items, errors }
+  const [importing, setImp]   = useState(false);
+  const [overwrite, setOvr]   = useState(false);
+  const fileRef               = useRef(null);
+
+  const handleFile = (f) => {
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = e => setTxt(e.target.result);
+    r.readAsText(f, "UTF-8");
+  };
+
+  const handleParse = () => {
+    if (!txt.trim()) return;
+    setParsed(parseImportTxt(txt, channels));
+  };
+
+  const handleImport = async () => {
+    if (!parsed || parsed.items.length === 0) return;
+    setImp(true);
+    try {
+      let finalItems = [...parsed.items];
+      if (!overwrite) {
+        // Remove itens que colidem com programas existentes
+        finalItems = finalItems.filter(item =>
+          !existingPrograms.some(ex =>
+            ex.data === item.data &&
+            ex.canalId === item.canalId &&
+            !(ex.horarioFim <= item.horarioInicio || ex.horarioInicio >= item.horarioFim)
+          )
+        );
+      } else {
+        // Apaga programas existentes nos canais+datas afetados
+        const pairs = new Set(parsed.items.map(it => `${it.canalId}__${it.data}`));
+        const toDelete = existingPrograms.filter(ex => pairs.has(`${ex.canalId}__${ex.data}`));
+        await Promise.all(toDelete.map(p => deleteDoc(doc(db,"programs",p.id))));
+      }
+      await onImport(finalItems);
+    } finally {
+      setImp(false);
+    }
+  };
+
+  const EXAMPLE = `# Exemplo de arquivo de importação
+# Linhas com # são comentários e são ignoradas
+
+CANAL: AgoraTV
+DATA: 2026-06-25
+00:00 | Jornal da Manhã        | https://youtu.be/dQw4w9WgXcQ
+01:00 | Documentário Natureza  | dQw4w9WgXcQ | HD | DUB
+03:00 | Filme de Ação          | dQw4w9WgXcQ | 14
+
+CANAL: SoundTV
+DATA: 2026-06-25
+00:00 | Rock Clássicos         | dQw4w9WgXcQ
+02:00 | Pop Brasil             | dQw4w9WgXcQ | HD`;
+
+  const conflictCount = parsed?.items.filter(item =>
+    existingPrograms.some(ex =>
+      ex.data === item.data && ex.canalId === item.canalId &&
+      !(ex.horarioFim <= item.horarioInicio || ex.horarioInicio >= item.horarioFim)
+    )
+  ).length || 0;
+
+  return (
+    <div onClick={onClose} style={{position:"fixed",inset:0,zIndex:200,background:"rgba(0,0,0,0.8)",
+      display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:"#14161e",borderRadius:12,
+        maxWidth:740,width:"100%",border:"1px solid rgba(255,255,255,0.1)",
+        maxHeight:"90vh",overflowY:"auto",display:"flex",flexDirection:"column"}}>
+
+        {/* ── HEADER ── */}
+        <div style={{padding:"16px 20px",borderBottom:"1px solid rgba(255,255,255,0.08)",
+          display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0}}>
+          <div>
+            <div style={{fontSize:17,fontWeight:700,color:"#fff"}}>📥 Importar Programação via TXT</div>
+            <div style={{fontSize:11,color:"#666",marginTop:2}}>
+              Cole o texto, arraste um arquivo .txt ou .csv
+            </div>
+          </div>
+          <button onClick={onClose} style={{background:"none",border:"none",color:"#666",
+            cursor:"pointer",fontSize:20,lineHeight:1}}>✕</button>
+        </div>
+
+        <div style={{padding:20,display:"flex",flexDirection:"column",gap:16,flex:1}}>
+
+          {/* ── FORMATO ── */}
+          <details style={{background:"rgba(255,152,0,0.06)",border:"1px solid rgba(255,152,0,0.2)",
+            borderRadius:6,padding:"10px 14px"}}>
+            <summary style={{cursor:"pointer",fontSize:12,fontWeight:700,color:"#ffb74d",
+              userSelect:"none"}}>📋 Ver formato do arquivo</summary>
+            <pre style={{marginTop:10,fontSize:11,color:"#888",lineHeight:1.7,
+              whiteSpace:"pre-wrap",fontFamily:"monospace"}}>{EXAMPLE}</pre>
+            <div style={{marginTop:10,fontSize:11,color:"#666",lineHeight:1.8}}>
+              <strong style={{color:"#aaa"}}>Colunas separadas por |</strong><br/>
+              • <code style={{color:"#ffb74d"}}>CANAL: NomeExato</code> — nome do canal cadastrado<br/>
+              • <code style={{color:"#ffb74d"}}>DATA: AAAA-MM-DD</code> — data no formato ISO<br/>
+              • <code style={{color:"#4fc3f7"}}>HH:MM | Nome | URL/ID</code> — um programa por linha<br/>
+              • Classificação opcional: <code>L, 10, 12, 14, 16, 18</code><br/>
+              • Tags opcionais: <code>HD, DUB, LEG, 4K, 5.1</code><br/>
+              • A duração é calculada automaticamente até o próximo programa
+            </div>
+          </details>
+
+          {/* ── ÁREA DE TEXTO + UPLOAD ── */}
+          <div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+              <label style={{fontSize:11,color:"#888",fontWeight:600,letterSpacing:0.5}}>
+                CONTEÚDO DO ARQUIVO
+              </label>
+              <div style={{display:"flex",gap:8}}>
+                <button onClick={()=>setTxt(EXAMPLE)}
+                  style={{fontSize:10,color:"#888",background:"rgba(255,255,255,0.05)",
+                    border:"1px solid rgba(255,255,255,0.08)",padding:"3px 8px",
+                    borderRadius:3,cursor:"pointer"}}>
+                  Carregar exemplo
+                </button>
+                <button onClick={()=>fileRef.current?.click()}
+                  style={{fontSize:10,color:"#ffb74d",background:"rgba(255,152,0,0.1)",
+                    border:"1px solid rgba(255,152,0,0.25)",padding:"3px 8px",
+                    borderRadius:3,cursor:"pointer"}}>
+                  📁 Abrir arquivo
+                </button>
+                <input ref={fileRef} type="file" accept=".txt,.csv,.tsv"
+                  style={{display:"none"}} onChange={e=>handleFile(e.target.files[0])}/>
+              </div>
+            </div>
+            <textarea
+              value={txt}
+              onChange={e=>{setTxt(e.target.value);setParsed(null)}}
+              onDrop={e=>{e.preventDefault();handleFile(e.dataTransfer.files[0])}}
+              onDragOver={e=>e.preventDefault()}
+              placeholder={"Cole aqui ou arraste um arquivo .txt\n\nCANAL: AgoraTV\nDATA: 2026-06-25\n00:00 | Programa | https://youtu.be/xxx"}
+              style={{width:"100%",height:160,background:"rgba(255,255,255,0.04)",
+                border:"1px solid rgba(255,255,255,0.1)",borderRadius:6,
+                padding:"10px 12px",color:"#fff",fontSize:12,
+                fontFamily:"monospace",resize:"vertical",outline:"none",
+                lineHeight:1.6,boxSizing:"border-box"}}
+            />
+          </div>
+
+          {/* ── BOTÃO PARSE ── */}
+          {!parsed && (
+            <button onClick={handleParse} disabled={!txt.trim()}
+              style={{padding:"11px 0",borderRadius:6,border:"none",cursor:txt.trim()?"pointer":"not-allowed",
+                background:txt.trim()?"linear-gradient(135deg,#ff9800,#f57c00)":"#333",
+                color:"#fff",fontSize:13,fontWeight:700,opacity:txt.trim()?1:0.5}}>
+              🔍 Analisar arquivo
+            </button>
+          )}
+
+          {/* ── RESULTADO DO PARSE ── */}
+          {parsed && (<>
+            {/* Erros */}
+            {parsed.errors.length > 0 && (
+              <div style={{background:"rgba(244,67,54,0.08)",border:"1px solid rgba(244,67,54,0.25)",
+                borderRadius:6,padding:"10px 14px"}}>
+                <div style={{fontSize:12,fontWeight:700,color:"#f44336",marginBottom:6}}>
+                  ⚠️ {parsed.errors.length} aviso(s) encontrado(s):
+                </div>
+                {parsed.errors.map((e,i)=>(
+                  <div key={i} style={{fontSize:11,color:"#ef9a9a",marginBottom:3,
+                    fontFamily:"monospace"}}>• {e}</div>
+                ))}
+              </div>
+            )}
+
+            {/* Preview dos programas */}
+            {parsed.items.length > 0 ? (
+              <div style={{background:"rgba(76,175,80,0.06)",border:"1px solid rgba(76,175,80,0.2)",
+                borderRadius:6,padding:"10px 14px"}}>
+                <div style={{fontSize:12,fontWeight:700,color:"#4caf50",marginBottom:10}}>
+                  ✅ {parsed.items.length} programa(s) prontos para importar:
+                </div>
+                <div style={{maxHeight:200,overflowY:"auto",display:"flex",flexDirection:"column",gap:4}}>
+                  {parsed.items.map((it,i)=>(
+                    <div key={i} style={{display:"flex",gap:10,alignItems:"center",
+                      padding:"6px 8px",background:"rgba(255,255,255,0.03)",borderRadius:4,
+                      fontSize:11}}>
+                      <span style={{color:"#4fc3f7",fontWeight:700,minWidth:40,fontFamily:"monospace"}}>
+                        {it._preview.horario}
+                      </span>
+                      <span style={{color:"#fff",fontWeight:600,flex:1,
+                        overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                        {it.nome}
+                      </span>
+                      <span style={{color:"#888",minWidth:70,textAlign:"right"}}>{it._preview.canalNome}</span>
+                      <span style={{color:"#666",minWidth:55,textAlign:"right",fontFamily:"monospace"}}>
+                        {it.data}
+                      </span>
+                      <span style={{fontSize:9,padding:"1px 5px",borderRadius:2,
+                        background:"rgba(255,255,255,0.08)",color:"#aaa"}}>
+                        {Math.floor(it.duracao/3600)}h{Math.floor((it.duracao%3600)/60).toString().padStart(2,"0")}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Conflitos */}
+                {conflictCount > 0 && (
+                  <div style={{marginTop:12,padding:"10px 12px",
+                    background:"rgba(255,152,0,0.08)",border:"1px solid rgba(255,152,0,0.25)",
+                    borderRadius:6}}>
+                    <div style={{fontSize:12,color:"#ff9800",fontWeight:700,marginBottom:8}}>
+                      ⚡ {conflictCount} conflito(s) com programação existente:
+                    </div>
+                    <div style={{display:"flex",gap:12,alignItems:"center"}}>
+                      <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:12,color:"#aaa"}}>
+                        <input type="radio" name="conflict" checked={!overwrite}
+                          onChange={()=>setOvr(false)}
+                          style={{accentColor:"#4fc3f7"}}/>
+                        Pular conflitantes ({conflictCount} ignorados)
+                      </label>
+                      <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:12,color:"#aaa"}}>
+                        <input type="radio" name="conflict" checked={overwrite}
+                          onChange={()=>setOvr(true)}
+                          style={{accentColor:"#f44336"}}/>
+                        <span style={{color:"#f44336"}}>Substituir</span> (apaga programação existente nos dias/canais afetados)
+                      </label>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div style={{padding:"14px",background:"rgba(244,67,54,0.08)",
+                border:"1px solid rgba(244,67,54,0.2)",borderRadius:6,
+                fontSize:13,color:"#f44336",textAlign:"center"}}>
+                Nenhum programa válido encontrado. Verifique o formato.
+              </div>
+            )}
+
+            {/* Botões de ação */}
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={()=>{setParsed(null);setOvr(false)}}
+                style={{flex:1,padding:11,borderRadius:6,cursor:"pointer",
+                  background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",
+                  color:"#aaa",fontSize:13,fontWeight:600}}>
+                ← Editar
+              </button>
+              <button onClick={handleImport}
+                disabled={importing || parsed.items.length === 0}
+                style={{flex:2,padding:11,borderRadius:6,border:"none",
+                  cursor:importing||parsed.items.length===0?"not-allowed":"pointer",
+                  background:importing||parsed.items.length===0?"#333"
+                    :"linear-gradient(135deg,#4caf50,#388e3c)",
+                  color:"#fff",fontSize:13,fontWeight:700,
+                  opacity:importing||parsed.items.length===0?0.5:1}}>
+                {importing?"⏳ Importando...":
+                  overwrite&&conflictCount>0
+                    ?`⚠️ Substituir e importar ${parsed.items.length}`
+                    :`✅ Importar ${overwrite?parsed.items.length:parsed.items.length-conflictCount} programa(s)`}
+              </button>
+            </div>
+          </>)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================
 // DUP MODAL
 // ============================================
 function DupModal({dates,onDup,onClose}){
@@ -522,6 +941,7 @@ export default function AdminPanel(){
   const [cloneError,setCloneError]         = useState("");
   const [showDup,setSD]      = useState(false);
   const [toast,setToast]     = useState({msg:"",type:"info"});
+  const [showImport,setShowImport] = useState(false);
 
   const notify = (msg, type="info") => {
     setToast({msg,type});
@@ -715,6 +1135,7 @@ export default function AdminPanel(){
       </div>
       <div style={{display:"flex",gap:8,alignItems:"center"}}>
         <a href="/tv" style={{padding:"8px 16px",borderRadius:6,textDecoration:"none",background:"rgba(76,175,80,0.1)",border:"1px solid rgba(76,175,80,0.25)",color:"#4caf50",fontSize:12,fontWeight:600}}>📺 Ver TV</a>
+        <button onClick={()=>setShowImport(true)} style={{padding:"8px 16px",borderRadius:6,cursor:"pointer",background:"rgba(255,152,0,0.12)",border:"1px solid rgba(255,152,0,0.3)",color:"#ffb74d",fontSize:12,fontWeight:600}}>📥 Importar TXT</button>
         <button onClick={()=>setSD(true)} style={{padding:"8px 16px",borderRadius:6,cursor:"pointer",background:"rgba(156,39,176,0.15)",border:"1px solid rgba(156,39,176,0.3)",color:"#ce93d8",fontSize:12,fontWeight:600}}>📋 Duplicar dia</button>
       </div>
     </div>
@@ -820,6 +1241,15 @@ export default function AdminPanel(){
     </div>}
 
     {showDup&&<DupModal dates={dates} onDup={handleDup} onClose={()=>setSD(false)}/>}
+    {showImport&&<ImportModal channels={channels} dates={dates} existingPrograms={programs} onClose={()=>setShowImport(false)} onImport={async(items)=>{
+      let ok=0,err=0;
+      for(const item of items){
+        try{ const {id:_,...data}=item; await addDoc(collection(db,"programs"),data); ok++; }
+        catch(e){ console.error(e); err++; }
+      }
+      setShowImport(false);
+      notify(err===0?`✅ ${ok} programa(s) importado(s)!`:`✅ ${ok} importados, ❌ ${err} erros`,"success");
+    }}/>}
 
     {toast.msg&&<div style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",padding:"12px 24px",borderRadius:8,background:toastBg,color:"#fff",fontSize:13,fontWeight:600,zIndex:200,animation:"fadeIn 0.3s ease",boxShadow:"0 4px 20px rgba(0,0,0,0.4)"}}>{toast.msg}</div>}
 
