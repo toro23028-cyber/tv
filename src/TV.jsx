@@ -331,26 +331,79 @@ function useGCTimer(cp, videoIndex) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// GCOverlay — o GC em si
-// zIndex: 3 (acima do click barrier:2, abaixo do OSD:10)
+// GCBlock — bloco visual de GC com barra de progresso
 // ─────────────────────────────────────────────────────────────
-// ─── Renderiza um bloco GC com fonte e estilo ─────────────────
-function GCBlock({ mensagem, fonte, estilo, cor, extra }) {
-  const sizes = { pequena:10, normal:13, grande:16, destaque:20 };
-  const fs    = sizes[fonte] || 13;
-  const bold  = fonte === "destaque";
-  const base  = { backdropFilter:"blur(4px)", borderRadius:"0 6px 6px 0",
-    fontSize:fs, fontWeight:bold?700:500, lineHeight:1.4 };
-  const styles = {
-    escuro:  { ...base, background:"rgba(0,0,0,0.75)", color:"#fff", padding:"6px 12px 6px 10px" },
-    canal:   { ...base, background:`${cor}dd`, color:"#fff", padding:"6px 12px 6px 10px" },
-    borda:   { ...base, background:"rgba(0,0,0,0.72)", color:"#fff", padding:"6px 12px 6px 10px", borderLeft:`4px solid ${cor}` },
-    simples: { fontSize:fs, fontWeight:bold?700:500, color:"#fff", textShadow:"0 1px 6px rgba(0,0,0,0.9)", padding:"4px 0", lineHeight:1.4 },
-  };
+// Barra de progresso decrescente para GC musical
+function GCProgressBar({ duracao, cor }) {
+  const [pct, setPct] = useState(100);
+  useEffect(() => {
+    setPct(100);
+    const total = duracao * 1000;
+    const start = Date.now();
+    const tick  = setInterval(() => {
+      const elapsed = Date.now() - start;
+      const rem = Math.max(0, 100 - (elapsed / total) * 100);
+      setPct(rem);
+      if (rem <= 0) clearInterval(tick);
+    }, 80);
+    return () => clearInterval(tick);
+  }, [duracao]);
   return (
-    <div style={styles[estilo] || styles.borda}>
+    <div style={{position:"absolute",bottom:0,left:0,right:0,height:2,
+      background:"rgba(255,255,255,0.08)"}}>
+      <div style={{height:"100%",width:`${pct}%`,
+        background:cor||"rgba(255,255,255,0.6)",
+        transition:"width 0.08s linear",borderRadius:1}}/>
+    </div>
+  );
+}
+
+function GCBlock({ mensagem, fonte, estilo, cor, duracao }) {
+  const sizes = { pequena:12, normal:15, grande:18, destaque:22 };
+  const fs    = sizes[fonte] || 15;
+  const bold  = fonte === "destaque";
+  // Barra de progresso: começa cheia e decresce em `duracao` segundos
+  const [pct, setPct] = useState(100);
+  useEffect(() => {
+    if (!duracao || duracao <= 0) return;
+    const total = duracao * 1000;
+    const start = Date.now();
+    const tick  = setInterval(() => {
+      const elapsed = Date.now() - start;
+      const remaining = Math.max(0, 100 - (elapsed / total) * 100);
+      setPct(remaining);
+      if (remaining <= 0) clearInterval(tick);
+    }, 100);
+    return () => clearInterval(tick);
+  }, [duracao]);
+
+  const base = { backdropFilter:"blur(6px)", fontSize:fs,
+    fontWeight:bold?700:500, lineHeight:1.45, position:"relative", overflow:"hidden" };
+  const styles = {
+    escuro:  { ...base, background:"rgba(0,0,0,0.80)", color:"#fff",
+      padding:"10px 16px", borderRadius:6 },
+    canal:   { ...base, background:`${cor}e0`, color:"#fff",
+      padding:"10px 16px", borderRadius:6 },
+    borda:   { ...base, background:"rgba(0,0,0,0.80)", color:"#fff",
+      padding:"10px 16px 10px 14px", borderLeft:`4px solid ${cor}`, borderRadius:"0 6px 6px 0" },
+    simples: { ...base, background:"rgba(0,0,0,0.55)", color:"#fff",
+      padding:"10px 16px", borderRadius:6,
+      textShadow:"0 1px 8px rgba(0,0,0,0.9)" },
+  };
+  const s = styles[estilo] || styles.borda;
+
+  return (
+    <div style={s}>
       {mensagem}
-      {extra}
+      {/* Barra de progresso decrescente na base do bloco */}
+      {duracao > 0 && (
+        <div style={{position:"absolute",bottom:0,left:0,right:0,height:2,
+          background:"rgba(255,255,255,0.1)"}}>
+          <div style={{height:"100%",width:`${pct}%`,
+            background:cor||"#fff",opacity:0.7,
+            transition:"width 0.1s linear"}}/>
+        </div>
+      )}
     </div>
   );
 }
@@ -415,30 +468,70 @@ function GCOverlay({ channel, program, nextProgram, videoIndex, episodioTitulo, 
   // próxima música: prop proximoTitulo ou próximo programa
   const nextTitle = proximoTitulo || nextProgram?.nome || null;
 
+  // Duração de cada GC em segundos (para a barra de progresso)
+  const GC_DURACAO = 23; // intro: 2-25s = 23s visível
+
   return (
     <div style={{
-      position:"absolute", top:80, left:20, zIndex:3,
+      position:"absolute",
+      // Inferior direito — altura de GC de TV aberta (~12% do fundo, acima do rodapé)
+      bottom:"clamp(60px, 9vh, 120px)",
+      right:0,
+      zIndex:3,
       pointerEvents:"none",
-      display:"flex", flexDirection:"column", gap:8,
-      maxWidth:"clamp(200px, 35vw, 400px)",
+      display:"flex", flexDirection:"column", alignItems:"flex-end", gap:8,
+      maxWidth:"clamp(220px, 38vw, 440px)",
     }}>
-      {/* Classificação indicativa */}
+      {/* Classificação indicativa — canto inferior direito */}
       {showProg && showClass && (
-        <div style={{display:"flex",alignItems:"center",gap:8,background:"rgba(0,0,0,0.72)",backdropFilter:"blur(4px)",borderLeft:`4px solid ${classColor}`,borderRadius:"0 6px 6px 0",padding:"6px 12px 6px 10px",opacity:musicPhase?1:0,transition:"opacity 0.6s"}}>
-          <div style={{width:28,height:28,borderRadius:4,flexShrink:0,background:classColor,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:900,color:classif==="L"||classif==="18"?"#fff":"#000"}}>{classif}</div>
-          <div style={{fontSize:11,color:"rgba(255,255,255,0.85)",lineHeight:1.3}}>{CLASS_DESC[classif]}</div>
+        <div style={{
+          display:"flex", alignItems:"center", gap:8,
+          background:"rgba(0,0,0,0.80)", backdropFilter:"blur(6px)",
+          borderRight:`4px solid ${classColor}`,
+          borderRadius:"6px 0 0 6px",
+          padding:"7px 14px 7px 12px",
+          opacity:musicPhase?1:0, transition:"opacity 0.6s",
+        }}>
+          <div style={{fontSize:13,color:"rgba(255,255,255,0.8)",lineHeight:1.3}}>
+            {CLASS_DESC[classif]}
+          </div>
+          <div style={{width:30,height:30,borderRadius:4,flexShrink:0,
+            background:classColor,display:"flex",alignItems:"center",justifyContent:"center",
+            fontSize:14,fontWeight:900,
+            color:classif==="L"||classif==="18"?"#fff":"#000"}}>{classif}</div>
         </div>
       )}
 
-      {/* GC Musical */}
+      {/* GC Musical — canto inferior direito */}
       {showProg && isMusica && curTitle && (
-        <div style={{background:"rgba(0,0,0,0.75)",backdropFilter:"blur(4px)",borderLeft:`4px solid ${cor}`,borderRadius:"0 6px 6px 0",padding:"8px 12px 8px 10px",opacity:musicPhase?1:0,transition:"opacity 0.6s"}}>
-          <div style={{fontSize:10,color:"rgba(255,255,255,0.5)",marginBottom:3,fontWeight:600,letterSpacing:0.5}}>🎵 VOCÊ ESTÁ OUVINDO</div>
-          <div style={{fontSize:14,fontWeight:700,color:"#fff",lineHeight:1.3,marginBottom:nextTitle?6:0}}>{curTitle}</div>
-          {nextTitle&&<div style={{fontSize:10,color:"rgba(255,255,255,0.5)",borderTop:"1px solid rgba(255,255,255,0.1)",paddingTop:5}}>
-            <span style={{color:"rgba(255,255,255,0.35)"}}>A SEGUIR </span>
-            <span style={{color:"rgba(255,255,255,0.65)"}}>{nextTitle}</span>
-          </div>}
+        <div style={{
+          background:"rgba(0,0,0,0.82)", backdropFilter:"blur(6px)",
+          borderRight:`4px solid ${cor}`,
+          borderRadius:"6px 0 0 6px",
+          padding:"10px 16px 12px 14px",
+          opacity:musicPhase?1:0, transition:"opacity 0.6s",
+          position:"relative", overflow:"hidden",
+          minWidth:220,
+        }}>
+          <div style={{fontSize:11,color:"rgba(255,255,255,0.45)",marginBottom:4,
+            fontWeight:600,letterSpacing:0.8,textTransform:"uppercase"}}>
+            🎵 Você está ouvindo
+          </div>
+          <div style={{fontSize:15,fontWeight:600,color:"#fff",lineHeight:1.4,
+            marginBottom:nextTitle?8:0}}>
+            {curTitle}
+          </div>
+          {nextTitle && (
+            <div style={{fontSize:11,color:"rgba(255,255,255,0.45)",
+              borderTop:"1px solid rgba(255,255,255,0.08)",paddingTop:6}}>
+              <span style={{color:"rgba(255,255,255,0.3)"}}>A seguir </span>
+              <span style={{color:"rgba(255,255,255,0.6)"}}>{nextTitle}</span>
+            </div>
+          )}
+          {/* Barra de progresso decrescente */}
+          {musicPhase && (
+            <GCProgressBar duracao={GC_DURACAO} cor={cor} key={`${cp?.id}_${videoIndex}_${musicPhase}`}/>
+          )}
         </div>
       )}
 
@@ -448,7 +541,8 @@ function GCOverlay({ channel, program, nextProgram, videoIndex, episodioTitulo, 
           <GCBlock mensagem={program.gcMensagem}
             fonte={program.gcFonte||"normal"}
             estilo={program.gcEstilo||"borda"}
-            cor={cor}/>
+            cor={cor}
+            duracao={GC_DURACAO}/>
         </div>
       )}
 
@@ -457,7 +551,8 @@ function GCOverlay({ channel, program, nextProgram, videoIndex, episodioTitulo, 
         <GCBlock mensagem={activeChannelGC.mensagem}
           fonte={activeChannelGC.fonte||"normal"}
           estilo={activeChannelGC.estilo||"borda"}
-          cor={cor}/>
+          cor={cor}
+          duracao={Number(activeChannelGC.duracao)||20}/>
       )}
     </div>
   );
@@ -1139,6 +1234,7 @@ export default function TVWeb(){
   const [selProg, setSP]          = useState(null);
   const [fade, setFade]           = useState(false);
   const [muted, setMuted]         = useState(true);
+  const [volume, setVolume]       = useState(80);  // 0-100, só visual + postMessage
   const [playerError, setPlayerError] = useState(false);
 
   // ============================================================
@@ -1154,6 +1250,7 @@ export default function TVWeb(){
   }, []);
 
   const hideTimer      = useRef(null);
+  const iframeRef      = useRef(null);  // para postMessage de volume ao YouTube
   const cRef           = useRef(null);
   // wRef removido — mouse wheel desativado
   const lastClickTime  = useRef(0);
@@ -1284,12 +1381,49 @@ export default function TVWeb(){
   useEffect(() => { if (showEPG || showFull) { clearTimeout(hideTimer.current); setOSD(true); } }, [showEPG, showFull]);
 
   // ============================================
-  // UNMUTE
+  // VOLUME
   // ============================================
+  const sendVolume = useCallback((vol) => {
+    // postMessage para o iframe do YouTube Player API
+    try {
+      iframeRef.current?.contentWindow?.postMessage(
+        JSON.stringify({ event:"command", func:"setVolume", args:[vol] }),
+        "*"
+      );
+    } catch(e) {}
+  }, []);
+
   const handleUnmute = useCallback(() => {
     setMuted(false);
     updateMuted(false);
-  }, [updateMuted]);
+    setTimeout(() => sendVolume(volume), 800);
+  }, [updateMuted, sendVolume, volume]);
+
+  const handleVolumeUp = useCallback((e) => {
+    e.stopPropagation();
+    const v = Math.min(100, volume + 10);
+    setVolume(v);
+    if (muted) { setMuted(false); updateMuted(false); }
+    setTimeout(() => sendVolume(v), 100);
+    showOSDNow();
+  }, [volume, muted, updateMuted, sendVolume, showOSDNow]);
+
+  const handleVolumeDown = useCallback((e) => {
+    e.stopPropagation();
+    const v = Math.max(0, volume - 10);
+    setVolume(v);
+    if (v === 0) { setMuted(true); updateMuted(true); }
+    else { if (muted) { setMuted(false); updateMuted(false); } }
+    setTimeout(() => sendVolume(v), 100);
+    showOSDNow();
+  }, [volume, muted, updateMuted, sendVolume, showOSDNow]);
+
+  const handleMuteToggle = useCallback((e) => {
+    e.stopPropagation();
+    if (muted) handleUnmute();
+    else { setMuted(true); updateMuted(true); }
+    showOSDNow();
+  }, [muted, handleUnmute, updateMuted, showOSDNow]);
 
   // ============================================
   // CHANNEL SWITCHING
@@ -1387,6 +1521,7 @@ export default function TVWeb(){
         {showPlayer ? (
           <iframe
             key={ytKey}
+            ref={iframeRef}
             src={ytSrc}
             allow="autoplay; encrypted-media"
             allowFullScreen={false}
@@ -1423,18 +1558,74 @@ export default function TVWeb(){
           : np?.nome || null}
       />
 
-      {/* ===== WATERMARK + HOME BUTTON ===== */}
-      <div style={{position:"absolute",top:0,left:0,right:0,zIndex:3,display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 20px",pointerEvents:"none"}}>
-        {/* Botão Home — só visível com OSD */}
+      {/* ===== TOP BAR: Home + Watermark ===== */}
+      <div style={{position:"absolute",top:0,left:0,right:0,zIndex:4,
+        display:"flex",justifyContent:"space-between",alignItems:"center",
+        padding:"14px 20px",pointerEvents:"none",
+        opacity:showOSD&&!showEPG&&!showFull?1:0,transition:"opacity 0.4s"}}>
+        {/* Botão Home */}
         <a href="/" onClick={e=>{e.stopPropagation();}}
-          style={{pointerEvents:"auto",opacity:showOSD&&!showEPG&&!showFull?0.7:0,
-            transition:"opacity 0.3s",display:"flex",alignItems:"center",gap:6,
-            textDecoration:"none",color:"rgba(255,255,255,0.8)",fontSize:12,fontWeight:700,
-            background:"rgba(0,0,0,0.5)",padding:"5px 12px",borderRadius:20,
-            border:"1px solid rgba(255,255,255,0.1)"}}>
-          🏠 Home
+          style={{pointerEvents:"auto",display:"flex",alignItems:"center",gap:7,
+            textDecoration:"none",color:"#fff",fontSize:13,fontWeight:700,
+            background:"rgba(0,0,0,0.6)",padding:"7px 14px",borderRadius:22,
+            border:"1px solid rgba(255,255,255,0.15)",backdropFilter:"blur(6px)",
+            boxShadow:"0 2px 8px rgba(0,0,0,0.4)"}}>
+          ← Home
         </a>
-        <div style={{fontSize:14,fontWeight:700,color:"rgba(255,255,255,0.12)",letterSpacing:2}}>TVWEB</div>
+        <div style={{fontSize:13,fontWeight:800,color:"rgba(255,255,255,0.15)",letterSpacing:3}}>TREND TV</div>
+      </div>
+
+      {/* ===== CONTROLES DE VOLUME (canto inferior esquerdo) ===== */}
+      <div style={{
+        position:"absolute",bottom:"clamp(70px,10vh,130px)",left:20,zIndex:4,
+        display:"flex",flexDirection:"column",alignItems:"center",gap:6,
+        opacity:showOSD&&!showEPG&&!showFull?1:0,transition:"opacity 0.4s",
+        pointerEvents:showOSD&&!showEPG&&!showFull?"auto":"none",
+      }}>
+        {/* Botão + volume */}
+        <button onClick={handleVolumeUp}
+          style={{width:38,height:38,borderRadius:"50%",border:"none",cursor:"pointer",
+            background:"rgba(0,0,0,0.65)",backdropFilter:"blur(6px)",
+            color:"#fff",fontSize:18,fontWeight:700,
+            border:"1px solid rgba(255,255,255,0.15)",
+            display:"flex",alignItems:"center",justifyContent:"center",
+            boxShadow:"0 2px 8px rgba(0,0,0,0.4)"}}>
+          +
+        </button>
+        {/* Indicador de volume */}
+        <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+          <div style={{width:4,height:48,background:"rgba(255,255,255,0.1)",
+            borderRadius:2,overflow:"hidden",position:"relative"}}>
+            <div style={{position:"absolute",bottom:0,left:0,right:0,
+              background:muted?"#555":"#fff",
+              height:`${muted?0:volume}%`,
+              transition:"height 0.2s,background 0.2s",borderRadius:2}}/>
+          </div>
+          <div style={{fontSize:9,color:"rgba(255,255,255,0.4)",fontWeight:600,
+            letterSpacing:0.5}}>
+            {muted?"MUDO":`${volume}%`}
+          </div>
+        </div>
+        {/* Botão mute/unmute */}
+        <button onClick={handleMuteToggle}
+          style={{width:38,height:38,borderRadius:"50%",cursor:"pointer",
+            background:muted?"rgba(229,57,53,0.3)":"rgba(0,0,0,0.65)",
+            backdropFilter:"blur(6px)",color:"#fff",fontSize:15,
+            border:muted?"1px solid rgba(229,57,53,0.5)":"1px solid rgba(255,255,255,0.15)",
+            display:"flex",alignItems:"center",justifyContent:"center",
+            boxShadow:"0 2px 8px rgba(0,0,0,0.4)"}}>
+          {muted?"🔇":"🔊"}
+        </button>
+        {/* Botão - volume */}
+        <button onClick={handleVolumeDown}
+          style={{width:38,height:38,borderRadius:"50%",border:"none",cursor:"pointer",
+            background:"rgba(0,0,0,0.65)",backdropFilter:"blur(6px)",
+            color:"#fff",fontSize:20,fontWeight:700,
+            border:"1px solid rgba(255,255,255,0.15)",
+            display:"flex",alignItems:"center",justifyContent:"center",
+            boxShadow:"0 2px 8px rgba(0,0,0,0.4)"}}>
+          −
+        </button>
       </div>
 
       {/* ===== UNMUTE BUTTON ===== */}
