@@ -1,0 +1,61 @@
+{
+  "name": "TREND TV — TV ao Vivo",
+  "short_name": "TREND TV",
+  "description": "Assista TV ao vivo diretamente no navegador. Programação 24h com guia de programação.",
+  "start_url": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#0a0c12",
+  "theme_color": "#0a0c12",
+  "lang": "pt-BR",
+  "dir": "ltr",
+  "categories": ["entertainment", "lifestyle"],
+  "scope": "/",
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/screenshots/home.jpg",
+      "sizes": "1280x720",
+      "type": "image/jpeg",
+      "form_factor": "wide",
+      "label": "Landing Page TREND TV"
+    },
+    {
+      "src": "/screenshots/player.jpg",
+      "sizes": "390x844",
+      "type": "image/jpeg",
+      "form_factor": "narrow",
+      "label": "Player com EPG"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Assistir TV",
+      "short_name": "TV ao Vivo",
+      "description": "Abrir o player direto",
+      "url": "/tv",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Guia de Programação",
+      "short_name": "Programação",
+      "description": "Ver o que vai passar",
+      "url": "/?epg=1",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}
