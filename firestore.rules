@@ -1,0 +1,30 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ============================================
+    // LEITURA PÚBLICA — TV.jsx precisa ler
+    // ============================================
+    match /channels/{id} {
+      allow read: if true;
+      allow write: if false; // Bloqueado: escrita só via Admin autenticado (futuro)
+    }
+
+    match /programs/{id} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    match /progress/{id} {
+      allow read: if true;
+      allow write: if true; // Auto-save de progresso: OK ser público
+    }
+
+    // ============================================
+    // BLOQUEIA TUDO O QUE NÃO FOI EXPLICITAMENTE LISTADO
+    // ============================================
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
