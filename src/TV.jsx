@@ -238,6 +238,176 @@ function resolveVideoIndex(videoList, elapsedInProg) {
   return { index: videoList.length - 1, startInVideo: 0 };
 }
 
+
+// ─────────────────────────────────────────────────────────────
+// CLASSIFICAÇÃO INDICATIVA — descrições
+// ─────────────────────────────────────────────────────────────
+const CLASS_DESC = {
+  L:  "Livre para todos os públicos",
+  "10": "Não recomendado para menores de 10 anos",
+  "12": "Não recomendado para menores de 12 anos",
+  "14": "Não recomendado para menores de 14 anos",
+  "16": "Não recomendado para menores de 16 anos",
+  "18": "Impróprio para menores de 18 anos",
+};
+const CLASS_COLOR = {
+  L:"#00c853","10":"#00bfff","12":"#ffd600","14":"#ff6d00","16":"#d50000","18":"#212121"
+};
+
+// ─────────────────────────────────────────────────────────────
+// useGCTimer — calcula se o GC deve estar visível agora
+// Baseado no tempo decorrido no VÍDEO atual (não no programa)
+// Retorna: "intro" | "outro" | null
+// ─────────────────────────────────────────────────────────────
+function useGCTimer(cp, videoIndex, playerState) {
+  const [phase, setPhase] = useState(null); // "intro"|"outro"|null
+
+  useEffect(() => {
+    if (!cp || cp.isPlaceholder) { setPhase(null); return; }
+
+    const tick = () => {
+      const now       = getNow();
+      const progStart = cp.horarioInicio;
+      const progEnd   = cp.horarioFim;
+      const progDur   = cp.duracao || (progEnd - progStart);
+
+      // Tempo decorrido DENTRO do programa (segundos)
+      const elapsed = Math.max(0, now - progStart);
+      // Tempo restante no programa
+      const remaining = Math.max(0, progEnd - now);
+
+      // Intro: segundos 2-25 do início do VÍDEO atual
+      // Para playlists, reseta a cada vídeo (elapsed calculado no vídeo)
+      const videoList = cp.videos || [];
+      let videoElapsed = elapsed;
+      if (videoList.length > 1 && videoIndex > 0) {
+        // Subtrai a duração dos vídeos anteriores
+        let acc = 0;
+        for (let i = 0; i < videoIndex && i < videoList.length; i++) {
+          acc += Number(videoList[i].duracao || 0);
+        }
+        videoElapsed = elapsed - acc;
+      }
+
+      const inIntro  = videoElapsed >= 2 && videoElapsed <= 25;
+      const inOutro  = remaining <= 20 && remaining > 5;
+
+      if (inIntro)       setPhase("intro");
+      else if (inOutro)  setPhase("outro");
+      else               setPhase(null);
+    };
+
+    tick();
+    const i = setInterval(tick, 1000);
+    return () => clearInterval(i);
+  }, [cp?.id, cp?.horarioInicio, videoIndex]);
+
+  return phase;
+}
+
+// ─────────────────────────────────────────────────────────────
+// GCOverlay — o GC em si
+// zIndex: 3 (acima do click barrier:2, abaixo do OSD:10)
+// ─────────────────────────────────────────────────────────────
+function GCOverlay({ channel, program, nextProgram, videoIndex, playerState }) {
+  const phase = useGCTimer(program, videoIndex, playerState);
+  const [visible, setVisible] = useState(false);
+
+  // Fade suave ao entrar/sair
+  useEffect(() => {
+    if (phase) {
+      setVisible(true);
+    } else {
+      const t = setTimeout(() => setVisible(false), 600);
+      return () => clearTimeout(t);
+    }
+  }, [phase]);
+
+  if (!visible && !phase) return null;
+  if (!program || program.isPlaceholder) return null;
+
+  const cor       = channel?.cor || "#1a73e8";
+  const isMusica  = channel?.tipo === "musica";
+  const classif   = program.classificacao || "L";
+  const classColor = CLASS_COLOR[classif] || "#666";
+  const showClass  = classif !== "L"; // mostra classificação apenas se não for Livre
+
+  // Para canal de música: extrai título do episódio atual
+  const videoList  = program.videos || [];
+  const curVideo   = videoList[videoIndex] || null;
+  const curTitle   = curVideo?.titulo || program.nome || "";
+  const nextVideo  = videoList[videoIndex + 1] || null;
+  const nextTitle  = nextVideo?.titulo || nextProgram?.nome || null;
+
+  return (
+    <div style={{
+      position:"absolute", top:80, left:20, zIndex:3,
+      opacity: phase ? 1 : 0,
+      transition: "opacity 0.6s ease",
+      pointerEvents: "none",
+      display: "flex", flexDirection: "column", gap: 8,
+      maxWidth: "clamp(200px, 35vw, 380px)",
+    }}>
+      {/* Classificação indicativa */}
+      {showClass && (
+        <div style={{
+          display:"flex", alignItems:"center", gap:8,
+          background:"rgba(0,0,0,0.72)", backdropFilter:"blur(4px)",
+          borderLeft:`4px solid ${classColor}`,
+          borderRadius:"0 6px 6px 0",
+          padding:"6px 12px 6px 10px",
+        }}>
+          <div style={{
+            width:28, height:28, borderRadius:4, flexShrink:0,
+            background:classColor, display:"flex",
+            alignItems:"center", justifyContent:"center",
+            fontSize:13, fontWeight:900,
+            color: classif==="L"||classif==="18" ? "#fff" : "#000",
+          }}>{classif}</div>
+          <div style={{fontSize:11, color:"rgba(255,255,255,0.8)", lineHeight:1.3}}>
+            {CLASS_DESC[classif]}
+          </div>
+        </div>
+      )}
+
+      {/* GC Musical */}
+      {isMusica && curTitle && (
+        <div style={{
+          background:"rgba(0,0,0,0.75)", backdropFilter:"blur(4px)",
+          borderLeft:`4px solid ${cor}`,
+          borderRadius:"0 6px 6px 0",
+          padding:"8px 12px 8px 10px",
+        }}>
+          <div style={{fontSize:10, color:"rgba(255,255,255,0.5)", marginBottom:3, fontWeight:600, letterSpacing:0.5}}>
+            🎵 VOCÊ ESTÁ OUVINDO
+          </div>
+          <div style={{fontSize:14, fontWeight:700, color:"#fff", lineHeight:1.3, marginBottom: nextTitle ? 6 : 0}}>
+            {curTitle}
+          </div>
+          {nextTitle && (
+            <div style={{fontSize:10, color:"rgba(255,255,255,0.5)", borderTop:"1px solid rgba(255,255,255,0.1)", paddingTop:5, marginTop:2}}>
+              <span style={{color:"rgba(255,255,255,0.35)"}}>A SEGUIR </span>
+              <span style={{color:"rgba(255,255,255,0.65)"}}>{nextTitle}</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* GC genérico (campo gcMensagem do programa) */}
+      {program.gcMensagem && (
+        <div style={{
+          background:"rgba(0,0,0,0.72)", backdropFilter:"blur(4px)",
+          borderLeft:`4px solid ${cor}`,
+          borderRadius:"0 6px 6px 0",
+          padding:"7px 12px 7px 10px",
+          fontSize:12, color:"rgba(255,255,255,0.85)", fontWeight:600,
+        }}>
+          {program.gcMensagem}
+        </div>
+      )}
+    </div>
+  );
+}
 // ============================================
 // SMALL COMPONENTS
 // ============================================
@@ -1106,7 +1276,14 @@ export default function TVWeb(){
     return () => window.removeEventListener("keydown", h);
   }, [swDir, showOSDNow, showEPG, showFull]);
 
-  // Mouse wheel desativado — troca de canal só por clique consciente no EPG/sidebar.
+  // ── Scroll do mouse: troca de canal ──────────────────────────
+  const wRef = useRef(null);
+  const handleWheel = useCallback((e) => {
+    if (showEPG || showFull) return; // não muda canal com menus abertos
+    if (wRef.current) return;        // debounce 400ms
+    wRef.current = setTimeout(() => { wRef.current = null; }, 400);
+    swDir(e.deltaY > 0 ? 1 : -1);
+  }, [swDir, showEPG, showFull]);
 
   // ============================================
   // CLICK
@@ -1148,6 +1325,7 @@ export default function TVWeb(){
     <div
       ref={cRef}
       onMouseMove={showOSDNow}
+      onWheel={handleWheel}
       style={{width:"100%",height:"100vh",background:"#000",position:"relative",fontFamily:"'Segoe UI','Roboto',-apple-system,sans-serif",overflow:"hidden",cursor:"default",userSelect:"none"}}
     >
       {/* ===== YOUTUBE PLAYER ===== */}
@@ -1178,6 +1356,15 @@ export default function TVWeb(){
 
       {/* ===== CLICK BARRIER ===== */}
       <div onClick={handleVideoClick} style={{position:"absolute",inset:0,zIndex:2}} />
+
+      {/* ===== GC OVERLAY (acima do barrier:2, abaixo do OSD:10) ===== */}
+      <GCOverlay
+        channel={ch}
+        program={cp}
+        nextProgram={np}
+        videoIndex={videoIndex}
+        playerState={playerState}
+      />
 
       {/* ===== WATERMARK + HOME BUTTON ===== */}
       <div style={{position:"absolute",top:0,left:0,right:0,zIndex:3,display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 20px",pointerEvents:"none"}}>

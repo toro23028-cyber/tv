@@ -281,6 +281,7 @@ function PlaylistImporter({ onImport }) {
   const [loading,  setLoading]  = useState(false);
   const [status,   setStatus]   = useState("");
   const [preview,  setPreview]  = useState(null); // { videos, totalDur, name }
+  const [shuffle,  setShuffle]  = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [error,    setError]    = useState("");
 
@@ -304,8 +305,16 @@ function PlaylistImporter({ onImport }) {
 
   const handleConfirm = () => {
     if (!preview) return;
-    onImport(preview.videos, preview.totalDur, preview.suggestedName);
-    setPreview(null); setUrl(""); setStatus(""); setExpanded(false);
+    let vids = [...preview.videos];
+    if (shuffle) {
+      // Fisher-Yates shuffle
+      for (let i = vids.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [vids[i], vids[j]] = [vids[j], vids[i]];
+      }
+    }
+    onImport(vids, preview.totalDur, preview.suggestedName);
+    setPreview(null); setUrl(""); setStatus(""); setExpanded(false); setShuffle(false);
   };
 
   const fmtDurMin = (s) => {
@@ -379,6 +388,12 @@ function PlaylistImporter({ onImport }) {
                   • Será agendado como 1 programa contínuo
                 </span>
               </div>
+              {/* Toggle shuffle */}
+              <label style={{display:"flex",alignItems:"center",gap:6,marginTop:8,cursor:"pointer",fontSize:11,color:"#aaa"}}>
+                <input type="checkbox" checked={shuffle} onChange={e=>setShuffle(e.target.checked)}
+                  style={{accentColor:"#9c27b0",width:14,height:14}}/>
+                <span>🔀 Embaralhar ordem dos vídeos</span>
+              </label>
             </div>
             <button onClick={()=>setExpanded(x=>!x)}
               style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",
@@ -446,6 +461,8 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
   const [classificacao,setClassificacao]=useState(program?.classificacao||"L");
   const [tags,setTags]=useState(program?.tags||["HD"]);
   const [sinopse,setSinopse]=useState(program?.sinopse||"");
+  const [gcMensagem,setGcMsg]=useState(program?.gcMensagem||"");
+  const [gcPosicao,setGcPos]=useState(program?.gcPosicao||"ambos");
   const [durationPreset,setDP]=useState(0);
   const [customH,setCH]=useState(program?Math.floor(program.duracao/3600):1);
   const [customM,setCM]=useState(program?Math.floor((program.duracao%3600)/60):0);
@@ -454,6 +471,7 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
   const [thumbnailType,setTT]=useState(program?.thumbnailType||"youtube");
   const [thumbnailUrl,setTU]=useState(program?.thumbnailUrl||null);
   const [error,setError]=useState("");
+  const [tipo,setTipo]=useState("geral");
   const [saving,setSaving]=useState(false);
   const [startMode,setSM]=useState(isEdit?"custom":"auto");
   const [startH,setSH]=useState(isEdit?Math.floor(program.horarioInicio/3600):0);
@@ -491,6 +509,8 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
         youtubeId: videos[0].youtubeUrl,
         videos: videos.filter(v => v.youtubeUrl.trim()),
         thumbnailType, thumbnailUrl,
+        gcMensagem: gcMensagem.trim() || null,
+        gcPosicao: gcMensagem.trim() ? gcPosicao : null,
       };
       if (isEdit) payload.id = program.id;
       // await garante que o Firestore confirmou antes de fechar o modal
@@ -633,6 +653,19 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
         <div><label style={lS}>SINOPSE</label>
           <textarea value={sinopse} onChange={e=>setSinopse(e.target.value)} placeholder="Descrição..." style={{...iS,width:"100%",height:70,resize:"vertical",fontFamily:"inherit"}}/></div>
 
+        {/* GC Mensagem */}
+        <div style={{background:"rgba(255,152,0,0.06)",border:"1px solid rgba(255,152,0,0.15)",borderRadius:6,padding:"12px 14px"}}>
+          <label style={{...lS,color:"#ffb74d",marginBottom:8}}>📺 MENSAGEM GC (opcional)</label>
+          <input value={gcMensagem} onChange={e=>setGcMsg(e.target.value)} placeholder='Ex: "Veja a seguir" ou "Classificação: 14 anos"'
+            style={{...iS,width:"100%",marginBottom:gcMensagem?8:0}}/>
+          {gcMensagem&&<div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+            {[["inicio","Só no início (seg 2-25)"],["final","Só no final (últimos 20s)"],["ambos","Início e final"]].map(([val,label])=>
+              <button key={val} onClick={()=>setGcPos(val)} style={{padding:"5px 11px",borderRadius:4,cursor:"pointer",fontSize:11,background:gcPosicao===val?"#ff980022":"rgba(255,255,255,0.04)",border:gcPosicao===val?"1px solid #ff9800":"1px solid rgba(255,255,255,0.08)",color:gcPosicao===val?"#ff9800":"#888",fontWeight:600}}>{label}</button>
+            )}
+          </div>}
+          {gcMensagem&&<div style={{marginTop:6,fontSize:10,color:"#888"}}>A mensagem aparecerá no canto superior esquerdo da tela nos momentos configurados.</div>}
+        </div>
+
         {/* Preview */}
         <div style={{padding:14,background:"rgba(26,115,232,0.08)",borderRadius:8,border:"1px solid rgba(26,115,232,0.2)"}}>
           <div style={{fontSize:11,color:"#4fc3f7",fontWeight:700,marginBottom:8}}>👁️ PREVIEW</div>
@@ -671,7 +704,7 @@ function ChannelEditor({channels,onAdd,onDelete}){
   const [cor,setCor]=useState("");
   const [saving,setSaving]=useState(false);
 
-  const startEdit=(ch)=>{setEditing(ch.id);setNome(ch.nome);setLogo(ch.logo);setLT(ch.logoType||"emoji");setLU(ch.logoUrl||null);setCor(ch.cor);setNumber(ch.numero||0)};
+  const startEdit=(ch)=>{setEditing(ch.id);setNome(ch.nome);setLogo(ch.logo);setLT(ch.logoType||"emoji");setLU(ch.logoUrl||null);setCor(ch.cor);setNumber(ch.numero||0);setTipo(ch.tipo||"geral")};
   const save=async()=>{
     if(!nome.trim()){ alert("Digite um nome para o canal"); return; }
     if(!cor){ alert("Selecione uma cor"); return; }
@@ -685,6 +718,7 @@ function ChannelEditor({channels,onAdd,onDelete}){
         logoType: logoType || "emoji",
         logoUrl:  logoUrl || null,
         cor:      cor,
+        tipo:     tipo || "geral",
       };
       await updateDoc(doc(db,"channels",editing), data);
       setEditing(null);
@@ -713,6 +747,14 @@ function ChannelEditor({channels,onAdd,onDelete}){
         </div>
         <div><label style={lS}>COR</label>
           <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>{COLOR_LIST.map(c=><button key={c} onClick={()=>setCor(c)} style={{width:36,height:36,borderRadius:4,cursor:"pointer",background:c,border:cor===c?"3px solid #fff":"2px solid transparent"}}/>)}</div>
+        </div>
+        <div><label style={lS}>TIPO DE CANAL</label>
+          <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+            {[["geral","📺 Geral"],["musica","🎵 Música"],["noticias","📰 Notícias"],["filmes","🎬 Filmes"],["esportes","⚽ Esportes"],["infantil","👶 Infantil"]].map(([val,label])=>
+              <button key={val} onClick={()=>setTipo(val)} style={{padding:"6px 12px",borderRadius:4,cursor:"pointer",fontSize:11,background:tipo===val?"#1a73e822":"rgba(255,255,255,0.04)",border:tipo===val?"1px solid #1a73e8":"1px solid rgba(255,255,255,0.08)",color:tipo===val?"#4fc3f7":"#888",fontWeight:600}}>{label}</button>
+            )}
+          </div>
+          {tipo==="musica"&&<div style={{marginTop:6,fontSize:10,color:"#9c27b0",padding:"4px 8px",background:"rgba(156,39,176,0.08)",borderRadius:4,border:"1px solid rgba(156,39,176,0.2)"}}>🎵 GC "Você está ouvindo" será exibido automaticamente neste canal</div>}
         </div>
         <div style={{padding:12,background:"rgba(26,115,232,0.08)",borderRadius:8,border:"1px solid rgba(26,115,232,0.2)"}}>
           <div style={{fontSize:11,color:"#4fc3f7",fontWeight:700,marginBottom:8}}>👁️ PREVIEW</div>
@@ -1289,6 +1331,42 @@ export default function AdminPanel({ onLogout }){
     } catch(err) { console.error("Erro ao duplicar:", err); notify("❌ Erro ao duplicar", "error"); }
   };
 
+  // ── Embaralhar grade do dia ──────────────────────────────────
+  const handleShuffleDay = async () => {
+    const progs = dayProgs.filter(p => p.canalId === selCh);
+    if (progs.length < 2) { notify("Adicione ao menos 2 programas para embaralhar","error"); return; }
+    if (!confirm(`Embaralhar ${progs.length} programas de ${getDayLabel(selDate)}?\nOs horários serão recalculados.`)) return;
+    // Fisher-Yates
+    const arr = [...progs];
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    let cur = 0;
+    const updated = arr.map(p => {
+      const np = { ...p, horarioInicio: cur, horarioFim: cur + p.duracao };
+      cur += p.duracao;
+      return np;
+    });
+    await handleReorder(updated);
+    notify("🔀 Grade embaralhada!", "success");
+  };
+
+  // ── Excluir selecionados ──────────────────────────────────────
+  const handleDeleteSelected = async () => {
+    if (selectedProgs.size === 0) return;
+    if (!confirm(`Excluir ${selectedProgs.size} programa(s) selecionado(s)?\nEsta ação não pode ser desfeita.`)) return;
+    const ids = [...selectedProgs];
+    try {
+      const results = await Promise.allSettled(ids.map(id => deleteDoc(doc(db,"programs",id))));
+      const failed = results.filter(r => r.status === "rejected").length;
+      setSelectedProgs(new Set());
+      notify(failed === 0
+        ? `🗑️ ${ids.length} programa(s) excluído(s)!`
+        : `⚠️ ${ids.length - failed} excluídos, ${failed} falharam`, failed > 0 ? "error" : "success");
+    } catch(err) { notify("❌ Erro ao excluir","error"); }
+  };
+
   const handleReorder = async (updated) => {
     // Atualiza estado local imediatamente (UX responsiva)
     setProgs([...programs.filter(p => !(p.canalId===selCh && p.data===selDate)), ...updated]);
@@ -1316,6 +1394,7 @@ export default function AdminPanel({ onLogout }){
         logoUrl:  null,
         cor:      COLOR_LIST[channels.length % COLOR_LIST.length] || "#2196F3",
         isInfo:   false,
+        tipo:     "geral",
       };
       await addDoc(collection(db,"channels"), newCh);
       notify("📺 Canal adicionado!","success");
@@ -1444,7 +1523,32 @@ export default function AdminPanel({ onLogout }){
           <span>📭 <strong style={{color:totalSch>=86400?"#4caf50":"#ff9800"}}>{secTo(86400-Math.min(totalSch,86400)).h}h{secTo(86400-Math.min(totalSch,86400)).m>0?`${secTo(86400-Math.min(totalSch,86400)).m}min`:""}</strong> livre</span>
         </div>
 
-        <div style={{marginBottom:8,fontSize:11,color:"#555",display:"flex",alignItems:"center",gap:6}}>⠿ Arraste para reordenar programas</div>
+        {/* Barra de ações em lote */}
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8,gap:8,flexWrap:"wrap"}}>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:12,color:"#888"}}>
+              <input type="checkbox"
+                checked={dayProgs.filter(p=>p.canalId===selCh).length>0&&selectedProgs.size===dayProgs.filter(p=>p.canalId===selCh).length}
+                onChange={e=>{
+                  if(e.target.checked) setSelectedProgs(new Set(dayProgs.filter(p=>p.canalId===selCh).map(p=>p.id)));
+                  else setSelectedProgs(new Set());
+                }}
+                style={{width:16,height:16,cursor:"pointer",accentColor:"#4caf50"}}/>
+              Selecionar todos
+            </label>
+            <span style={{fontSize:11,color:"#555"}}>⠿ Arraste para reordenar</span>
+          </div>
+          <div style={{display:"flex",gap:6}}>
+            <button onClick={handleShuffleDay}
+              style={{padding:"6px 12px",borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:600,background:"rgba(156,39,176,0.1)",border:"1px solid rgba(156,39,176,0.25)",color:"#ce93d8"}}>
+              🔀 Embaralhar dia
+            </button>
+            {selectedProgs.size>0&&<button onClick={handleDeleteSelected}
+              style={{padding:"6px 12px",borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:600,background:"rgba(244,67,54,0.1)",border:"1px solid rgba(244,67,54,0.25)",color:"#f44336"}}>
+              🗑️ Excluir {selectedProgs.size}
+            </button>}
+          </div>
+        </div>
 
         <TimelineView programs={dayProgs} channels={channels} selectedChannel={selCh}
           onEdit={p=>{setEP(p);setSM(true)}} onDelete={handleDel} onReorder={handleReorder}
