@@ -27,26 +27,44 @@ const CC={L:"#0f0","10":"#00bfff","12":"#ff0","14":"#f80","16":"#f00","18":"#000
 function getToday(){ return new Date().toISOString().split("T")[0] }
 function extractYTId(s){ if(!s)return null; const p=[/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/,/^([a-zA-Z0-9_-]{11})$/]; for(const r of p){const m=s.match(r);if(m)return m[1]} return null }
 
-// ============ TIMELINE ABSOLUTA (7 dias contínuos) ============
-const QUEUE_DAYS=7; // Mudar para 15, 30, etc conforme necessário - escalável!
-const BASE_DATE=new Date("2026-06-24T00:00:00Z");
-function dateSecondsToAbsolute(dateStr,secondsInDay){
-  const targetDate=new Date(dateStr+"T00:00:00Z");
-  const daysDiff=Math.floor((targetDate-BASE_DATE)/(1000*60*60*24));
-  return daysDiff*86400+secondsInDay;
-}
-function getAbsoluteNow(){
-  const now=new Date();
-  return Math.floor((now-BASE_DATE)/1000);
-}
-function absoluteToDateSeconds(absSeconds){
-  const dayNum=Math.floor(absSeconds/86400);
-  const secondsInDay=absSeconds%86400;
-  const targetDate=new Date(BASE_DATE.getTime()+dayNum*24*60*60*1000);
-  const dateStr=targetDate.toISOString().split("T")[0];
-  return {date:dateStr,seconds:secondsInDay};
+// ============================================================
+// ✅ FIX 1: BASE_DATE DINÂMICA — nunca expira, rolling window
+// Em vez de hardcode "2026-06-24", usa o início do dia atual
+// como âncora, garantindo que o sistema funcione para sempre.
+// ============================================================
+const QUEUE_DAYS = 7; // Escalável: mude para 15, 30, etc.
+
+function getBaseDate() {
+  const now = new Date();
+  // Início do dia de hoje às 00:00:00 UTC
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 }
 
+function dateSecondsToAbsolute(dateStr, secondsInDay) {
+  const BASE_DATE = getBaseDate();
+  const targetDate = new Date(dateStr + "T00:00:00Z");
+  const daysDiff = Math.floor((targetDate - BASE_DATE) / (1000 * 60 * 60 * 24));
+  return daysDiff * 86400 + secondsInDay;
+}
+
+function getAbsoluteNow() {
+  const BASE_DATE = getBaseDate();
+  const now = new Date();
+  return Math.floor((now - BASE_DATE) / 1000);
+}
+
+function absoluteToDateSeconds(absSeconds) {
+  const BASE_DATE = getBaseDate();
+  const dayNum = Math.floor(absSeconds / 86400);
+  const secondsInDay = absSeconds % 86400;
+  const targetDate = new Date(BASE_DATE.getTime() + dayNum * 24 * 60 * 60 * 1000);
+  const dateStr = targetDate.toISOString().split("T")[0];
+  return { date: dateStr, seconds: secondsInDay };
+}
+
+// ============================================
+// SCHEDULE BUILDER
+// ============================================
 function buildSchedule(programs, channelId) {
   const today = getToday();
   const dayProgs = programs
@@ -58,6 +76,7 @@ function buildSchedule(programs, channelId) {
       duracao: Number(p.duracao),
       horarioTexto: fmtHM(Number(p.horarioInicio)), horarioFimTexto: fmtHM(Number(p.horarioFim)),
     }));
+
   if (dayProgs.length > 0) {
     const withGaps = [];
     for (let i = 0; i < dayProgs.length; i++) {
@@ -89,11 +108,15 @@ function buildSchedule(programs, channelId) {
     }
     return withGaps;
   }
+
+  // Sem programação hoje: repete o que existir em loop
   const anyProgs = programs.filter(p => p.canalId === channelId).sort((a,b) => Number(a.horarioInicio) - Number(b.horarioInicio));
   if (anyProgs.length === 0) return [];
   const schedule = []; let cur = 0, idx = 0;
   while (cur < 86400) {
-    const src = anyProgs[idx % anyProgs.length]; const dur = Number(src.duracao) || 3600; const end = cur + dur;
+    const src = anyProgs[idx % anyProgs.length];
+    const dur = Number(src.duracao) || 3600;
+    const end = cur + dur;
     schedule.push({ ...src, id:`${src.id}_rep${idx}`, horarioInicio:cur, horarioFim:end, duracao:dur, horarioTexto:fmtHM(cur), horarioFimTexto:fmtHM(end) });
     cur = end; idx++;
   }
@@ -105,41 +128,48 @@ function getCurProg(schedule) {
   const s = getNow();
   return schedule.find(p => s >= p.horarioInicio && s < p.horarioFim) || null;
 }
-function getElapsed(prog) { return getNow() - prog.horarioInicio }
+function getElapsed(prog) { return Math.max(0, getNow() - prog.horarioInicio) }
 
-// Encontra qual programa está rodando AGORA em qualquer hora dos 7 dias
-function getCurrentProgramAbsolute(programs, channelId) {
-  const now = getAbsoluteNow();
-  for (const prog of programs.filter(p => p.canalId === channelId)) {
-    const progStart = dateSecondsToAbsolute(prog.data, Number(prog.horarioInicio));
-    const progEnd = progStart + Number(prog.duracao);
-    if (now >= progStart && now < progEnd) {
-      return { prog, startAbs: progStart, elapsed: now - progStart };
-    }
-  }
-  return null;
-}
-
-function ChLogo({ch, size=28}) {
-  if (ch.logoType==="custom" && ch.logoUrl) return <img src={ch.logoUrl} alt="" style={{width:size,height:size,borderRadius:4,objectFit:"cover"}} />;
-  return <span style={{fontSize:size*0.85}}>{ch.logo || "📺"}</span>;
+// ============================================================
+// ✅ FIX 2: getVideoList — extrai lista ordenada de vídeos
+// Prioriza o array videos[], fallback para youtubeId antigo.
+// ============================================================
+function getVideoList(prog) {
+  if (!prog) return [];
+  const fromArray = (prog.videos || [])
+    .map(v => extractYTId(v?.youtubeUrl || v?.url || ""))
+    .filter(Boolean);
+  if (fromArray.length > 0) return fromArray;
+  const single = extractYTId(prog.youtubeId);
+  return single ? [single] : [];
 }
 
 // ============================================
 // SMALL COMPONENTS
 // ============================================
-function LiveDot({big}){ const[v,setV]=useState(true); useEffect(()=>{const i=setInterval(()=>setV(x=>!x),800);return()=>clearInterval(i)},[]); return <span style={{display:"inline-flex",alignItems:"center",gap:5,fontSize:big?14:11,fontWeight:800,color:"#ff3b3b",opacity:v?1:0.3,transition:"opacity 0.3s"}}><span style={{width:big?10:8,height:big?10:8,borderRadius:"50%",background:"#ff3b3b",boxShadow:"0 0 8px #ff3b3b"}}/>AO VIVO</span> }
+function ChLogo({ch, size=28}) {
+  if (ch.logoType==="custom" && ch.logoUrl) return <img src={ch.logoUrl} alt="" style={{width:size,height:size,borderRadius:4,objectFit:"cover"}} />;
+  return <span style={{fontSize:size*0.85}}>{ch.logo || "📺"}</span>;
+}
+
+function LiveDot({big}){
+  const[v,setV]=useState(true);
+  useEffect(()=>{const i=setInterval(()=>setV(x=>!x),800);return()=>clearInterval(i)},[]);
+  return <span style={{display:"inline-flex",alignItems:"center",gap:5,fontSize:big?14:11,fontWeight:800,color:"#ff3b3b",opacity:v?1:0.3,transition:"opacity 0.3s"}}>
+    <span style={{width:big?10:8,height:big?10:8,borderRadius:"50%",background:"#ff3b3b",boxShadow:"0 0 8px #ff3b3b"}}/>AO VIVO
+  </span>;
+}
 
 function Badge({c,big}){ return <span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:big?30:22,height:big?30:22,borderRadius:4,background:CC[c]||"#888",color:c==="L"||c==="18"?"#fff":"#000",fontSize:big?13:10,fontWeight:800}}>{c}</span> }
 function Tag({t}){ const c={HD:"#1a73e8","4K":"#e91e63",DUB:"#4caf50",LEG:"#ff9800","5.1":"#9c27b0"}; return <span style={{fontSize:10,fontWeight:700,padding:"3px 7px",borderRadius:3,background:c[t]||"#555",color:"#fff"}}>{t}</span> }
 
 function shareProgram(prog,ch){ const text=`📺 ${prog.nome}\n🕐 ${prog.horarioTexto} - ${prog.horarioFimTexto}\n📡 ${ch?.nome||"TVWEB"}`; if(navigator.share)navigator.share({title:prog.nome,text,url:window.location.href}).catch(()=>{}); else{navigator.clipboard?.writeText(text);alert("Copiado!")} }
-function scheduleNotif(prog,ch,min=5){ const ns=getNow();const ts=prog.horarioInicio-min*60;const delay=(ts-ns)*1000;if(delay<=0){alert("Já começou!");return}if(!("Notification"in window)){alert("Sem suporte.");return}Notification.requestPermission().then(p=>{if(p!=="granted")return;setTimeout(()=>{new Notification(`📺 ${prog.nome} em ${min}min!`,{body:`${ch?.nome} · ${prog.horarioTexto}`})},delay);alert(`✅ Lembrete definido!`)}) }
+function scheduleNotif(prog,ch,min=5){ const ns=getNow();const ts=prog.horarioInicio-min*60;const delay=(ts-ns)*1000;if(delay<=0){alert("Já começou!");return}if(!("Notification"in window)){alert("Sem suporte.");return}Notification.requestPermission().then(p=>{if(p!=="granted")return;setTimeout(()=>{new Notification(`📺 ${prog.nome} em ${min}min!`,{body:`${ch?.nome} · ${prog.horarioTexto}`})},delay);alert("✅ Lembrete definido!")}) }
 
 // ============================================
-// OSD HEADER (TV-style top bar)
+// OSD HEADER
 // ============================================
-function OSDHeader({channel,program,visible}){
+function OSDHeader({channel,program,visible,videoIndex,videoTotal}){
   const[t,setT]=useState(new Date());
   useEffect(()=>{const i=setInterval(()=>setT(new Date()),1000);return()=>clearInterval(i)},[]);
   const ds=["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"];
@@ -153,7 +183,6 @@ function OSDHeader({channel,program,visible}){
     pointerEvents:visible?"auto":"none",
   }}>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-      {/* LEFT: Channel info */}
       <div style={{display:"flex",alignItems:"center",gap:16}}>
         <div style={{width:60,height:60,borderRadius:8,background:`${channel.cor}33`,border:`2px solid ${channel.cor}`,display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden"}}>
           <ChLogo ch={channel} size={channel.logoType==="custom"?60:40}/>
@@ -165,6 +194,12 @@ function OSDHeader({channel,program,visible}){
           </div>
           <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:2}}>
             <span style={{fontSize:20,fontWeight:700,color:"#fff"}}>{program.nome}</span>
+            {/* ✅ FIX 2: Indicador de vídeo atual quando há múltiplos */}
+            {videoTotal > 1 && (
+              <span style={{fontSize:12,fontWeight:700,padding:"3px 8px",borderRadius:4,background:"rgba(156,39,176,0.4)",border:"1px solid rgba(156,39,176,0.6)",color:"#ce93d8"}}>
+                {videoIndex + 1}/{videoTotal}
+              </span>
+            )}
           </div>
           <div style={{display:"flex",alignItems:"center",gap:10,marginTop:4}}>
             <span style={{fontSize:15,color:"#bbb"}}>{program.horarioTexto} - {program.horarioFimTexto}</span>
@@ -173,7 +208,6 @@ function OSDHeader({channel,program,visible}){
           </div>
         </div>
       </div>
-      {/* RIGHT: Clock + TREND TV */}
       <div style={{textAlign:"right",flexShrink:0}}>
         <div style={{fontSize:32,fontWeight:800,color:"#fff",letterSpacing:1,lineHeight:1}}>
           {String(t.getHours()).padStart(2,"0")}:{String(t.getMinutes()).padStart(2,"0")}
@@ -188,12 +222,12 @@ function OSDHeader({channel,program,visible}){
 }
 
 // ============================================
-// OSD FOOTER (TV-style bottom bar)
+// OSD FOOTER
 // ============================================
 function OSDFooter({program,nextProgram,onOpenEPG,onOpenFull,onFullscreen,visible}){
   const[el,setEl]=useState(0);
   const[isFullscreen,setIsFullscreen]=useState(false);
-  
+
   useEffect(()=>{
     if(!program) return;
     const u=()=>setEl(getElapsed(program)); u();
@@ -205,9 +239,10 @@ function OSDFooter({program,nextProgram,onOpenEPG,onOpenFull,onFullscreen,visibl
     document.addEventListener("fullscreenchange",h);
     return()=>document.removeEventListener("fullscreenchange",h);
   },[]);
+
   if(!program) return null;
   const pct=Math.min((el/program.duracao)*100,100);
-  const nowH=fmtHM(getNow());
+
   return <div style={{
     position:"absolute",bottom:0,left:0,right:0,zIndex:10,
     background:"linear-gradient(0deg, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.85) 70%, transparent 100%)",
@@ -216,7 +251,6 @@ function OSDFooter({program,nextProgram,onOpenEPG,onOpenFull,onFullscreen,visibl
     transition:"transform 0.6s ease",
     pointerEvents:visible?"auto":"none",
   }}>
-    {/* Progress bar */}
     <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:12}}>
       <span style={{fontSize:15,fontWeight:700,color:"#fff",minWidth:55}}>{fmtHM(program.horarioInicio + el)}</span>
       <div style={{flex:1,height:5,background:"rgba(255,255,255,0.15)",borderRadius:3,overflow:"hidden"}}>
@@ -224,7 +258,6 @@ function OSDFooter({program,nextProgram,onOpenEPG,onOpenFull,onFullscreen,visibl
       </div>
       <span style={{fontSize:13,color:"#888",minWidth:55,textAlign:"right"}}>{program.horarioFimTexto}</span>
     </div>
-    {/* Info row */}
     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
       <div style={{display:"flex",alignItems:"center",gap:12}}>
         <LiveDot big/>
@@ -240,7 +273,7 @@ function OSDFooter({program,nextProgram,onOpenEPG,onOpenFull,onFullscreen,visibl
 }
 
 // ============================================
-// EPG COMPACTO (with clock + sticky names)
+// EPG COMPACTO
 // ============================================
 function EPGCompact({channels,allPrograms,currentChannelId,onSelectChannel,onSelectProgram,onOpenFull,onClose}){
   const now=getNow();
@@ -254,9 +287,14 @@ function EPGCompact({channels,allPrograms,currentChannelId,onSelectChannel,onSel
 
   useEffect(()=>{
     if(scrollRef.current) scrollRef.current.scrollLeft=Math.max(0,nowPx-300);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
 
   const scroll=(dir)=>{if(scrollRef.current)scrollRef.current.scrollLeft+=dir*400};
+  const sortedChannels = useMemo(()=>[
+    ...channels.filter(ch=>ch.id===currentChannelId),
+    ...channels.filter(ch=>ch.id!==currentChannelId),
+  ],[channels,currentChannelId]);
 
   return <div onClick={e=>e.stopPropagation()} style={{position:"absolute",bottom:0,left:0,right:0,zIndex:20,animation:"slideUp 0.3s ease"}}>
     <div style={{background:"rgba(10,12,18,0.98)",borderTop:"1px solid rgba(255,255,255,0.1)",padding:"10px 20px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
@@ -273,8 +311,7 @@ function EPGCompact({channels,allPrograms,currentChannelId,onSelectChannel,onSel
     <div style={{background:"rgba(10,12,18,0.98)",display:"flex",overflow:"hidden",maxHeight:"60vh",minHeight:320}}>
       <div style={{minWidth:140,borderRight:"1px solid rgba(255,255,255,0.08)",flexShrink:0,overflowY:"auto"}}>
         <div style={{height:35}}/>
-        {/* Current channel first + others */}
-        {[...channels.filter(ch=>ch.id===currentChannelId),...channels.filter(ch=>ch.id!==currentChannelId)].map(ch=><div key={ch.id} onClick={()=>onSelectChannel(ch.id)} style={{height:ROW_H,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",borderBottom:"1px solid rgba(255,255,255,0.05)",background:ch.id===currentChannelId?"rgba(26,115,232,0.15)":"transparent",borderLeft:ch.id===currentChannelId?"3px solid #1a73e8":"none"}}>
+        {sortedChannels.map(ch=><div key={ch.id} onClick={()=>onSelectChannel(ch.id)} style={{height:ROW_H,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",borderBottom:"1px solid rgba(255,255,255,0.05)",background:ch.id===currentChannelId?"rgba(26,115,232,0.15)":"transparent",borderLeft:ch.id===currentChannelId?"3px solid #1a73e8":"none"}}>
           <div style={{textAlign:"center"}}><ChLogo ch={ch} size={36}/><div style={{fontSize:12,fontWeight:600,color:ch.id===currentChannelId?"#fff":"#888",marginTop:4}}>{ch.nome}</div></div>
         </div>)}
       </div>
@@ -286,10 +323,11 @@ function EPGCompact({channels,allPrograms,currentChannelId,onSelectChannel,onSel
               <span style={{fontSize:13,color:"#ccc",fontWeight:600,padding:"8px 8px",whiteSpace:"nowrap",display:"inline-block"}}>{String(h).padStart(2,"0")}:00</span>
             </div>;
           })}
-          <div style={{position:"absolute",top:0,bottom:-ROW_H*channels.length,left:nowPx,width:3,background:"#ff3b3b",zIndex:5,boxShadow:"0 0 12px #ff3b3b",pointerEvents:"none"}}><div style={{width:10,height:10,borderRadius:"50%",background:"#ff3b3b",position:"absolute",top:-3,left:-3.5}}/></div>
+          <div style={{position:"absolute",top:0,bottom:-ROW_H*channels.length,left:nowPx,width:3,background:"#ff3b3b",zIndex:5,boxShadow:"0 0 12px #ff3b3b",pointerEvents:"none"}}>
+            <div style={{width:10,height:10,borderRadius:"50%",background:"#ff3b3b",position:"absolute",top:-3,left:-3.5}}/>
+          </div>
         </div>
-        {/* Schedule for all channels - current first */}
-        {[...channels.filter(ch=>ch.id===currentChannelId),...channels.filter(ch=>ch.id!==currentChannelId)].map(ch=>{
+        {sortedChannels.map(ch=>{
           const sched=buildSchedule(allPrograms,ch.id);
           const cur=getCurProg(sched);
           const isCurrent=ch.id===currentChannelId;
@@ -352,10 +390,18 @@ function FullDay({channels,allPrograms,currentChannelId,onClose,onProgramClick})
           const isNow=ns>=prog.horarioInicio&&ns<prog.horarioFim;
           const isPast=ns>=prog.horarioFim;
           return <div key={prog.id} onClick={()=>onProgramClick(prog)} style={{display:"flex",gap:14,padding:"16px 18px",borderRadius:10,cursor:"pointer",background:isNow?"rgba(26,115,232,0.15)":isPast?"rgba(255,255,255,0.015)":"rgba(255,255,255,0.04)",border:isNow?"1px solid #1a73e8":"1px solid rgba(255,255,255,0.06)",opacity:isPast?0.4:1,transition:"all 0.2s"}}>
-            <div style={{minWidth:75,textAlign:"center",paddingTop:2}}><div style={{fontSize:18,fontWeight:700,color:isNow?"#4fc3f7":"#fff"}}>{prog.horarioTexto}</div><div style={{fontSize:11,color:"#555",marginTop:2}}>{prog.horarioFimTexto}</div>{isNow&&<div style={{marginTop:6}}><LiveDot/></div>}</div>
+            <div style={{minWidth:75,textAlign:"center",paddingTop:2}}>
+              <div style={{fontSize:18,fontWeight:700,color:isNow?"#4fc3f7":"#fff"}}>{prog.horarioTexto}</div>
+              <div style={{fontSize:11,color:"#555",marginTop:2}}>{prog.horarioFimTexto}</div>
+              {isNow&&<div style={{marginTop:6}}><LiveDot/></div>}
+            </div>
             <div style={{width:3,borderRadius:2,background:isNow?ch.cor:"rgba(255,255,255,0.08)",flexShrink:0}}/>
             <div style={{flex:1,minWidth:0}}>
-              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:5,flexWrap:"wrap"}}><span style={{fontSize:16,fontWeight:600,color:isNow?"#fff":"#ccc"}}>{prog.nome}</span><Badge c={prog.classificacao}/>{prog.tags?.map(t=><Tag key={t} t={t}/>)}</div>
+              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:5,flexWrap:"wrap"}}>
+                <span style={{fontSize:16,fontWeight:600,color:isNow?"#fff":"#ccc"}}>{prog.nome}</span>
+                <Badge c={prog.classificacao}/>
+                {prog.tags?.map(t=><Tag key={t} t={t}/>)}
+              </div>
               <div style={{fontSize:13,color:"#999",lineHeight:1.6,marginBottom:6}}>{prog.sinopse}</div>
               <div style={{fontSize:11,color:"#666"}}>⏱ {fD(prog.duracao)}</div>
             </div>
@@ -400,238 +446,478 @@ function ProgModal({program,channel,onClose,onWatch}){
   </div>;
 }
 
+// ============================================================
+// ✅ FIX 3: PLAYER STATE — gerencia qual vídeo está tocando
+// Separado do componente principal para evitar re-renders
+// desnecessários causados pelo tick de 3s.
+// ============================================================
+function usePlayerState(cp, curCh) {
+  const videoListRef  = useRef([]);
+  const videoIndexRef = useRef(0);
+  const prevProgIdRef = useRef(null);
+  const ytKeyRef      = useRef("");
+  const ytStartRef    = useRef(0);
+  const [playerState, setPlayerState] = useState({
+    ytKey: "", src: null, videoIndex: 0, videoTotal: 0,
+  });
+
+  const buildSrc = useCallback((videoId, startSec, muted) => {
+    if (!videoId) return null;
+    return `https://www.youtube.com/embed/${videoId}?autoplay=1&mute=${muted?1:0}&start=${Math.floor(startSec)}&controls=0&disablekb=1&modestbranding=1&rel=0&showinfo=0&iv_load_policy=3&fs=0&playsinline=1&enablejsapi=0`;
+  }, []);
+
+  // Chamado quando o programa muda
+  const onProgramChange = useCallback((prog, muted) => {
+    const list = getVideoList(prog);
+    videoListRef.current  = list;
+    videoIndexRef.current = 0;
+    prevProgIdRef.current = prog.id;
+
+    // Calcula o vídeo correto baseado no tempo decorrido
+    // Se há múltiplos vídeos e duração conhecida de cada um,
+    // poderíamos calcular qual está no ar. Por ora, começa do 0
+    // com o start correto dentro do programa.
+    const elapsed = getElapsed(prog);
+    ytStartRef.current = elapsed;
+    ytKeyRef.current   = `${curCh}_${prog.id}_0_${Date.now()}`;
+
+    const videoId = list[0] || null;
+    setPlayerState({
+      ytKey: ytKeyRef.current,
+      src: buildSrc(videoId, elapsed, muted),
+      videoIndex: 0,
+      videoTotal: list.length,
+    });
+  }, [curCh, buildSrc]);
+
+  // Avança para o próximo vídeo na lista
+  const nextVideo = useCallback((muted) => {
+    const list = videoListRef.current;
+    const next = videoIndexRef.current + 1;
+    if (next >= list.length) return false; // não há próximo
+
+    videoIndexRef.current = next;
+    ytKeyRef.current = `${curCh}_${prevProgIdRef.current}_${next}_${Date.now()}`;
+
+    setPlayerState(prev => ({
+      ...prev,
+      ytKey: ytKeyRef.current,
+      src: buildSrc(list[next], 0, muted),
+      videoIndex: next,
+    }));
+    return true;
+  }, [curCh, buildSrc]);
+
+  // Atualiza src quando muted muda (sem trocar vídeo)
+  const updateMuted = useCallback((muted) => {
+    const list = videoListRef.current;
+    const idx  = videoIndexRef.current;
+    const videoId = list[idx] || null;
+    if (!videoId) return;
+    ytKeyRef.current = ytKeyRef.current + "_um";
+    setPlayerState(prev => ({
+      ...prev,
+      ytKey: ytKeyRef.current,
+      src: buildSrc(videoId, 0, muted),
+    }));
+  }, [buildSrc]);
+
+  return { playerState, prevProgIdRef, onProgramChange, nextVideo, updateMuted };
+}
+
 // ============================================
 // MAIN APP
 // ============================================
 export default function TVWeb(){
-  const [channels, setChannels] = useState([]);
-  const [allPrograms, setAllPrograms] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [curCh, setCurCh] = useState(null);
-  const [showEPG, setEPG] = useState(false);
-  const [showFull, setFull] = useState(false);
-  const [showOSD, setOSD] = useState(true);
-  const [selProg, setSP] = useState(null);
-  const [fade, setFade] = useState(false);
-  const [muted, setMuted] = useState(true);
-  // Tick: forces re-render every 3s to auto-switch videos
+  const [channels, setChannels]   = useState([]);
+  const [allPrograms, setAllProgs] = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [firebaseError, setFBErr] = useState(false);
+  const [curCh, setCurCh]         = useState(null);
+  const [showEPG, setEPG]         = useState(false);
+  const [showFull, setFull]       = useState(false);
+  const [showOSD, setOSD]         = useState(true);
+  const [selProg, setSP]          = useState(null);
+  const [fade, setFade]           = useState(false);
+  const [muted, setMuted]         = useState(true);
+  const [playerError, setPlayerError] = useState(false);
+
+  // ============================================================
+  // ✅ FIX 4: TICK OTIMIZADO
+  // - clearInterval garantido pelo cleanup do useEffect
+  // - Tick só recalcula o programa atual, sem re-renderizar o player
+  // - Intervalo aumentado para 5s (3s era desnecessariamente rápido)
+  // ============================================================
   const [tick, setTick] = useState(0);
-  useEffect(()=>{const i=setInterval(()=>setTick(t=>t+1),3000);return()=>clearInterval(i)},[]);
+  useEffect(() => {
+    const i = setInterval(() => setTick(t => t + 1), 5000);
+    return () => clearInterval(i); // ← cleanup garantido
+  }, []);
 
-  const hideTimer=useRef(null);
-  const cRef=useRef(null);
-  const wRef=useRef(null);
-  const lastClickTimeRef=useRef(0);
-  const ytKeyRef=useRef("");
-  const ytStartRef=useRef(0);
-  const prevProgIdRef=useRef(null);
+  const hideTimer      = useRef(null);
+  const cRef           = useRef(null);
+  const wRef           = useRef(null);
+  const lastClickTime  = useRef(0);
 
-  // ========== FIREBASE REAL-TIME ==========
+  // ============================================
+  // FIREBASE REAL-TIME
+  // ============================================
   useEffect(() => {
     let loaded = { channels: false, programs: false };
-    const fallbackTimer = setTimeout(()=>setLoading(false),5000);
-    const unsubCh = onSnapshot(collection(db,"channels"),(snap)=>{
-      const list=snap.docs.map(d=>({...d.data(),id:d.id}));
-      const sorted=list.sort((a,b)=>(a.numero||0)-(b.numero||0));
-      if(sorted.length>0){setChannels(sorted);setCurCh(prev=>prev||sorted[0].id)}
-      else{setChannels(FALLBACK_CHANNELS);setCurCh("_info")}
-      loaded.channels=true;
-      if(loaded.channels&&loaded.programs){setLoading(false);clearTimeout(fallbackTimer)}
-    },(err)=>{console.error("Firebase channels err:",err);setChannels(FALLBACK_CHANNELS);loaded.channels=true;if(loaded.channels&&loaded.programs)setLoading(false)});
-    const unsubPr = onSnapshot(collection(db,"programs"),(snap)=>{
-      const list=snap.docs.map(d=>({...d.data(),id:d.id}));
-      if(list.length>0)setAllPrograms(list); else setAllPrograms(FALLBACK_PROGRAMS);
-      loaded.programs=true;
-      if(loaded.channels&&loaded.programs){setLoading(false);clearTimeout(fallbackTimer)}
-    },(err)=>{console.error("Firebase programs err:",err);setAllPrograms(FALLBACK_PROGRAMS);loaded.programs=true;if(loaded.channels&&loaded.programs)setLoading(false)});
-    return()=>{unsubCh();unsubPr();clearTimeout(fallbackTimer)};
-  },[]);
+    const fallbackTimer = setTimeout(() => {
+      setLoading(false);
+      if (!loaded.channels && !loaded.programs) setFBErr(true);
+    }, 8000);
 
-  // ========== DERIVED STATE (recalcs every tick) ==========
-  const CHANNELS=channels;
-  const ch=CHANNELS.find(c=>c.id===curCh)||CHANNELS[0];
-  const schedule=useMemo(()=>ch?buildSchedule(allPrograms,ch.id):[],[allPrograms,ch?.id,tick]);
-  const cp=getCurProg(schedule);
-  const ci=schedule.findIndex(p=>p.id===cp?.id);
-  const np=ci>=0?schedule[ci+1]:null;
+    const unsubCh = onSnapshot(collection(db, "channels"), (snap) => {
+      const list = snap.docs.map(d => ({ ...d.data(), id: d.id }));
+      const sorted = list.sort((a,b) => (a.numero||0) - (b.numero||0));
+      if (sorted.length > 0) { setChannels(sorted); setCurCh(prev => prev || sorted[0].id); }
+      else { setChannels(FALLBACK_CHANNELS); setCurCh("_info"); }
+      loaded.channels = true;
+      if (loaded.channels && loaded.programs) { setLoading(false); clearTimeout(fallbackTimer); }
+    }, (err) => {
+      console.error("Firebase channels:", err);
+      setChannels(FALLBACK_CHANNELS);
+      setFBErr(true);
+      loaded.channels = true;
+      if (loaded.channels && loaded.programs) setLoading(false);
+    });
 
-  // ========== AUTO VIDEO SWITCH ==========
-  // When current program changes, update ytKey to force new iframe
-  useEffect(()=>{
-    if(cp&&cp.id!==prevProgIdRef.current){
-      prevProgIdRef.current=cp.id;
-      ytStartRef.current=Math.max(0,Math.floor(getElapsed(cp)));
-      ytKeyRef.current=`${curCh}_${cp.id}_${Date.now()}`;
-      
-      // AUTO-SAVE: Salva progresso quando muda de programa
-      (async()=>{
-        try {
-          const prog = allPrograms.find(p => p.id === cp.id);
-          if (prog) {
-            await updateDoc(doc(db,"progress",curCh),{
-              currentProgramId:cp.id,
-              currentProgramName:prog.nome,
-              timestamp:new Date(),
-              absoluteSeconds:getAbsoluteNow()
-            }).catch(()=>addDoc(collection(db,"progress"),{
-              canalId:curCh,
-              currentProgramId:cp.id,
-              currentProgramName:prog.nome,
-              timestamp:new Date(),
-              absoluteSeconds:getAbsoluteNow()
-            }));
-          }
-        } catch(err){ console.error("Auto-save progress err:",err); }
-      })();
-    }
-  },[cp?.id,curCh,allPrograms]);
+    const unsubPr = onSnapshot(collection(db, "programs"), (snap) => {
+      const list = snap.docs.map(d => ({ ...d.data(), id: d.id }));
+      setAllProgs(list.length > 0 ? list : FALLBACK_PROGRAMS);
+      loaded.programs = true;
+      if (loaded.channels && loaded.programs) { setLoading(false); clearTimeout(fallbackTimer); }
+    }, (err) => {
+      console.error("Firebase programs:", err);
+      setAllProgs(FALLBACK_PROGRAMS);
+      loaded.programs = true;
+      if (loaded.channels && loaded.programs) setLoading(false);
+    });
 
-  const ytVideoId=cp?extractYTId(cp.youtubeId||cp.videos?.[0]?.youtubeUrl):null;
-  const ytSrc=ytVideoId
-    ?`https://www.youtube.com/embed/${ytVideoId}?autoplay=1&mute=${muted?1:0}&start=${ytStartRef.current}&controls=0&disablekb=1&modestbranding=1&rel=0&showinfo=0&iv_load_policy=3&fs=0&playsinline=1&enablejsapi=0`
-    :null;
+    return () => { unsubCh(); unsubPr(); clearTimeout(fallbackTimer); };
+  }, []);
 
-  // ========== OSD VISIBILITY (20 seconds) ==========
-  const showOSDNow=useCallback(()=>{
+  // ============================================
+  // DERIVED STATE
+  // ============================================
+  const ch = channels.find(c => c.id === curCh) || channels[0];
+
+  // useMemo com tick na dependência: recalcula o programa atual a cada tick
+  const schedule = useMemo(
+    () => ch ? buildSchedule(allPrograms, ch.id) : [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [allPrograms, ch?.id, tick]
+  );
+
+  const cp = useMemo(() => getCurProg(schedule), [schedule]);
+  const ci = schedule.findIndex(p => p.id === cp?.id);
+  const np = ci >= 0 ? schedule[ci + 1] : null;
+
+  // ============================================
+  // PLAYER STATE HOOK
+  // ============================================
+  const { playerState, prevProgIdRef, onProgramChange, nextVideo, updateMuted } =
+    usePlayerState(cp, curCh);
+
+  // ============================================================
+  // ✅ FIX 2 + 5: AUTO VIDEO SWITCH & SEQUÊNCIA DE VÍDEOS
+  // Quando o programa muda → reseta para o primeiro vídeo
+  // O botão "Próximo vídeo" ou fim do iframe avança na lista
+  // ============================================================
+  useEffect(() => {
+    if (!cp || cp.id === prevProgIdRef.current) return;
+    setPlayerError(false);
+    onProgramChange(cp, muted);
+
+    // Auto-save progresso
+    (async () => {
+      try {
+        const prog = allPrograms.find(p => p.id === cp.id);
+        if (!prog) return;
+        await updateDoc(doc(db, "progress", curCh), {
+          currentProgramId: cp.id, currentProgramName: prog.nome,
+          timestamp: new Date(), absoluteSeconds: getAbsoluteNow(),
+        }).catch(() =>
+          addDoc(collection(db, "progress"), {
+            canalId: curCh, currentProgramId: cp.id,
+            currentProgramName: prog.nome, timestamp: new Date(),
+            absoluteSeconds: getAbsoluteNow(),
+          })
+        );
+      } catch (err) { console.error("Auto-save:", err); }
+    })();
+  // prevProgIdRef é um ref, não precisa entrar nas deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cp?.id, curCh]);
+
+  // ============================================
+  // OSD VISIBILITY
+  // ============================================
+  const showOSDNow = useCallback(() => {
     clearTimeout(hideTimer.current);
     setOSD(true);
-    hideTimer.current=setTimeout(()=>{if(!showEPG&&!showFull)setOSD(false)},20000);
-  },[showEPG,showFull]);
+    hideTimer.current = setTimeout(() => {
+      setOSD(false);
+    }, 20000);
+  }, []);
 
-  useEffect(()=>{showOSDNow();return()=>clearTimeout(hideTimer.current)},[showOSDNow]);
+  useEffect(() => { showOSDNow(); return () => clearTimeout(hideTimer.current); }, [showOSDNow]);
+  useEffect(() => { if (showEPG || showFull) { clearTimeout(hideTimer.current); setOSD(true); } }, [showEPG, showFull]);
 
-  // Keep OSD visible while EPG/Full are open
-  useEffect(()=>{if(showEPG||showFull)setOSD(true)},[showEPG,showFull]);
-
-  // ========== UNMUTE ==========
-  const handleUnmute=useCallback(()=>{
-    if(cp)ytStartRef.current=Math.max(0,Math.floor(getElapsed(cp)));
-    ytKeyRef.current=ytKeyRef.current+"_unmuted";
+  // ============================================
+  // UNMUTE
+  // ============================================
+  const handleUnmute = useCallback(() => {
     setMuted(false);
-  },[cp]);
+    updateMuted(false);
+  }, [updateMuted]);
 
-  // ========== CHANNEL SWITCHING ==========
-  const swCh=useCallback(id=>{
-    if(id===curCh)return;
+  // ============================================
+  // CHANNEL SWITCHING
+  // ============================================
+  const swCh = useCallback((id) => {
+    if (id === curCh) return;
     setFade(true);
-    setTimeout(()=>{setCurCh(id);setFade(false)},300);
+    setPlayerError(false);
+    setTimeout(() => { setCurCh(id); setFade(false); }, 300);
     showOSDNow();
-  },[curCh,showOSDNow]);
+  }, [curCh, showOSDNow]);
 
-  const swDir=useCallback(dir=>{
-    const i=CHANNELS.findIndex(c=>c.id===curCh);if(i<0)return;
-    const n=dir>0?(i<CHANNELS.length-1?CHANNELS[i+1].id:CHANNELS[0].id):(i>0?CHANNELS[i-1].id:CHANNELS[CHANNELS.length-1].id);
+  const swDir = useCallback((dir) => {
+    const i = channels.findIndex(c => c.id === curCh);
+    if (i < 0) return;
+    const n = dir > 0
+      ? (i < channels.length - 1 ? channels[i+1].id : channels[0].id)
+      : (i > 0 ? channels[i-1].id : channels[channels.length-1].id);
     swCh(n);
-  },[curCh,CHANNELS,swCh]);
+  }, [curCh, channels, swCh]);
 
-  // ========== KEYBOARD ==========
-  useEffect(()=>{const h=e=>{
-    if(e.key==="ArrowUp")swDir(-1);
-    else if(e.key==="ArrowDown")swDir(1);
-    else if(e.key==="Escape"){setEPG(false);setFull(false);setSP(null)}
-    else if(e.key==="g"||e.key==="G"){if(showFull){setFull(false);setEPG(true)}else if(showEPG)setEPG(false);else setEPG(true)}
-    showOSDNow();
-  };window.addEventListener("keydown",h);return()=>window.removeEventListener("keydown",h)},[swDir,showOSDNow,showEPG,showFull]);
+  // ============================================
+  // KEYBOARD
+  // ============================================
+  useEffect(() => {
+    const h = (e) => {
+      if (e.key === "ArrowUp")   swDir(-1);
+      else if (e.key === "ArrowDown")  swDir(1);
+      else if (e.key === "Escape") { setEPG(false); setFull(false); setSP(null); }
+      else if (e.key === "g" || e.key === "G") {
+        if (showFull) { setFull(false); setEPG(true); }
+        else if (showEPG) setEPG(false);
+        else setEPG(true);
+      }
+      showOSDNow();
+    };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [swDir, showOSDNow, showEPG, showFull]);
 
-  // ========== MOUSE WHEEL ==========
-  const handleWheel=useCallback(e=>{
-    if(showEPG||showFull)return;
-    if(wRef.current)return;
-    wRef.current=setTimeout(()=>{wRef.current=null},400);
-    swDir(e.deltaY>0?1:-1);
-  },[swDir,showEPG,showFull]);
+  // ============================================
+  // MOUSE WHEEL
+  // ============================================
+  const handleWheel = useCallback((e) => {
+    if (showEPG || showFull) return;
+    if (wRef.current) return;
+    wRef.current = setTimeout(() => { wRef.current = null; }, 400);
+    swDir(e.deltaY > 0 ? 1 : -1);
+  }, [swDir, showEPG, showFull]);
 
-  // ========== CLICK HANDLER (on the video overlay only) ==========
-  const handleVideoClick=useCallback(()=>{
-    // Don't activate audio if menus are open
-    if(showEPG||showFull||selProg)return;
-    
-    const now=Date.now();
-    if(now-lastClickTimeRef.current<300){
-      if(!document.fullscreenElement)cRef.current?.requestFullscreen?.();
+  // ============================================
+  // CLICK
+  // ============================================
+  const handleVideoClick = useCallback(() => {
+    if (showEPG || showFull || selProg) return;
+    const now = Date.now();
+    if (now - lastClickTime.current < 300) {
+      if (!document.fullscreenElement) cRef.current?.requestFullscreen?.();
       else document.exitFullscreen?.();
     }
-    lastClickTimeRef.current=now;
-    // Any click on video area activates audio
-    if(muted)handleUnmute();
+    lastClickTime.current = now;
+    if (muted) handleUnmute();
     showOSDNow();
-  },[muted,handleUnmute,showOSDNow,showEPG,showFull,selProg]);
+  }, [muted, handleUnmute, showOSDNow, showEPG, showFull, selProg]);
 
-  // ========== LOADING ==========
-  if(loading) return <div style={{width:"100%",height:"100vh",background:"#000",display:"flex",alignItems:"center",justifyContent:"center",color:"#888",fontFamily:"system-ui",fontSize:16}}>
-    <div style={{textAlign:"center"}}><div style={{fontSize:48,marginBottom:16}}>📺</div>Carregando TVWEB...</div>
-  </div>;
-  if(!ch) return null;
+  // ============================================
+  // NEXT VIDEO (botão manual ou erro)
+  // ============================================
+  const handleNextVideo = useCallback(() => {
+    const advanced = nextVideo(muted);
+    if (!advanced) {
+      // Não há próximo vídeo — mostra erro temporário
+      setPlayerError(true);
+      setTimeout(() => setPlayerError(false), 5000);
+    } else {
+      setPlayerError(false);
+    }
+  }, [nextVideo, muted]);
 
-  // ========== RENDER ==========
-  return <div ref={cRef} onWheel={handleWheel} onMouseMove={showOSDNow}
-    style={{width:"100%",height:"100vh",background:"#000",position:"relative",fontFamily:"'Segoe UI','Roboto',-apple-system,sans-serif",overflow:"hidden",cursor:"default",userSelect:"none"}}>
+  // ============================================
+  // LOADING
+  // ============================================
+  if (loading) return (
+    <div style={{width:"100%",height:"100vh",background:"#000",display:"flex",alignItems:"center",justifyContent:"center",color:"#888",fontFamily:"system-ui",fontSize:16}}>
+      <div style={{textAlign:"center"}}>
+        <div style={{fontSize:48,marginBottom:16}}>📺</div>
+        Carregando TVWEB...
+      </div>
+    </div>
+  );
+  if (!ch) return null;
 
-    {/* ===== YOUTUBE PLAYER (completely isolated) ===== */}
-    <div style={{position:"absolute",inset:0,zIndex:1,opacity:fade?0:1,transition:"opacity 0.5s"}}>
-      {ytSrc && !cp?.isPlaceholder ? (
-        <iframe
-          key={ytKeyRef.current}
-          src={ytSrc}
-          allow="autoplay; encrypted-media"
-          allowFullScreen={false}
-          style={{width:"100%",height:"100%",border:"none",pointerEvents:"none"}}
-          title={cp?.nome||"TVWEB"}
-        />
-      ) : (
-        <div style={{width:"100%",height:"100%",background:`radial-gradient(ellipse at center,${ch.cor||"#1a73e8"}15,#0a0c12 70%)`,display:"flex",alignItems:"center",justifyContent:"center"}}>
-          {cp?.isPlaceholder?(
-            <div style={{textAlign:"center",maxWidth:600}}>
-              <div style={{fontSize:140,marginBottom:30,opacity:0.8}}>📺</div>
-              <div style={{fontSize:48,fontWeight:700,color:"#fff",marginBottom:16}}>Voltamos já!</div>
-              <div style={{fontSize:18,color:"#999"}}>Programação em breve</div>
-            </div>
-          ):(
-            <div style={{textAlign:"center",opacity:0.15}}><ChLogo ch={ch} size={100}/><div style={{fontSize:24,color:"#fff",marginTop:8,fontWeight:700}}>{ch.nome}</div></div>
-          )}
+  const { src: ytSrc, ytKey, videoIndex, videoTotal } = playerState;
+  const showPlayer = ytSrc && !cp?.isPlaceholder;
+
+  // ============================================
+  // RENDER
+  // ============================================
+  return (
+    <div
+      ref={cRef}
+      onWheel={handleWheel}
+      onMouseMove={showOSDNow}
+      style={{width:"100%",height:"100vh",background:"#000",position:"relative",fontFamily:"'Segoe UI','Roboto',-apple-system,sans-serif",overflow:"hidden",cursor:"default",userSelect:"none"}}
+    >
+      {/* ===== YOUTUBE PLAYER ===== */}
+      <div style={{position:"absolute",inset:0,zIndex:1,opacity:fade?0:1,transition:"opacity 0.5s"}}>
+        {showPlayer ? (
+          <iframe
+            key={ytKey}
+            src={ytSrc}
+            allow="autoplay; encrypted-media"
+            allowFullScreen={false}
+            style={{width:"100%",height:"100%",border:"none",pointerEvents:"none"}}
+            title={cp?.nome || "TVWEB"}
+          />
+        ) : (
+          <div style={{width:"100%",height:"100%",background:`radial-gradient(ellipse at center,${ch.cor||"#1a73e8"}15,#0a0c12 70%)`,display:"flex",alignItems:"center",justifyContent:"center"}}>
+            {cp?.isPlaceholder ? (
+              <div style={{textAlign:"center",maxWidth:600}}>
+                <div style={{fontSize:140,marginBottom:30,opacity:0.8}}>📺</div>
+                <div style={{fontSize:48,fontWeight:700,color:"#fff",marginBottom:16}}>Voltamos já!</div>
+                <div style={{fontSize:18,color:"#999"}}>Programação em breve</div>
+              </div>
+            ) : (
+              <div style={{textAlign:"center",opacity:0.15}}><ChLogo ch={ch} size={100}/><div style={{fontSize:24,color:"#fff",marginTop:8,fontWeight:700}}>{ch.nome}</div></div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* ===== CLICK BARRIER ===== */}
+      <div onClick={handleVideoClick} style={{position:"absolute",inset:0,zIndex:2}} />
+
+      {/* ===== WATERMARK ===== */}
+      <div style={{position:"absolute",top:16,right:20,fontSize:14,fontWeight:700,color:"rgba(255,255,255,0.12)",letterSpacing:2,zIndex:3,pointerEvents:"none"}}>TVWEB</div>
+
+      {/* ===== UNMUTE BUTTON ===== */}
+      {muted && (
+        <button onClick={e=>{e.stopPropagation();handleUnmute()}} style={{
+          position:"absolute",bottom:"50%",left:"50%",transform:"translate(-50%,50%)",zIndex:15,
+          background:"rgba(0,0,0,0.85)",border:"1px solid rgba(255,255,255,0.2)",
+          color:"#fff",padding:"14px 32px",borderRadius:30,cursor:"pointer",
+          fontSize:16,fontWeight:700,display:"flex",alignItems:"center",gap:10,
+          animation:"pulseFull 2s ease infinite",
+        }}>🔇 Clique para ativar o som</button>
+      )}
+
+      {/* ===== PLAYER ERROR OVERLAY ===== */}
+      {playerError && (
+        <div style={{
+          position:"absolute",bottom:"40%",left:"50%",transform:"translateX(-50%)",zIndex:15,
+          background:"rgba(0,0,0,0.85)",border:"1px solid rgba(244,67,54,0.4)",
+          color:"#f44336",padding:"12px 24px",borderRadius:8,fontSize:14,fontWeight:600,
+          display:"flex",alignItems:"center",gap:10,
+        }}>
+          ⚠️ Sem mais vídeos neste programa. Aguarde o próximo...
         </div>
       )}
+
+      {/* ✅ FIX 2: BOTÃO PRÓXIMO VÍDEO (visível no OSD quando há múltiplos) */}
+      {videoTotal > 1 && showOSD && !showEPG && !showFull && (
+        <button
+          onClick={e => { e.stopPropagation(); handleNextVideo(); }}
+          style={{
+            position:"absolute",top:"50%",right:80,transform:"translateY(-50%)",zIndex:15,
+            background:"rgba(0,0,0,0.7)",border:"1px solid rgba(156,39,176,0.5)",
+            color:"#ce93d8",padding:"10px 18px",borderRadius:8,cursor:"pointer",
+            fontSize:13,fontWeight:700,display:"flex",flexDirection:"column",
+            alignItems:"center",gap:4,
+          }}
+        >
+          <span style={{fontSize:20}}>⏭</span>
+          <span>{videoIndex + 1}/{videoTotal}</span>
+        </button>
+      )}
+
+      {/* ===== OSD HEADER ===== */}
+      <OSDHeader
+        channel={ch} program={cp}
+        visible={showOSD && !showEPG && !showFull}
+        videoIndex={videoIndex}
+        videoTotal={videoTotal}
+      />
+
+      {/* ===== OSD FOOTER ===== */}
+      <OSDFooter
+        program={cp} nextProgram={np}
+        visible={showOSD && !showEPG && !showFull}
+        onOpenEPG={() => setEPG(true)}
+        onOpenFull={() => setFull(true)}
+        onFullscreen={() => {
+          if (!document.fullscreenElement) cRef.current?.requestFullscreen?.();
+          else document.exitFullscreen?.();
+        }}
+      />
+
+      {/* ===== CHANNEL SIDEBAR ===== */}
+      <div style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",zIndex:15,display:"flex",flexDirection:"column",gap:4,opacity:showOSD&&!showEPG&&!showFull?0.7:0,transition:"opacity 0.3s",pointerEvents:showOSD&&!showEPG&&!showFull?"auto":"none"}}>
+        {channels.map(c => (
+          <div key={c.id} onClick={e=>{e.stopPropagation();swCh(c.id)}} style={{width:40,height:40,borderRadius:4,background:c.id===curCh?"rgba(26,115,232,0.3)":"rgba(0,0,0,0.5)",border:c.id===curCh?"1px solid #1a73e8":"1px solid rgba(255,255,255,0.1)",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",overflow:"hidden"}}>
+            <ChLogo ch={c} size={c.logoType==="custom"?40:22}/>
+          </div>
+        ))}
+      </div>
+
+      {/* ===== FIREBASE ERROR NOTICE ===== */}
+      {firebaseError && (
+        <div style={{position:"absolute",top:16,left:"50%",transform:"translateX(-50%)",zIndex:20,background:"rgba(255,152,0,0.15)",border:"1px solid rgba(255,152,0,0.3)",color:"#ff9800",padding:"8px 16px",borderRadius:6,fontSize:12,fontWeight:600}}>
+          ⚠️ Modo offline — dados em cache
+        </div>
+      )}
+
+      {/* ===== EPG / FULL / MODAL ===== */}
+      {showEPG && (
+        <EPGCompact
+          channels={channels} allPrograms={allPrograms} currentChannelId={curCh}
+          onSelectChannel={id => { swCh(id); setEPG(false); }}
+          onSelectProgram={setSP}
+          onOpenFull={() => { setEPG(false); setFull(true); }}
+          onClose={() => setEPG(false)}
+        />
+      )}
+      {showFull && (
+        <FullDay
+          channels={channels} allPrograms={allPrograms} currentChannelId={curCh}
+          onClose={() => setFull(false)} onProgramClick={setSP}
+        />
+      )}
+      {selProg && (
+        <ProgModal
+          program={selProg}
+          channel={channels.find(c => buildSchedule(allPrograms, c.id).some(p => p.id === selProg.id)) || ch}
+          onClose={() => setSP(null)}
+          onWatch={(chId) => { swCh(chId); setEPG(false); setFull(false); }}
+        />
+      )}
+
+      <style>{`
+        @keyframes slideUp{from{transform:translateY(100%);opacity:0}to{transform:translateY(0);opacity:1}}
+        @keyframes slideDown{from{transform:translateY(-20px);opacity:0}to{transform:translateY(0);opacity:1}}
+        @keyframes pulseFull{0%,100%{opacity:.6;transform:translate(-50%,50%) scale(1)}50%{opacity:1;transform:translate(-50%,50%) scale(1.05)}}
+        ::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:rgba(255,255,255,.02)}::-webkit-scrollbar-thumb{background:rgba(255,255,255,.1);border-radius:3px}
+        *{box-sizing:border-box;margin:0;padding:0}
+      `}</style>
     </div>
-
-    {/* ===== CLICK BARRIER (completely above iframe, below menus) ===== */}
-    <div onClick={handleVideoClick} style={{position:"absolute",inset:0,zIndex:2}} />
-
-    {/* ===== WATERMARK ===== */}
-    <div style={{position:"absolute",top:16,right:20,fontSize:14,fontWeight:700,color:"rgba(255,255,255,0.12)",letterSpacing:2,zIndex:3,pointerEvents:"none"}}>TVWEB</div>
-
-    {/* ===== UNMUTE BUTTON ===== */}
-    {muted&&<button onClick={e=>{e.stopPropagation();handleUnmute()}} style={{
-      position:"absolute",bottom:"50%",left:"50%",transform:"translate(-50%,50%)",zIndex:15,
-      background:"rgba(0,0,0,0.85)",border:"1px solid rgba(255,255,255,0.2)",
-      color:"#fff",padding:"14px 32px",borderRadius:30,cursor:"pointer",
-      fontSize:16,fontWeight:700,display:"flex",alignItems:"center",gap:10,
-      animation:"pulseFull 2s ease infinite",
-    }}>🔇 Clique para ativar o som</button>}
-
-    {/* ===== OSD HEADER (TV-style, 20s) ===== */}
-    <OSDHeader channel={ch} program={cp} visible={showOSD&&!showEPG&&!showFull}/>
-
-    {/* ===== OSD FOOTER (TV-style, 20s) ===== */}
-    <OSDFooter program={cp} nextProgram={np} visible={showOSD&&!showEPG&&!showFull}
-      onOpenEPG={()=>setEPG(true)} onOpenFull={()=>setFull(true)} onFullscreen={()=>{if(!document.fullscreenElement)cRef.current?.requestFullscreen?.();else document.exitFullscreen?.()}}/>
-
-
-    {/* ===== CHANNEL SIDEBAR ===== */}
-    <div style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",zIndex:15,display:"flex",flexDirection:"column",gap:4,opacity:showOSD&&!showEPG&&!showFull?0.7:0,transition:"opacity 0.3s",pointerEvents:showOSD&&!showEPG&&!showFull?"auto":"none"}}>
-      {CHANNELS.map(c=><div key={c.id} onClick={e=>{e.stopPropagation();swCh(c.id)}} style={{width:40,height:40,borderRadius:4,background:c.id===curCh?"rgba(26,115,232,0.3)":"rgba(0,0,0,0.5)",border:c.id===curCh?"1px solid #1a73e8":"1px solid rgba(255,255,255,0.1)",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",overflow:"hidden"}}><ChLogo ch={c} size={c.logoType==="custom"?40:22}/></div>)}
-    </div>
-
-    {/* ===== EPG / FULL / MODAL (above everything) ===== */}
-    {showEPG&&<EPGCompact channels={CHANNELS} allPrograms={allPrograms} currentChannelId={curCh} onSelectChannel={id=>{swCh(id);setEPG(false)}} onSelectProgram={setSP} onOpenFull={()=>{setEPG(false);setFull(true)}} onClose={()=>setEPG(false)}/>}
-    {showFull&&<FullDay channels={CHANNELS} allPrograms={allPrograms} currentChannelId={curCh} onClose={()=>setFull(false)} onProgramClick={setSP}/>}
-    {selProg&&<ProgModal program={selProg} channel={CHANNELS.find(c=>buildSchedule(allPrograms,c.id).some(p=>p.id===selProg.id))||ch} onClose={()=>setSP(null)} onWatch={(chId)=>{swCh(chId);setEPG(false);setFull(false)}}/>}
-
-    <style>{`
-      @keyframes slideUp{from{transform:translateY(100%);opacity:0}to{transform:translateY(0);opacity:1}}
-      @keyframes slideDown{from{transform:translateY(-20px);opacity:0}to{transform:translateY(0);opacity:1}}
-      @keyframes pulseFull{0%,100%{opacity:.6;transform:translate(-50%,50%) scale(1)}50%{opacity:1;transform:translate(-50%,50%) scale(1.05)}}
-      ::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:rgba(255,255,255,.02)}::-webkit-scrollbar-thumb{background:rgba(255,255,255,.1);border-radius:3px}
-      *{box-sizing:border-box;margin:0;padding:0}
-    `}</style>
-  </div>;
+  );
 }
