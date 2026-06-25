@@ -1270,7 +1270,7 @@ export default function TVWeb(){
         <EPGCompact
           channels={channels} allPrograms={allPrograms} currentChannelId={curCh}
           onSelectChannel={id => { swCh(id); setEPG(false); }}
-          onSelectProgram={setSP}   {/* modal só mostra info, não troca conteúdo */}
+          onSelectProgram={setSP}
           onOpenFull={() => { setEPG(false); setFull(true); }}
           onClose={() => setEPG(false)}
         />
