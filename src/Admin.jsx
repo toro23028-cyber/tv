@@ -518,9 +518,11 @@ export default function AdminPanel(){
   };
 
   // ============================================================
-  // ✅ FIX 3: QUERY FILTRADA POR DATA — reduz leituras Firestore
-  // Em vez de carregar TODOS os programas, filtra pelo range de datas
-  // relevante (ontem até QUEUE_DAYS à frente).
+  // FIREBASE — sem filtro de data (índice composto não obrigatório)
+  // A query filtrada com where("data",...) exige índice composto
+  // no Firestore — sem ele retorna silenciosamente vazio para datas
+  // futuras. Como a coleção é pequena (7-30 dias × canais), carregar
+  // tudo é correto e sem custo relevante.
   // ============================================================
   useEffect(() => {
     const unsubCh = onSnapshot(collection(db, "channels"), (snap) => {
@@ -532,22 +534,8 @@ export default function AdminPanel(){
       }
     }, err => console.error("Firebase channels:", err));
 
-    // Calcula range de datas: ontem até hoje + QUEUE_DAYS
-    const today = new Date(getToday() + "T00:00:00");
-    const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
-    const future = new Date(today); future.setDate(today.getDate() + QUEUE_DAYS);
-
-    const fmtDate = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-    const dateFrom = fmtDate(yesterday);
-    const dateTo   = fmtDate(future);
-
-    const qPrograms = query(
-      collection(db, "programs"),
-      where("data", ">=", dateFrom),
-      where("data", "<=", dateTo)
-    );
-
-    const unsubPr = onSnapshot(qPrograms, (snap) => {
+    // Carrega TODOS os programas sem filtro — funciona sem índice
+    const unsubPr = onSnapshot(collection(db, "programs"), (snap) => {
       const list = snap.docs.map(d => ({ ...d.data(), id: d.id }));
       setProgs(list);
     }, err => console.error("Firebase programs:", err));
