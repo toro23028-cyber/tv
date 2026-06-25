@@ -77,6 +77,75 @@ async function fetchYouTubeMetadata(videoId) {
 }
 
 function extractYTId(s){ if(!s)return null; const p=[/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/,/^([a-zA-Z0-9_-]{11})$/]; for(const r of p){const m=s.match(r);if(m)return m[1]} return null }
+
+// ─── Extrai playlistId de qualquer URL do YouTube ──────────────
+function extractPlaylistId(url) {
+  if (!url) return null;
+  const m = url.match(/[?&]list=([a-zA-Z0-9_-]+)/);
+  return m ? m[1] : null;
+}
+
+// ─── Busca TODOS os vídeos de uma playlist (paginado) ──────────
+// Retorna: [{ youtubeUrl, titulo, duracao }]
+async function fetchPlaylistVideos(playlistId, onProgress) {
+  const API_KEY = import.meta.env.VITE_YOUTUBE_API_KEY;
+  if (!API_KEY) { console.warn("VITE_YOUTUBE_API_KEY não configurada"); return []; }
+
+  const videos = [];
+  let pageToken = "";
+  let page = 0;
+
+  // 1. Coleta todos os videoIds da playlist (máx 500 vídeos, 10 páginas de 50)
+  do {
+    const url = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=${playlistId}&maxResults=50&pageToken=${pageToken}&key=${API_KEY}`;
+    const res  = await fetch(url);
+    if (!res.ok) break;
+    const data = await res.json();
+    if (!data.items) break;
+
+    for (const item of data.items) {
+      const vid = item.snippet?.resourceId?.videoId;
+      const tit = item.snippet?.title;
+      if (vid && tit && tit !== "Deleted video" && tit !== "Private video") {
+        videos.push({ videoId: vid, titulo: tit });
+      }
+    }
+
+    pageToken = data.nextPageToken || "";
+    page++;
+    if (onProgress) onProgress(`Buscando página ${page}… (${videos.length} vídeos)`);
+  } while (pageToken && page < 10);
+
+  if (videos.length === 0) return [];
+
+  // 2. Busca duração de todos em lotes de 50
+  const result = [];
+  for (let i = 0; i < videos.length; i += 50) {
+    const batch  = videos.slice(i, i + 50);
+    const ids    = batch.map(v => v.videoId).join(",");
+    const url    = `https://www.googleapis.com/youtube/v3/videos?part=contentDetails&id=${ids}&key=${API_KEY}`;
+    const res    = await fetch(url);
+    const data   = res.ok ? await res.json() : { items: [] };
+
+    // Monta mapa de id → duração
+    const durMap = {};
+    for (const item of (data.items || [])) {
+      const m = (item.contentDetails?.duration || "").match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+      durMap[item.id] = m ? (parseInt(m[1]||0)*3600 + parseInt(m[2]||0)*60 + parseInt(m[3]||0)) : 0;
+    }
+
+    for (const v of batch) {
+      result.push({
+        youtubeUrl: v.videoId,
+        titulo:     v.titulo,
+        duracao:    durMap[v.videoId] || 0,
+      });
+    }
+    if (onProgress) onProgress(`Duração: ${Math.min(i+50, videos.length)}/${videos.length} vídeos…`);
+  }
+
+  return result;
+}
 function ytThumb(id){ const x=extractYTId(id); return x?`https://img.youtube.com/vi/${x}/mqdefault.jpg`:null }
 
 const iS = {background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:4,padding:"8px 12px",color:"#fff",fontSize:13,outline:"none"};
@@ -205,6 +274,169 @@ function TimelineView({programs,channels,selectedChannel,onEdit,onDelete,onReord
 }
 
 // ============================================
+// PLAYLIST IMPORTER (dentro do ProgramModal)
+// ============================================
+function PlaylistImporter({ onImport }) {
+  const [url,      setUrl]      = useState("");
+  const [loading,  setLoading]  = useState(false);
+  const [status,   setStatus]   = useState("");
+  const [preview,  setPreview]  = useState(null); // { videos, totalDur, name }
+  const [expanded, setExpanded] = useState(false);
+  const [error,    setError]    = useState("");
+
+  const handleFetch = async () => {
+    const plId = extractPlaylistId(url.trim());
+    if (!plId) { setError("URL inválida — cole uma URL de playlist do YouTube"); return; }
+    setError(""); setLoading(true); setPreview(null); setStatus("Conectando à API do YouTube…");
+    try {
+      const vids = await fetchPlaylistVideos(plId, setStatus);
+      if (vids.length === 0) { setError("Nenhum vídeo encontrado (playlist vazia ou privada)"); setLoading(false); return; }
+      const totalDur = vids.reduce((s,v) => s + (v.duracao||0), 0);
+      // Tenta usar o título do primeiro vídeo como base do nome
+      const suggestedName = vids[0]?.titulo?.replace(/(?:#\d+|ep\.?\s*\d+|\s*-\s*parte\s*\d+)/gi,"").trim() || "";
+      setPreview({ videos: vids, totalDur, suggestedName });
+      setStatus("");
+    } catch(e) {
+      setError("Erro ao buscar playlist: " + e.message);
+    }
+    setLoading(false);
+  };
+
+  const handleConfirm = () => {
+    if (!preview) return;
+    onImport(preview.videos, preview.totalDur, preview.suggestedName);
+    setPreview(null); setUrl(""); setStatus(""); setExpanded(false);
+  };
+
+  const fmtDurMin = (s) => {
+    const h=Math.floor(s/3600), m=Math.floor((s%3600)/60);
+    return h>0 ? `${h}h${m>0?`${m}min`:""}` : `${m}min`;
+  };
+
+  return (
+    <div style={{background:"rgba(156,39,176,0.06)",border:"1px solid rgba(156,39,176,0.2)",
+      borderRadius:8,padding:"12px 14px"}}>
+
+      {/* Header da seção */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <span style={{fontSize:16}}>🎵</span>
+          <span style={{fontSize:12,fontWeight:700,color:"#ce93d8",letterSpacing:0.5}}>
+            IMPORTAR PLAYLIST DO YOUTUBE
+          </span>
+        </div>
+        <span style={{fontSize:10,color:"#666"}}>opcional</span>
+      </div>
+
+      {/* Input */}
+      <div style={{display:"flex",gap:8,marginBottom:8}}>
+        <input
+          value={url} onChange={e=>{setUrl(e.target.value);setError("");setPreview(null);}}
+          placeholder="https://youtube.com/playlist?list=PLxxxxxx"
+          style={{...iS, flex:1, fontSize:12}}
+          onKeyDown={e=>e.key==="Enter"&&handleFetch()}
+        />
+        <button onClick={handleFetch} disabled={loading||!url.trim()}
+          style={{padding:"8px 14px",borderRadius:4,border:"none",cursor:loading||!url.trim()?"not-allowed":"pointer",
+            background:loading||!url.trim()?"#333":"rgba(156,39,176,0.6)",
+            color:"#fff",fontSize:12,fontWeight:700,whiteSpace:"nowrap",
+            opacity:loading||!url.trim()?0.5:1,minWidth:80}}>
+          {loading ? "⏳" : "🔍 Buscar"}
+        </button>
+      </div>
+
+      {/* Status de progresso */}
+      {status && (
+        <div style={{fontSize:11,color:"#9c27b0",marginBottom:8,
+          display:"flex",alignItems:"center",gap:6}}>
+          <span style={{animation:"spin 1s linear infinite",display:"inline-block"}}>⏳</span>
+          {status}
+        </div>
+      )}
+
+      {/* Erro */}
+      {error && (
+        <div style={{fontSize:11,color:"#f44336",padding:"6px 10px",
+          background:"rgba(244,67,54,0.08)",borderRadius:4,marginBottom:8}}>
+          ⚠️ {error}
+        </div>
+      )}
+
+      {/* Preview da playlist */}
+      {preview && (
+        <div style={{background:"rgba(156,39,176,0.1)",borderRadius:6,
+          padding:"10px 12px",border:"1px solid rgba(156,39,176,0.25)"}}>
+
+          {/* Resumo */}
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+            <div>
+              <div style={{fontSize:13,fontWeight:700,color:"#fff",marginBottom:2}}>
+                ✅ {preview.videos.length} vídeos encontrados
+              </div>
+              <div style={{fontSize:11,color:"#9c27b0"}}>
+                Duração total: <strong style={{color:"#ce93d8"}}>{fmtDurMin(preview.totalDur)}</strong>
+                <span style={{color:"#555",marginLeft:8}}>
+                  • Será agendado como 1 programa contínuo
+                </span>
+              </div>
+            </div>
+            <button onClick={()=>setExpanded(x=>!x)}
+              style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",
+                color:"#aaa",padding:"4px 10px",borderRadius:4,cursor:"pointer",fontSize:11}}>
+              {expanded?"▲ Ocultar":"▼ Ver episódios"}
+            </button>
+          </div>
+
+          {/* Lista de episódios expansível */}
+          {expanded && (
+            <div style={{maxHeight:180,overflowY:"auto",display:"flex",flexDirection:"column",
+              gap:3,marginBottom:10}}>
+              {preview.videos.map((v,i)=>(
+                <div key={i} style={{display:"flex",alignItems:"center",gap:8,
+                  padding:"4px 6px",background:"rgba(255,255,255,0.03)",
+                  borderRadius:3,fontSize:11}}>
+                  <span style={{color:"#6a1b9a",fontWeight:700,minWidth:26,
+                    textAlign:"right",flexShrink:0}}>
+                    {i+1}
+                  </span>
+                  <img src={`https://img.youtube.com/vi/${v.youtubeUrl}/default.jpg`}
+                    alt="" style={{width:32,height:22,objectFit:"cover",borderRadius:2,flexShrink:0}}/>
+                  <span style={{color:"#ddd",flex:1,overflow:"hidden",
+                    textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                    {v.titulo}
+                  </span>
+                  <span style={{color:"#555",flexShrink:0,minWidth:36,textAlign:"right"}}>
+                    {fmtDurMin(v.duracao)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Botão de confirmação */}
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={()=>{setPreview(null);setUrl("");}}
+              style={{flex:1,padding:"8px 0",borderRadius:4,cursor:"pointer",
+                background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.1)",
+                color:"#888",fontSize:12}}>
+              Cancelar
+            </button>
+            <button onClick={handleConfirm}
+              style={{flex:2,padding:"8px 0",borderRadius:4,border:"none",cursor:"pointer",
+                background:"linear-gradient(135deg,#7b1fa2,#9c27b0)",
+                color:"#fff",fontSize:12,fontWeight:700}}>
+              🎬 Usar esta playlist como programa
+            </button>
+          </div>
+        </div>
+      )}
+
+      <style>{`@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}`}</style>
+    </div>
+  );
+}
+
+// ============================================
 // PROGRAM MODAL
 // ============================================
 function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existingPrograms,onSave,onClose}){
@@ -311,6 +543,17 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
             <input type="number" min="0" max="59" value={customM} onChange={e=>setCM(e.target.value)} style={{...iS,width:55,textAlign:"center"}}/><span style={{color:"#888"}}>min</span>
           </div>}
         </div>
+
+        {/* ── PLAYLIST DO YOUTUBE ── */}
+        <PlaylistImporter onImport={(vids, totalDur, suggestedName) => {
+          setVideos(vids);
+          // Atualiza duração com soma total da playlist
+          const h = Math.floor(totalDur/3600);
+          const m = Math.floor((totalDur%3600)/60);
+          setCH(h); setCM(m); setDP(0);
+          // Sugere nome se o campo estiver vazio
+          if (!nome.trim() && suggestedName) setNome(suggestedName);
+        }}/>
 
         {/* Videos */}
         <div>
