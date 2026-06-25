@@ -24,7 +24,10 @@ function getNow(){ const n=new Date(); return n.getHours()*3600+n.getMinutes()*6
 function fmtHM(s){ return `${String(Math.floor(s/3600)).padStart(2,"0")}:${String(Math.floor((s%3600)/60)).padStart(2,"0")}` }
 function fD(s){ const h=Math.floor(s/3600),m=Math.floor((s%3600)/60); return h>0?`${h}h${m>0?String(m).padStart(2,"0")+"min":""}`: `${m}min` }
 const CC={L:"#0f0","10":"#00bfff","12":"#ff0","14":"#f80","16":"#f00","18":"#000"};
-function getToday(){ return new Date().toISOString().split("T")[0] }
+function getToday(){
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
 function extractYTId(s){ if(!s)return null; const p=[/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/,/^([a-zA-Z0-9_-]{11})$/]; for(const r of p){const m=s.match(r);if(m)return m[1]} return null }
 
 // ============================================================
@@ -756,7 +759,7 @@ function FullDay({channels,allPrograms,currentChannelId,onClose,onProgramClick})
         {sched.filter(p=>p.horarioFim<=86400&&p.horarioFim>getNow()).map(prog=>{
           const isNow=ns>=prog.horarioInicio&&ns<prog.horarioFim;
           const isPast=ns>=prog.horarioFim;
-          return <div key={prog.id} onClick={()=>onProgramClick(prog)} style={{display:"flex",gap:14,padding:"16px 18px",borderRadius:10,cursor:"pointer",background:isNow?"rgba(26,115,232,0.15)":isPast?"rgba(255,255,255,0.015)":"rgba(255,255,255,0.04)",border:isNow?"1px solid #1a73e8":"1px solid rgba(255,255,255,0.06)",opacity:isPast?0.4:1,transition:"all 0.2s"}}>
+          return <div key={prog.id} style={{display:"flex",gap:14,padding:"16px 18px",borderRadius:10,background:isNow?"rgba(26,115,232,0.15)":isPast?"rgba(255,255,255,0.015)":"rgba(255,255,255,0.04)",border:isNow?"1px solid #1a73e8":"1px solid rgba(255,255,255,0.06)",opacity:isPast?0.4:1,transition:"all 0.2s"}}>
             <div style={{minWidth:75,textAlign:"center",paddingTop:2}}>
               <div style={{fontSize:18,fontWeight:700,color:isNow?"#4fc3f7":"#fff"}}>{prog.horarioTexto}</div>
               <div style={{fontSize:11,color:"#555",marginTop:2}}>{prog.horarioFimTexto}</div>
@@ -803,7 +806,7 @@ function ProgModal({program,channel,onClose,onWatch}){
         <div style={{fontSize:14,color:"#999",lineHeight:1.6,marginBottom:16}}>{program.sinopse}</div>
         <div style={{display:"flex",gap:16,fontSize:13,color:"#666",marginBottom:16}}><span>⏰ {program.horarioTexto} - {program.horarioFimTexto}</span><span>⏱ {fD(Number(program.duracao))}</span></div>
         <div style={{display:"flex",gap:8}}>
-          {isNow&&onWatch&&<button onClick={()=>{onWatch(program.canalId);onClose()}} style={{flex:1,padding:12,background:"linear-gradient(135deg,#f44336,#e91e63)",border:"none",borderRadius:6,color:"#fff",cursor:"pointer",fontSize:14,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>▶ Assistir Agora</button>}
+          {/* "Assistir Agora" removido — programação linear, usuário assiste o canal atual */}
           <button onClick={()=>shareProgram(program,channel)} style={{flex:1,padding:12,background:"rgba(76,175,80,0.15)",border:"1px solid rgba(76,175,80,0.3)",borderRadius:6,color:"#4caf50",cursor:"pointer",fontSize:13,fontWeight:600}}>📤 Compartilhar</button>
           {isFut&&<button onClick={()=>scheduleNotif(program,channel)} style={{flex:1,padding:12,background:"rgba(255,152,0,0.15)",border:"1px solid rgba(255,152,0,0.3)",borderRadius:6,color:"#ff9800",cursor:"pointer",fontSize:13,fontWeight:600}}>🔔 Lembrete</button>}
           <button onClick={onClose} style={{flex:1,padding:12,background:"rgba(26,115,232,0.2)",border:"1px solid rgba(26,115,232,0.3)",borderRadius:6,color:"#4fc3f7",cursor:"pointer",fontSize:13,fontWeight:600}}>Fechar</button>
@@ -900,7 +903,12 @@ export default function TVWeb(){
   const [allPrograms, setAllProgs] = useState([]);
   const [loading, setLoading]     = useState(true);
   const [firebaseError, setFBErr] = useState(false);
-  const [curCh, setCurCh]         = useState(null);
+  // Lê ?canal=ID da URL (vindo da Landing Page)
+  const _initialCh = useMemo(() => {
+    try { return new URLSearchParams(window.location.search).get("canal") || null; }
+    catch { return null; }
+  }, []);
+  const [curCh, setCurCh] = useState(_initialCh);
   const [showEPG, setEPG]         = useState(false);
   const [showFull, setFull]       = useState(false);
   const [showOSD, setOSD]         = useState(true);
@@ -923,7 +931,7 @@ export default function TVWeb(){
 
   const hideTimer      = useRef(null);
   const cRef           = useRef(null);
-  const wRef           = useRef(null);
+  // wRef removido — mouse wheel desativado
   const lastClickTime  = useRef(0);
 
   // ============================================
@@ -940,7 +948,7 @@ export default function TVWeb(){
       const list = snap.docs.map(d => ({ ...d.data(), id: d.id }));
       const sorted = list.sort((a,b) => (a.numero||0) - (b.numero||0));
       if (sorted.length > 0) { setChannels(sorted); setCurCh(prev => prev || sorted[0].id); }
-      else { setChannels(FALLBACK_CHANNELS); setCurCh("_info"); }
+      else { setChannels(FALLBACK_CHANNELS); setCurCh(prev => prev || "_info"); }
       loaded.channels = true;
       if (loaded.channels && loaded.programs) { setLoading(false); clearTimeout(fallbackTimer); }
     }, (err) => {
@@ -989,9 +997,12 @@ export default function TVWeb(){
     usePlayerState(cp, curCh);
 
   // ============================================================
-  // ✅ FIX 2 + 5: AUTO VIDEO SWITCH & SEQUÊNCIA DE VÍDEOS
-  // Quando o programa muda → reseta para o primeiro vídeo
-  // O botão "Próximo vídeo" ou fim do iframe avança na lista
+  // AUTO VIDEO SWITCH — ao trocar de programa E auto-avanço
+  // de episódio dentro de uma playlist.
+  // ─ Ao trocar de programa: onProgramChange recalcula qual
+  //   episódio deve estar tocando agora via resolveVideoIndex.
+  // ─ A cada tick (5s): verifica se o episódio atual terminou
+  //   e avança automaticamente para o próximo se necessário.
   // ============================================================
   useEffect(() => {
     if (!cp || cp.id === prevProgIdRef.current) return;
@@ -1019,16 +1030,31 @@ export default function TVWeb(){
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cp?.id, curCh]);
 
+  // ─────────────────────────────────────────────────────────────
+  // AUTO-AVANÇO DE EPISÓDIO dentro de playlist (roda a cada tick)
+  // ─────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!cp || !playerState.ytKey) return;
+    const { videoIndex, videoTotal } = playerState;
+    if (videoTotal <= 1) return;
+    const list    = getVideoList(cp);
+    const elapsed = getElapsed(cp);
+    const { index: shouldBeIdx } = resolveVideoIndex(list, elapsed);
+    if (shouldBeIdx > videoIndex) nextVideo(muted);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tick]);
+
   // ============================================
   // OSD VISIBILITY
   // ============================================
   const showOSDNow = useCallback(() => {
     clearTimeout(hideTimer.current);
     setOSD(true);
+    // Só agenda o auto-hide quando nenhum menu está aberto
     hideTimer.current = setTimeout(() => {
       setOSD(false);
     }, 20000);
-  }, []);
+  }, []); // showEPG/showFull não entram nas deps: o timer é resetado pelo useEffect abaixo
 
   useEffect(() => { showOSDNow(); return () => clearTimeout(hideTimer.current); }, [showOSDNow]);
   useEffect(() => { if (showEPG || showFull) { clearTimeout(hideTimer.current); setOSD(true); } }, [showEPG, showFull]);
@@ -1047,7 +1073,7 @@ export default function TVWeb(){
   const swCh = useCallback((id) => {
     if (id === curCh) return;
     setFade(true);
-    setPlayerError(false);
+    setPlayerError(false); // limpa erro ao trocar canal
     setTimeout(() => { setCurCh(id); setFade(false); }, 300);
     showOSDNow();
   }, [curCh, showOSDNow]);
@@ -1080,15 +1106,7 @@ export default function TVWeb(){
     return () => window.removeEventListener("keydown", h);
   }, [swDir, showOSDNow, showEPG, showFull]);
 
-  // ============================================
-  // MOUSE WHEEL
-  // ============================================
-  const handleWheel = useCallback((e) => {
-    if (showEPG || showFull) return;
-    if (wRef.current) return;
-    wRef.current = setTimeout(() => { wRef.current = null; }, 400);
-    swDir(e.deltaY > 0 ? 1 : -1);
-  }, [swDir, showEPG, showFull]);
+  // Mouse wheel desativado — troca de canal só por clique consciente no EPG/sidebar.
 
   // ============================================
   // CLICK
@@ -1105,19 +1123,7 @@ export default function TVWeb(){
     showOSDNow();
   }, [muted, handleUnmute, showOSDNow, showEPG, showFull, selProg]);
 
-  // ============================================
-  // NEXT VIDEO (botão manual ou erro)
-  // ============================================
-  const handleNextVideo = useCallback(() => {
-    const advanced = nextVideo(muted);
-    if (!advanced) {
-      // Não há próximo vídeo — mostra erro temporário
-      setPlayerError(true);
-      setTimeout(() => setPlayerError(false), 5000);
-    } else {
-      setPlayerError(false);
-    }
-  }, [nextVideo, muted]);
+  // handleNextVideo removido — TV linear, usuário não controla episódios.
 
   // ============================================
   // LOADING
@@ -1141,7 +1147,6 @@ export default function TVWeb(){
   return (
     <div
       ref={cRef}
-      onWheel={handleWheel}
       onMouseMove={showOSDNow}
       style={{width:"100%",height:"100vh",background:"#000",position:"relative",fontFamily:"'Segoe UI','Roboto',-apple-system,sans-serif",overflow:"hidden",cursor:"default",userSelect:"none"}}
     >
@@ -1174,8 +1179,19 @@ export default function TVWeb(){
       {/* ===== CLICK BARRIER ===== */}
       <div onClick={handleVideoClick} style={{position:"absolute",inset:0,zIndex:2}} />
 
-      {/* ===== WATERMARK ===== */}
-      <div style={{position:"absolute",top:16,right:20,fontSize:14,fontWeight:700,color:"rgba(255,255,255,0.12)",letterSpacing:2,zIndex:3,pointerEvents:"none"}}>TVWEB</div>
+      {/* ===== WATERMARK + HOME BUTTON ===== */}
+      <div style={{position:"absolute",top:0,left:0,right:0,zIndex:3,display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 20px",pointerEvents:"none"}}>
+        {/* Botão Home — só visível com OSD */}
+        <a href="/" onClick={e=>{e.stopPropagation();}}
+          style={{pointerEvents:"auto",opacity:showOSD&&!showEPG&&!showFull?0.7:0,
+            transition:"opacity 0.3s",display:"flex",alignItems:"center",gap:6,
+            textDecoration:"none",color:"rgba(255,255,255,0.8)",fontSize:12,fontWeight:700,
+            background:"rgba(0,0,0,0.5)",padding:"5px 12px",borderRadius:20,
+            border:"1px solid rgba(255,255,255,0.1)"}}>
+          🏠 Home
+        </a>
+        <div style={{fontSize:14,fontWeight:700,color:"rgba(255,255,255,0.12)",letterSpacing:2}}>TVWEB</div>
+      </div>
 
       {/* ===== UNMUTE BUTTON ===== */}
       {muted && (
@@ -1200,27 +1216,16 @@ export default function TVWeb(){
         </div>
       )}
 
-      {/* ✅ FIX 2: BOTÃO PRÓXIMO VÍDEO (visível no OSD quando há múltiplos) */}
+      {/* Indicador de episódio — só leitura, sem botão de pular */}
       {videoTotal > 1 && showOSD && !showEPG && !showFull && (
-        <button
-          onClick={e => { e.stopPropagation(); handleNextVideo(); }}
-          title={`Próximo episódio (${videoIndex + 2}/${videoTotal})`}
-          style={{
-            position:"absolute",top:"50%",right:80,transform:"translateY(-50%)",zIndex:15,
-            background:"rgba(0,0,0,0.75)",border:"1px solid rgba(156,39,176,0.5)",
-            color:"#ce93d8",padding:"10px 16px",borderRadius:8,cursor:"pointer",
-            display:"flex",flexDirection:"column",alignItems:"center",gap:3,
-          }}
-        >
-          <span style={{fontSize:22}}>⏭</span>
-          <span style={{fontSize:11,fontWeight:700}}>Ep {videoIndex + 1}/{videoTotal}</span>
-          {videoIndex + 1 < videoTotal && (
-            <span style={{fontSize:9,color:"#9c27b0",maxWidth:80,
-              overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",textAlign:"center"}}>
-              próximo
-            </span>
-          )}
-        </button>
+        <div style={{
+          position:"absolute",top:16,left:"50%",transform:"translateX(-50%)",zIndex:15,
+          background:"rgba(0,0,0,0.6)",border:"1px solid rgba(156,39,176,0.35)",
+          color:"#ce93d8",padding:"5px 14px",borderRadius:20,
+          fontSize:12,fontWeight:700,pointerEvents:"none",letterSpacing:0.3,
+        }}>
+          Ep {videoIndex + 1}/{videoTotal}
+        </div>
       )}
 
       {/* ===== OSD HEADER ===== */}
@@ -1265,7 +1270,7 @@ export default function TVWeb(){
         <EPGCompact
           channels={channels} allPrograms={allPrograms} currentChannelId={curCh}
           onSelectChannel={id => { swCh(id); setEPG(false); }}
-          onSelectProgram={setSP}
+          onSelectProgram={setSP}   {/* modal só mostra info, não troca conteúdo */}
           onOpenFull={() => { setEPG(false); setFull(true); }}
           onClose={() => setEPG(false)}
         />
@@ -1279,9 +1284,8 @@ export default function TVWeb(){
       {selProg && (
         <ProgModal
           program={selProg}
-          channel={channels.find(c => buildSchedule(allPrograms, c.id).some(p => p.id === selProg.id)) || ch}
+          channel={channels.find(c => c.id === selProg.canalId) || ch}
           onClose={() => setSP(null)}
-          onWatch={(chId) => { swCh(chId); setEPG(false); setFull(false); }}
         />
       )}
 

@@ -87,18 +87,8 @@ function ProtectedAdmin(){
     return()=>clearInterval(i);
   },[]);
   if(!auth) return <AdminLogin onSuccess={()=>setAuth(true)}/>;
-  return (
-    <div style={{position:"relative"}}>
-      <button onClick={()=>{clearSession();setAuth(false);}} title="Sair"
-        style={{position:"fixed",top:16,right:16,zIndex:9999,
-          background:"rgba(244,67,54,0.12)",border:"1px solid rgba(244,67,54,0.25)",
-          color:"#f44336",padding:"6px 12px",borderRadius:6,cursor:"pointer",
-          fontSize:12,fontWeight:600}}>
-        🔓 Sair
-      </button>
-      <Admin/>
-    </div>
-  );
+  // Passa onLogout para o Admin renderizar o botão dentro do próprio header
+  return <Admin onLogout={()=>{clearSession();setAuth(false);}}/>;
 }
 
 // ============================================

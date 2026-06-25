@@ -673,9 +673,26 @@ function ChannelEditor({channels,onAdd,onDelete}){
 
   const startEdit=(ch)=>{setEditing(ch.id);setNome(ch.nome);setLogo(ch.logo);setLT(ch.logoType||"emoji");setLU(ch.logoUrl||null);setCor(ch.cor);setNumber(ch.numero||0)};
   const save=async()=>{
+    if(!nome.trim()){ alert("Digite um nome para o canal"); return; }
+    if(!cor){ alert("Selecione uma cor"); return; }
     setSaving(true);
-    try { await updateDoc(doc(db,"channels",editing),{nome,numero,logo,logoType,logoUrl,cor}); setEditing(null); }
-    catch(err){ console.error("Erro ao salvar canal:",err); alert("Erro ao salvar canal"); }
+    try {
+      // Remove campos undefined — Firestore rejeita undefined
+      const data = {
+        nome:     nome.trim(),
+        numero:   Number(numero) || 0,
+        logo:     logo || "📺",
+        logoType: logoType || "emoji",
+        logoUrl:  logoUrl || null,
+        cor:      cor,
+      };
+      await updateDoc(doc(db,"channels",editing), data);
+      setEditing(null);
+    }
+    catch(err){
+      console.error("Erro ao salvar canal:",err);
+      alert("Erro ao salvar canal: " + err.message);
+    }
     setSaving(false);
   };
 
@@ -1168,12 +1185,12 @@ function DupModal({dates,onDup,onClose}){
 // ============================================
 // MAIN ADMIN
 // ============================================
-export default function AdminPanel(){
+export default function AdminPanel({ onLogout }){
   const dates = genDates(30);
   const [tab,setTab]         = useState("schedule");
   const [selDate,setSelDate] = useState(dates[0]);
   const [selCh,setSelCh]     = useState(null);
-  const [channels,setCh]     = useState(DEFAULT_CHANNELS);
+  const [channels,setCh]     = useState([]);  // começa vazio, Firebase preenche
   const [programs,setProgs]  = useState([]);
   const [showModal,setSM]    = useState(false);
   const [editProg,setEP]     = useState(null);
@@ -1261,12 +1278,14 @@ export default function AdminPanel(){
       const existing = programs.filter(p => p.data === to);
       await Promise.all(existing.map(p => deleteDoc(doc(db, "programs", p.id))));
       // Cria novos no Firestore (sem id — Firestore gera)
-      await Promise.all(fp.map(p => {
+      const results = await Promise.allSettled(fp.map(p => {
         const { id: _id, ...data } = p;
         return addDoc(collection(db, "programs"), { ...data, data: to });
       }));
-      // onSnapshot atualiza o estado automaticamente
-      notify(`📋 ${fp.length} programa(s) duplicado(s) para ${to}!`, "success");
+      const failed = results.filter(r => r.status === "rejected").length;
+      notify(failed === 0
+        ? `📋 ${fp.length} programa(s) duplicado(s)!`
+        : `⚠️ ${fp.length - failed} copiados, ${failed} falharam`, failed > 0 ? "error" : "success");
     } catch(err) { console.error("Erro ao duplicar:", err); notify("❌ Erro ao duplicar", "error"); }
   };
 
@@ -1289,10 +1308,18 @@ export default function AdminPanel(){
   const addChannel = async () => {
     try {
       const maxNum = channels.length > 0 ? Math.max(...channels.map(c => c.numero||0)) : 0;
-      const newCh = {numero:maxNum+1,nome:`Canal ${maxNum+1}`,logo:"📺",logoType:"emoji",logoUrl:null,cor:COLOR_LIST[channels.length%COLOR_LIST.length]};
-      await addDoc(collection(db,"channels"),newCh);
+      const newCh = {
+        numero:   maxNum + 1,
+        nome:     `Canal ${maxNum + 1}`,
+        logo:     "📺",
+        logoType: "emoji",
+        logoUrl:  null,
+        cor:      COLOR_LIST[channels.length % COLOR_LIST.length] || "#2196F3",
+        isInfo:   false,
+      };
+      await addDoc(collection(db,"channels"), newCh);
       notify("📺 Canal adicionado!","success");
-    } catch(err) { console.error(err); notify("❌ Erro ao adicionar canal","error"); }
+    } catch(err) { console.error(err); notify("❌ Erro ao adicionar canal: " + err.message,"error"); }
   };
 
   const delChannel = async (ch) => {
@@ -1377,9 +1404,11 @@ export default function AdminPanel(){
         <div><div style={{fontSize:18,fontWeight:700,color:"#fff"}}>TVWEB Admin</div><div style={{fontSize:11,color:"#888"}}>Painel de Programação</div></div>
       </div>
       <div style={{display:"flex",gap:8,alignItems:"center"}}>
+        <a href="/" style={{padding:"8px 16px",borderRadius:6,textDecoration:"none",background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",color:"#888",fontSize:12,fontWeight:600}}>🏠 Home</a>
         <a href="/tv" style={{padding:"8px 16px",borderRadius:6,textDecoration:"none",background:"rgba(76,175,80,0.1)",border:"1px solid rgba(76,175,80,0.25)",color:"#4caf50",fontSize:12,fontWeight:600}}>📺 Ver TV</a>
         <button onClick={()=>setShowImport(true)} style={{padding:"8px 16px",borderRadius:6,cursor:"pointer",background:"rgba(255,152,0,0.12)",border:"1px solid rgba(255,152,0,0.3)",color:"#ffb74d",fontSize:12,fontWeight:600}}>📥 Importar TXT</button>
         <button onClick={()=>setSD(true)} style={{padding:"8px 16px",borderRadius:6,cursor:"pointer",background:"rgba(156,39,176,0.15)",border:"1px solid rgba(156,39,176,0.3)",color:"#ce93d8",fontSize:12,fontWeight:600}}>📋 Duplicar dia</button>
+        {onLogout&&<button onClick={onLogout} style={{padding:"8px 14px",borderRadius:6,cursor:"pointer",background:"rgba(244,67,54,0.1)",border:"1px solid rgba(244,67,54,0.2)",color:"#f44336",fontSize:12,fontWeight:600}}>🔓 Sair</button>}
       </div>
     </div>
 
