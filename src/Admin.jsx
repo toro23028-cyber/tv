@@ -251,10 +251,21 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
     }
     setSaving(true);
     try {
-      onSave({id:isEdit?program.id:`prog_${Date.now()}`,nome,canalId,classificacao,tags,sinopse,data:selectedDate,duracao:dur,horarioInicio:horIn,horarioFim:horFim,youtubeId:videos[0].youtubeUrl,videos:videos.filter(v=>v.youtubeUrl.trim()),thumbnailType,thumbnailUrl});
+      // Para edição: passa o id real. Para novo: sem id (Firestore gera)
+      const payload = {
+        nome, canalId, classificacao, tags, sinopse,
+        data: selectedDate, duracao: dur,
+        horarioInicio: horIn, horarioFim: horFim,
+        youtubeId: videos[0].youtubeUrl,
+        videos: videos.filter(v => v.youtubeUrl.trim()),
+        thumbnailType, thumbnailUrl,
+      };
+      if (isEdit) payload.id = program.id;
+      // await garante que o Firestore confirmou antes de fechar o modal
+      await onSave(payload);
       setSaving(false);
     } catch(err) {
-      console.error("Erro ao salvar:",err);
+      console.error("Erro ao salvar:", err);
       setSaving(false);
       setError("Erro ao salvar programa");
     }
@@ -552,14 +563,22 @@ export default function AdminPanel(){
         x.data === p.data && x.canalId === p.canalId && x.id !== p.id &&
         !(x.horarioFim <= p.horarioInicio || x.horarioInicio >= p.horarioFim)
       );
-      if (conflicts.length > 0) { notify("⚠️ Conflito de horário com outro programa!","error"); return; }
+      if (conflicts.length > 0) { notify("⚠️ Conflito de horário com outro programa!", "error"); return; }
 
-      if (editProg) { await updateDoc(doc(db,"programs",p.id),p); }
-      else          { const ref = await addDoc(collection(db,"programs"),p); p.id = ref.id; }
+      if (editProg) {
+        // Edição: atualiza doc existente — onSnapshot atualiza o estado
+        const { id, ...data } = p;
+        await updateDoc(doc(db, "programs", id), data);
+      } else {
+        // Novo: remove o id gerado localmente, Firestore gera o real
+        const { id: _localId, ...data } = p;
+        await addDoc(collection(db, "programs"), data);
+        // NÃO atualiza estado manualmente — onSnapshot faz isso
+      }
 
-      notify(editProg ? "✅ Atualizado!" : "✅ Agendado!","success");
+      notify(editProg ? "✅ Atualizado!" : "✅ Agendado!", "success");
       setSM(false); setEP(null);
-    } catch(err) { console.error("Erro ao salvar:",err); notify("❌ Erro ao salvar","error"); }
+    } catch(err) { console.error("Erro ao salvar:", err); notify("❌ Erro ao salvar", "error"); }
   };
 
   const handleDel = async (id) => {
@@ -571,16 +590,37 @@ export default function AdminPanel(){
     } catch(err) { console.error("Erro ao deletar:",err); notify("❌ Erro ao deletar","error"); setProgs(prev); }
   };
 
-  const handleDup = (from, to) => {
+  const handleDup = async (from, to) => {
     const fp = programs.filter(p => p.data === from);
-    const np = fp.map(p => ({...p, id:`prog_${Date.now()}_${Math.random().toString(36).slice(2)}`, data:to}));
-    setProgs([...programs.filter(p => p.data !== to), ...np]);
-    notify(`📋 ${np.length} copiados!`,"info");
+    if (fp.length === 0) { notify("⚠️ Nenhum programa no dia de origem", "error"); return; }
+    try {
+      // Apaga programas existentes no dia destino antes de copiar
+      const existing = programs.filter(p => p.data === to);
+      await Promise.all(existing.map(p => deleteDoc(doc(db, "programs", p.id))));
+      // Cria novos no Firestore (sem id — Firestore gera)
+      await Promise.all(fp.map(p => {
+        const { id: _id, ...data } = p;
+        return addDoc(collection(db, "programs"), { ...data, data: to });
+      }));
+      // onSnapshot atualiza o estado automaticamente
+      notify(`📋 ${fp.length} programa(s) duplicado(s) para ${to}!`, "success");
+    } catch(err) { console.error("Erro ao duplicar:", err); notify("❌ Erro ao duplicar", "error"); }
   };
 
-  const handleReorder = (updated) => {
-    setProgs([...programs.filter(p=>!(p.canalId===selCh&&p.data===selDate)), ...updated]);
-    notify("🔄 Reordenado!","info");
+  const handleReorder = async (updated) => {
+    // Atualiza estado local imediatamente (UX responsiva)
+    setProgs([...programs.filter(p => !(p.canalId===selCh && p.data===selDate)), ...updated]);
+    try {
+      // Persiste novos horários no Firestore
+      await Promise.all(updated.map(p => {
+        const { id, ...data } = p;
+        return updateDoc(doc(db, "programs", id), {
+          horarioInicio: data.horarioInicio,
+          horarioFim:    data.horarioFim,
+        });
+      }));
+      notify("🔄 Ordem salva!", "success");
+    } catch(err) { console.error("Erro ao reordenar:", err); notify("❌ Erro ao salvar ordem", "error"); }
   };
 
   const addChannel = async () => {
