@@ -14,7 +14,17 @@ function ytThumb(id){ return id?`https://img.youtube.com/vi/${id}/maxresdefault.
 function ytThumbMed(id){ return id?`https://img.youtube.com/vi/${id}/mqdefault.jpg`:null }
 function extractYTId(s){ if(!s)return null; const p=[/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/,/^([a-zA-Z0-9_-]{11})$/]; for(const r of p){const m=s.match(r);if(m)return m[1]} return null }
 
-function buildScheduleToday(programs, channelId){
+function buildScheduleToday(programs, channelId, channel){
+  // Canal HLS: programa virtual cobrindo 24h
+  if (channel?.streamUrl) {
+    return [{
+      id: `_live_${channelId}`,
+      canalId: channelId,
+      nome: `Programação ${channel.nome || "ao vivo"}`,
+      horarioInicio: 0, horarioFim: 86400, duracao: 86400,
+      isLive: true, classificacao: "L", tags: ["AO VIVO"],
+    }];
+  }
   const today = getToday();
   return programs
     .filter(p => p.canalId === channelId && p.data === today)
@@ -165,11 +175,9 @@ function GuiaModal({ channels, allPrograms, initialChannelId, onClose, onWatch }
 
   const sched = useMemo(()=>{
     const today = getToday();
-    return allPrograms
-      .filter(p=>p.canalId===selCh&&p.data===today)
-      .sort((a,b)=>Number(a.horarioInicio)-Number(b.horarioInicio))
-      .map(p=>({...p,horarioInicio:Number(p.horarioInicio),horarioFim:Number(p.horarioFim),duracao:Number(p.duracao)}));
-  },[allPrograms,selCh]);
+    const ch = channels.find(c=>c.id===selCh);
+    return buildScheduleToday(allPrograms, selCh, ch);
+  },[allPrograms,selCh,channels]);
 
   return (
     <div onClick={onClose} style={{position:"fixed",inset:0,zIndex:200,background:"rgba(0,0,0,0.88)",overflowY:"auto",display:"flex",flexDirection:"column"}}>
@@ -197,7 +205,7 @@ function GuiaModal({ channels, allPrograms, initialChannelId, onClose, onWatch }
         </div>
         {/* Lista de programas */}
         <div style={{display:"flex",flexDirection:"column",gap:6}}>
-          {sched.length===0 && <div style={{padding:40,textAlign:"center",color:"#555"}}>Sem programação para este canal hoje.</div>}
+          {sched.length===0 && !channels.find(c=>c.id===selCh)?.streamUrl && <div style={{padding:40,textAlign:"center",color:"#555"}}>Sem programação para este canal hoje.</div>}
           {sched.map(prog=>{
             const isNow  = now>=prog.horarioInicio&&now<prog.horarioFim;
             const isPast = now>=prog.horarioFim;
@@ -330,7 +338,7 @@ function UpcomingList({ channels, allPrograms }){
   const upcoming = useMemo(()=>{
     const items=[];
     channels.forEach(ch=>{
-      const sched=buildScheduleToday(allPrograms,ch.id);
+      const sched=buildScheduleToday(allPrograms,ch.id,ch);
       sched.filter(p=>p.horarioInicio>now&&p.horarioInicio<now+3*3600)
         .slice(0,2).forEach(p=>items.push({...p,channel:ch}));
     });
@@ -413,7 +421,7 @@ export default function Home(){
 
   const channelNow = useMemo(()=>{
     const map={};
-    channels.forEach(ch=>{ map[ch.id]=getCurrent(buildScheduleToday(programs,ch.id))||null; });
+    channels.forEach(ch=>{ map[ch.id]=getCurrent(buildScheduleToday(programs,ch.id,ch))||null; });
     return map;
   },[channels,programs]);
 
