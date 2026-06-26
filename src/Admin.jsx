@@ -485,6 +485,7 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
   const [thumbnailUrl,setTU]=useState(program?.thumbnailUrl||null);
   const [error,setError]=useState("");
   const [tipo,setTipo]=useState("geral");
+  const [gcLayout,setGcLayout]=useState("inf-dir");
   const [saving,setSaving]=useState(false);
   const [startMode,setSM]=useState(isEdit?"custom":"auto");
   const [startH,setSH]=useState(isEdit?Math.floor(program.horarioInicio/3600):0);
@@ -754,9 +755,10 @@ function ChannelEditor({channels,onAdd,onDelete}){
   const [logoUrl,setLU]=useState(null);
   const [cor,setCor]=useState("");
   const [tipo,setTipo]=useState("geral");
+  const [gcLayout,setGcLayout]=useState("inf-dir");
   const [saving,setSaving]=useState(false);
 
-  const startEdit=(ch)=>{setEditing(ch.id);setNome(ch.nome);setLogo(ch.logo);setLT(ch.logoType||"emoji");setLU(ch.logoUrl||null);setCor(ch.cor);setNumber(ch.numero||0);setTipo(ch.tipo||"geral")};
+  const startEdit=(ch)=>{setEditing(ch.id);setNome(ch.nome);setLogo(ch.logo);setLT(ch.logoType||"emoji");setLU(ch.logoUrl||null);setCor(ch.cor);setNumber(ch.numero||0);setTipo(ch.tipo||"geral");setGcLayout(ch.gcLayout||"inf-dir")};
   const save=async()=>{
     if(!nome.trim()){ alert("Digite um nome para o canal"); return; }
     if(!cor){ alert("Selecione uma cor"); return; }
@@ -771,6 +773,7 @@ function ChannelEditor({channels,onAdd,onDelete}){
         logoUrl:  logoUrl || null,
         cor:      cor,
         tipo:     tipo || "geral",
+        gcLayout: gcLayout || "inf-dir",
       };
       await updateDoc(doc(db,"channels",editing), data);
       setEditing(null);
@@ -807,6 +810,25 @@ function ChannelEditor({channels,onAdd,onDelete}){
             )}
           </div>
           {tipo==="musica"&&<div style={{marginTop:6,fontSize:10,color:"#9c27b0",padding:"4px 8px",background:"rgba(156,39,176,0.08)",borderRadius:4,border:"1px solid rgba(156,39,176,0.2)"}}>🎵 GC "Você está ouvindo" será exibido automaticamente neste canal</div>}
+        </div>
+        <div><label style={lS}>POSIÇÃO DO GC NA TELA</label>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5,marginTop:4}}>
+            {[
+              ["sup-esq","↖ Sup. Esquerdo"],
+              ["sup-dir","↗ Sup. Direito"],
+              ["inf-esq","↙ Inf. Esquerdo"],
+              ["inf-dir","↘ Inf. Direito"],
+            ].map(([val,label])=>(
+              <button key={val} onClick={()=>setGcLayout(val)}
+                style={{padding:"8px 6px",borderRadius:5,cursor:"pointer",fontSize:11,fontWeight:600,textAlign:"center",
+                  background:gcLayout===val?"rgba(26,115,232,0.2)":"rgba(255,255,255,0.04)",
+                  border:gcLayout===val?"1px solid #1a73e8":"1px solid rgba(255,255,255,0.08)",
+                  color:gcLayout===val?"#4fc3f7":"#888"}}>
+                {label}
+              </button>
+            ))}
+          </div>
+          <div style={{marginTop:6,fontSize:10,color:"#555"}}>Define onde o GC aparece na tela para este canal.</div>
         </div>
 
         <div style={{padding:12,background:"rgba(26,115,232,0.08)",borderRadius:8,border:"1px solid rgba(26,115,232,0.2)"}}>
