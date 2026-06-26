@@ -71,7 +71,26 @@ function absoluteToDateSeconds(absSeconds) {
 // ============================================
 // SCHEDULE BUILDER
 // ============================================
-function buildSchedule(programs, channelId) {
+function buildSchedule(programs, channelId, channelName, streamUrl) {
+  // Canal HLS: gera programa virtual cobrindo 24h
+  if (streamUrl) {
+    const nome = `Programação ${channelName || "ao vivo"}`;
+    return [{
+      id: `_live_${channelId}`,
+      canalId: channelId,
+      nome,
+      data: getToday(),
+      horarioInicio: 0,
+      horarioFim: 86400,
+      duracao: 86400,
+      horarioTexto: "00:00",
+      horarioFimTexto: "23:59",
+      classificacao: "L",
+      tags: ["AO VIVO"],
+      isLive: true,
+      isPlaceholder: false,
+    }];
+  }
   const today     = getToday();
   // Dia anterior para capturar programas que cruzam meia-noite
   const prevDate  = new Date(today + "T00:00:00");
@@ -625,7 +644,7 @@ function GCOverlay({ channel, program, nextProgram, videoIndex, episodioTitulo, 
 // HLSPlayer — player de stream m3u8 via hls.js (CDN)
 // Carrega hls.js dinamicamente para não aumentar o bundle
 // ─────────────────────────────────────────────────────────────
-function HLSPlayer({ url, muted }) {
+function HLSPlayer({ url, muted, onVideoRef }) {
   const videoRef = useRef(null);
   const hlsRef   = useRef(null);
 
@@ -684,6 +703,12 @@ function HLSPlayer({ url, muted }) {
     if (videoRef.current) videoRef.current.muted = muted;
   }, [muted]);
 
+  // Expõe o elemento video para controle de volume externo
+  useEffect(() => {
+    if (onVideoRef && videoRef.current) onVideoRef(videoRef.current);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
     <video
       ref={videoRef}
@@ -726,7 +751,7 @@ function OSDHeader({channel,program,visible,videoIndex,videoTotal,episodioTitulo
   const ds=["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"];
   if(!channel) return null;
   // Modo HLS: sem programa — mostra banner simples com canal e AO VIVO
-  if(isHLS || !program) return (
+  if((isHLS && program?.isLive) || !program) return (
     <div style={{
       position:"absolute",top:0,left:0,right:0,zIndex:10,
       background:"linear-gradient(180deg, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.7) 70%, transparent 100%)",
@@ -816,7 +841,7 @@ function OSDHeader({channel,program,visible,videoIndex,videoTotal,episodioTitulo
 // ============================================
 // OSD FOOTER
 // ============================================
-function OSDFooter({program,nextProgram,onOpenEPG,onOpenFull,onFullscreen,visible,muted,vol,onVolUp,onVolDown,onMuteToggle}){
+function OSDFooter({program,nextProgram,onOpenEPG,onOpenFull,onFullscreen,visible,muted,vol,onVolUp,onVolDown,onMuteToggle,isHLS}){
   const[el,setEl]=useState(0);
   const[isFullscreen,setIsFullscreen]=useState(false);
 
@@ -832,8 +857,8 @@ function OSDFooter({program,nextProgram,onOpenEPG,onOpenFull,onFullscreen,visibl
     return()=>document.removeEventListener("fullscreenchange",h);
   },[]);
 
-  // Modo HLS: sem programa — mostra rodapé simplificado
-  if(!program) return (
+  // Modo HLS (programa virtual) ou sem programa: mostra rodapé simplificado
+  if(!program || (isHLS && program?.isLive)) return (
     <div style={{
       position:"absolute",bottom:0,left:0,right:0,zIndex:10,
       background:"linear-gradient(0deg, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.85) 70%, transparent 100%)",
@@ -1421,7 +1446,7 @@ function usePlayerState(cp, curCh) {
 
   const buildSrc = useCallback((videoId, startSec, muted) => {
     if (!videoId) return null;
-    return `https://www.youtube.com/embed/${videoId}?autoplay=1&mute=${muted?1:0}&start=${Math.floor(Math.max(0,startSec))}&controls=0&disablekb=1&modestbranding=1&rel=0&showinfo=0&iv_load_policy=3&fs=0&playsinline=1&enablejsapi=0`;
+    return `https://www.youtube.com/embed/${videoId}?autoplay=1&mute=${muted?1:0}&start=${Math.floor(Math.max(0,startSec))}&controls=0&disablekb=1&modestbranding=1&rel=0&showinfo=0&iv_load_policy=3&fs=0&playsinline=1&enablejsapi=1`;
   }, []);
 
   // Chamado quando o programa muda — descobre qual episódio está no ar
@@ -1502,7 +1527,8 @@ export default function TVWeb(){
   const [selProg, setSP]          = useState(null);
   const [fade, setFade]           = useState(false);
   const [muted, setMuted]         = useState(true);
-  const [volume, setVolume]       = useState(80);  // 0-100, só visual + postMessage
+  const [volume, setVolume]       = useState(80);  // 0-100
+  const hlsVideoRef               = useRef(null);   // <video> do HLSPlayer para controle direto
   const [playerError, setPlayerError] = useState(false);
 
   // ============================================================
@@ -1571,9 +1597,9 @@ export default function TVWeb(){
 
   // useMemo com tick na dependência: recalcula o programa atual a cada tick
   const schedule = useMemo(
-    () => ch ? buildSchedule(allPrograms, ch.id) : [],
+    () => ch ? buildSchedule(allPrograms, ch.id, ch.nome, ch.streamUrl) : [],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [allPrograms, ch?.id, tick]
+    [allPrograms, ch?.id, ch?.streamUrl, tick]
   );
 
   const cp = useMemo(() => getCurProg(schedule), [schedule]);
@@ -1659,13 +1685,19 @@ export default function TVWeb(){
   // VOLUME
   // ============================================
   const sendVolume = useCallback((vol) => {
-    // postMessage para o iframe do YouTube Player API
-    try {
-      iframeRef.current?.contentWindow?.postMessage(
-        JSON.stringify({ event:"command", func:"setVolume", args:[vol] }),
-        "*"
-      );
-    } catch(e) {}
+    if (hlsVideoRef.current) {
+      // Canal HLS: controla volume direto no <video>
+      hlsVideoRef.current.volume  = vol / 100;
+      hlsVideoRef.current.muted   = vol === 0;
+    } else {
+      // Canal YouTube: postMessage (requer enablejsapi=1)
+      try {
+        iframeRef.current?.contentWindow?.postMessage(
+          JSON.stringify({ event:"command", func:"setVolume", args:[vol] }),
+          "*"
+        );
+      } catch(e) {}
+    }
   }, []);
 
   const handleUnmute = useCallback(() => {
@@ -1800,7 +1832,7 @@ export default function TVWeb(){
       <div style={{position:"absolute",inset:0,zIndex:1,opacity:fade?0:1,transition:"opacity 0.5s"}}>
         {isHLS ? (
           /* Canal com stream m3u8 — player nativo */
-          <HLSPlayer url={streamUrl} muted={muted} key={streamUrl}/>
+          <HLSPlayer url={streamUrl} muted={muted} key={streamUrl} onVideoRef={el=>{hlsVideoRef.current=el;}}/>
         ) : showPlayer ? (
           /* Canal com programação YouTube */
           <iframe
@@ -1906,6 +1938,7 @@ export default function TVWeb(){
         onVolUp={handleVolumeUp}
         onVolDown={handleVolumeDown}
         onMuteToggle={handleMuteToggle}
+        isHLS={isHLS}
       />
 
       {/* ===== CHANNEL SIDEBAR ===== */}
