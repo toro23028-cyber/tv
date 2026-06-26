@@ -867,15 +867,14 @@ function OSDFooter({program,nextProgram,onOpenEPG,onOpenFull,onFullscreen,visibl
       transition:"transform 0.6s ease",
       pointerEvents:visible?"auto":"none",
     }}>
-      {/* Barra live pulsante */}
+      {/* Barra AO VIVO — vermelha, 100%, sem animação */}
       <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:12}}>
         <span style={{fontSize:13,fontWeight:700,color:"#ff3b3b",minWidth:55,display:"flex",alignItems:"center",gap:5}}>
           <span style={{width:8,height:8,borderRadius:"50%",background:"#ff3b3b",boxShadow:"0 0 6px #ff3b3b",display:"inline-block",animation:"pulseFull 1.2s ease infinite"}}/>
           LIVE
         </span>
         <div style={{flex:1,height:3,background:"rgba(255,255,255,0.08)",borderRadius:2,overflow:"hidden"}}>
-          <div style={{width:"100%",height:"100%",background:"linear-gradient(90deg,#ff3b3b,#ff7043)",borderRadius:2,
-            animation:"hlsLivePulse 2s ease-in-out infinite"}}/>
+          <div style={{width:"100%",height:"100%",background:"#ff3b3b",borderRadius:2}}/>
         </div>
       </div>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
