@@ -759,22 +759,33 @@ function IPTVSearchModal({ onSelect, onClose }) {
   const [allChs,   setAllChs]   = useState([]);
   const [error,    setError]    = useState(null);
 
-  // Carrega channels.json e streams.json uma vez
+  const [logos, setLogos] = useState({});  // channel_id → url
+
+  // Carrega channels.json + streams.json + logos.json de uma vez
   useEffect(() => {
     setLoading(true);
     Promise.all([
       fetch("https://iptv-org.github.io/api/channels.json").then(r=>r.json()),
       fetch("https://iptv-org.github.io/api/streams.json").then(r=>r.json()),
-    ]).then(([chs, strs]) => {
+      fetch("https://iptv-org.github.io/api/logos.json").then(r=>r.json()),
+    ]).then(([chs, strs, lgos]) => {
       setAllChs(chs);
-      // Mapeia channel_id → primeira url disponível sem label de bloqueio
-      const map = {};
+      // Mapeia channel_id → primeira url de stream sem geo-bloqueio
+      const streamMap = {};
       strs.forEach(s => {
-        if (s.channel && !map[s.channel] && s.label !== "Geo-blocked") {
-          map[s.channel] = s.url;
+        if (s.channel && !streamMap[s.channel] && s.label !== "Geo-blocked") {
+          streamMap[s.channel] = s.url;
         }
       });
-      setStreams(map);
+      setStreams(streamMap);
+      // Mapeia channel_id → primeira logo disponível
+      const logoMap = {};
+      lgos.forEach(l => {
+        if (l.channel && l.url && !logoMap[l.channel]) {
+          logoMap[l.channel] = l.url;
+        }
+      });
+      setLogos(logoMap);
       setLoaded(true);
       setLoading(false);
     }).catch(e => {
@@ -805,16 +816,27 @@ function IPTVSearchModal({ onSelect, onClose }) {
     ["DE","🇩🇪 Alemanha"],["IT","🇮🇹 Itália"],["JP","🇯🇵 Japão"],
   ];
 
+  // Mapeia categoria iptv-org → tipo do canal TREND TV
+  const catToTipo = (cats=[]) => {
+    if (cats.includes("music"))         return "musica";
+    if (cats.includes("news"))          return "noticias";
+    if (cats.includes("movies"))        return "filmes";
+    if (cats.includes("sports"))        return "esportes";
+    if (cats.includes("kids") || cats.includes("animation")) return "infantil";
+    return "geral";
+  };
+
   const handleSelect = (ch) => {
-    const url = streams[ch.id] || null;
-    // Tenta pegar logo da API de logos
+    const streamUrl = streams[ch.id] || null;
+    const logoUrl   = logos[ch.id]   || null;
     onSelect({
       nome:      ch.name,
-      logoUrl:   null,         // logo será buscada separadamente
-      streamUrl: url || "",
+      logoUrl,
+      streamUrl: streamUrl || "",
+      tipo:      catToTipo(ch.categories),
       iptvId:    ch.id,
       pais:      ch.country,
-      aviso:     !url,         // sem stream disponível → avisa
+      aviso:     !streamUrl,
     });
     onClose();
   };
@@ -884,10 +906,14 @@ function IPTVSearchModal({ onSelect, onClose }) {
                   transition:"background 0.15s"}}
                 onMouseEnter={e=>e.currentTarget.style.background="rgba(255,255,255,0.04)"}
                 onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                {/* Logo placeholder */}
-                <div style={{width:36,height:36,borderRadius:5,background:"rgba(255,255,255,0.06)",
-                  display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,fontSize:18}}>
-                  📺
+                {/* Logo do canal */}
+                <div style={{width:40,height:40,borderRadius:5,background:"rgba(255,255,255,0.06)",
+                  display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,overflow:"hidden"}}>
+                  {logos[ch.id]
+                    ? <img src={logos[ch.id]} alt="" style={{width:"100%",height:"100%",objectFit:"contain"}}
+                        onError={e=>{e.target.style.display="none";e.target.nextSibling.style.display="flex";}}/>
+                    : null}
+                  <span style={{fontSize:18,display:logos[ch.id]?"none":"flex"}}>📺</span>
                 </div>
                 <div style={{flex:1,minWidth:0}}>
                   <div style={{fontSize:13,fontWeight:600,color:"#fff",
@@ -906,8 +932,11 @@ function IPTVSearchModal({ onSelect, onClose }) {
                         padding:"2px 6px",borderRadius:3}}>📡 STREAM</span>
                     : <span style={{fontSize:9,color:"#555",
                         background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.06)",
-                        padding:"2px 6px",borderRadius:3}}>só metadados</span>
+                        padding:"2px 6px",borderRadius:3}}>sem stream</span>
                   }
+                  {logos[ch.id] && <span style={{fontSize:9,color:"#1a73e8",
+                    background:"rgba(26,115,232,0.1)",border:"1px solid rgba(26,115,232,0.2)",
+                    padding:"2px 6px",borderRadius:3}}>🖼️ logo</span>}
                 </div>
               </div>
             );
@@ -917,8 +946,8 @@ function IPTVSearchModal({ onSelect, onClose }) {
         {/* Footer */}
         <div style={{padding:"10px 20px",borderTop:"1px solid rgba(255,255,255,0.05)",
           fontSize:10,color:"#444",flexShrink:0}}>
-          ⚠️ Streams podem ter restrição geográfica ou CORS. Teste antes de usar.
-          Metadados: <a href="https://github.com/iptv-org/database" target="_blank"
+          ⚠️ Streams podem ter restrição geográfica. Logos e metadados importados automaticamente.
+          Fonte: <a href="https://github.com/iptv-org/database" target="_blank"
             rel="noopener noreferrer" style={{color:"#1a73e8",textDecoration:"none"}}>iptv-org/database</a>
         </div>
       </div>
@@ -943,13 +972,18 @@ function ChannelEditor({channels,onAdd,onDelete}){
   const [showIPTV,setShowIPTV]=useState(false);
   const [saving,setSaving]=useState(false);
 
-  const handleIPTVSelect = ({ nome:n, streamUrl:su, iptvId, aviso }) => {
+  const handleIPTVSelect = ({ nome:n, streamUrl:su, logoUrl:lu, tipo:tp, aviso }) => {
     setNome(n);
     setStreamUrl(su || "");
-    if (!logo) setLogo("📺");
-    if (!cor)  setCor(COLOR_LIST[Math.floor(Math.random()*COLOR_LIST.length)]);
-    if (aviso) notify(`"${n}" importado sem stream — cole a URL m3u8 manualmente se tiver.`,"info");
-    else       notify(`✅ "${n}" importado com stream!`,"success");
+    // Aplica logo se disponível
+    if (lu) { setLT("custom"); setLU(lu); }
+    else    { setLT("emoji");  setLogo("📺"); }
+    // Aplica tipo de canal automaticamente
+    if (tp) setTipo(tp);
+    // Cor aleatória se não tiver
+    if (!cor) setCor(COLOR_LIST[Math.floor(Math.random()*COLOR_LIST.length)]);
+    if (aviso) notify(`"${n}" importado sem stream disponível — cole a URL m3u8 manualmente.`,"info");
+    else       notify(`✅ "${n}" importado com stream e logo!`,"success");
   };
 
   const startEdit=(ch)=>{setEditing(ch.id);setNome(ch.nome);setLogo(ch.logo);setLT(ch.logoType||"emoji");setLU(ch.logoUrl||null);setCor(ch.cor);setNumber(ch.numero||0);setTipo(ch.tipo||"geral");setGcLayout(ch.gcLayout||"inf-dir");setStreamUrl(ch.streamUrl||"")};
