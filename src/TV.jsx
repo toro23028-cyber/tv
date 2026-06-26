@@ -620,6 +620,81 @@ function GCOverlay({ channel, program, nextProgram, videoIndex, episodioTitulo, 
     </div>
   );
 }
+
+// ─────────────────────────────────────────────────────────────
+// HLSPlayer — player de stream m3u8 via hls.js (CDN)
+// Carrega hls.js dinamicamente para não aumentar o bundle
+// ─────────────────────────────────────────────────────────────
+function HLSPlayer({ url, muted }) {
+  const videoRef = useRef(null);
+  const hlsRef   = useRef(null);
+
+  useEffect(() => {
+    if (!url || !videoRef.current) return;
+    let hls;
+
+    const initHLS = (Hls) => {
+      if (hlsRef.current) { hlsRef.current.destroy(); }
+      if (Hls.isSupported()) {
+        hls = new Hls({
+          enableWorker: true,
+          lowLatencyMode: true,
+          backBufferLength: 30,
+        });
+        hls.loadSource(url);
+        hls.attachMedia(videoRef.current);
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          videoRef.current?.play().catch(() => {});
+        });
+        hls.on(Hls.Events.ERROR, (_, data) => {
+          if (data.fatal) {
+            switch(data.type) {
+              case Hls.ErrorTypes.NETWORK_ERROR:
+                hls.startLoad(); break;
+              case Hls.ErrorTypes.MEDIA_ERROR:
+                hls.recoverMediaError(); break;
+              default:
+                hls.destroy(); break;
+            }
+          }
+        });
+        hlsRef.current = hls;
+      } else if (videoRef.current.canPlayType("application/vnd.apple.mpegurl")) {
+        // Safari: suporte nativo HLS
+        videoRef.current.src = url;
+        videoRef.current.play().catch(() => {});
+      }
+    };
+
+    // Carrega hls.js do CDN se ainda não carregado
+    if (window.Hls) {
+      initHLS(window.Hls);
+    } else {
+      const script = document.createElement("script");
+      script.src = "https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.7/hls.min.js";
+      script.onload = () => initHLS(window.Hls);
+      document.head.appendChild(script);
+    }
+
+    return () => { hlsRef.current?.destroy(); hlsRef.current = null; };
+  }, [url]);
+
+  // Mute reativo
+  useEffect(() => {
+    if (videoRef.current) videoRef.current.muted = muted;
+  }, [muted]);
+
+  return (
+    <video
+      ref={videoRef}
+      muted={muted}
+      autoPlay
+      playsInline
+      style={{ width:"100%", height:"100%", objectFit:"cover", background:"#000" }}
+    />
+  );
+}
+
 // ============================================
 // SMALL COMPONENTS
 // ============================================
@@ -1627,6 +1702,9 @@ export default function TVWeb(){
 
   const { src: ytSrc, ytKey, videoIndex, videoTotal, episodioTitulo } = playerState;
   const showPlayer = ytSrc && !cp?.isPlaceholder;
+  // Canal com stream m3u8 — ignora programação YT e usa HLS direto
+  const streamUrl  = ch?.streamUrl || null;
+  const isHLS      = !!streamUrl;
 
   // ============================================
   // RENDER
@@ -1638,9 +1716,13 @@ export default function TVWeb(){
       onWheel={handleWheel}
       style={{width:"100%",height:"100vh",background:"#000",position:"relative",fontFamily:"'Segoe UI','Roboto',-apple-system,sans-serif",overflow:"hidden",cursor:"default",userSelect:"none"}}
     >
-      {/* ===== YOUTUBE PLAYER ===== */}
+      {/* ===== PLAYER (HLS ou YouTube) ===== */}
       <div style={{position:"absolute",inset:0,zIndex:1,opacity:fade?0:1,transition:"opacity 0.5s"}}>
-        {showPlayer ? (
+        {isHLS ? (
+          /* Canal com stream m3u8 — player nativo */
+          <HLSPlayer url={streamUrl} muted={muted} key={streamUrl}/>
+        ) : showPlayer ? (
+          /* Canal com programação YouTube */
           <iframe
             key={ytKey}
             ref={iframeRef}
