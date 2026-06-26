@@ -720,11 +720,44 @@ function scheduleNotif(prog,ch,min=5){ const ns=getNow();const ts=prog.horarioIn
 // ============================================
 // OSD HEADER
 // ============================================
-function OSDHeader({channel,program,visible,videoIndex,videoTotal,episodioTitulo}){
+function OSDHeader({channel,program,visible,videoIndex,videoTotal,episodioTitulo,isHLS}){
   const[t,setT]=useState(new Date());
   useEffect(()=>{const i=setInterval(()=>setT(new Date()),1000);return()=>clearInterval(i)},[]);
   const ds=["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"];
-  if(!program||!channel) return null;
+  if(!channel) return null;
+  // Modo HLS: sem programa — mostra banner simples com canal e AO VIVO
+  if(isHLS || !program) return (
+    <div style={{
+      position:"absolute",top:0,left:0,right:0,zIndex:10,
+      background:"linear-gradient(180deg, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.7) 70%, transparent 100%)",
+      padding:"20px 30px 50px",
+      transform:visible?"translateY(0)":"translateY(-100%)",
+      transition:"transform 0.6s ease",
+      pointerEvents:visible?"auto":"none",
+    }}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{display:"flex",alignItems:"center",gap:16}}>
+          <div style={{width:60,height:60,borderRadius:8,background:`${channel.cor}33`,border:`2px solid ${channel.cor}`,display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden"}}>
+            <ChLogo ch={channel} size={channel.logoType==="custom"?60:40}/>
+          </div>
+          <div>
+            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
+              <span style={{fontSize:28,fontWeight:800,color:"#fff"}}>{channel.numero}</span>
+              <span style={{fontSize:22,fontWeight:700,color:channel.cor}}>{channel.nome}</span>
+            </div>
+            <LiveDot big/>
+          </div>
+        </div>
+        <div style={{textAlign:"right",flexShrink:0}}>
+          <div style={{fontSize:32,fontWeight:800,color:"#fff",letterSpacing:1,lineHeight:1}}>
+            {String(t.getHours()).padStart(2,"0")}:{String(t.getMinutes()).padStart(2,"0")}
+          </div>
+          <div style={{fontSize:14,color:"#aaa",marginTop:4}}>{ds[t.getDay()]} {t.getDate()}/{t.getMonth()+1}</div>
+          <div style={{fontSize:16,fontWeight:800,color:"rgba(255,255,255,0.5)",letterSpacing:3,marginTop:8}}>TREND TV</div>
+        </div>
+      </div>
+    </div>
+  );
   return <div style={{
     position:"absolute",top:0,left:0,right:0,zIndex:10,
     background:"linear-gradient(180deg, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.85) 70%, transparent 100%)",
@@ -799,7 +832,52 @@ function OSDFooter({program,nextProgram,onOpenEPG,onOpenFull,onFullscreen,visibl
     return()=>document.removeEventListener("fullscreenchange",h);
   },[]);
 
-  if(!program) return null;
+  // Modo HLS: sem programa — mostra rodapé simplificado
+  if(!program) return (
+    <div style={{
+      position:"absolute",bottom:0,left:0,right:0,zIndex:10,
+      background:"linear-gradient(0deg, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.85) 70%, transparent 100%)",
+      padding:"40px 30px 20px",
+      transform:visible?"translateY(0)":"translateY(100%)",
+      transition:"transform 0.6s ease",
+      pointerEvents:visible?"auto":"none",
+    }}>
+      {/* Barra live pulsante */}
+      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:12}}>
+        <span style={{fontSize:13,fontWeight:700,color:"#ff3b3b",minWidth:55,display:"flex",alignItems:"center",gap:5}}>
+          <span style={{width:8,height:8,borderRadius:"50%",background:"#ff3b3b",boxShadow:"0 0 6px #ff3b3b",display:"inline-block",animation:"pulseFull 1.2s ease infinite"}}/>
+          LIVE
+        </span>
+        <div style={{flex:1,height:3,background:"rgba(255,255,255,0.08)",borderRadius:2,overflow:"hidden"}}>
+          <div style={{width:"100%",height:"100%",background:"linear-gradient(90deg,#ff3b3b,#ff7043)",borderRadius:2,
+            animation:"hlsLivePulse 2s ease-in-out infinite"}}/>
+        </div>
+      </div>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+        <LiveDot big/>
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          <a href="/" onClick={e=>e.stopPropagation()}
+            style={{display:"flex",alignItems:"center",gap:6,textDecoration:"none",
+              background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.15)",
+              color:"#ccc",padding:"10px 16px",borderRadius:6,fontSize:13,fontWeight:600}}>
+            ← Home
+          </a>
+          <div style={{display:"flex",alignItems:"center",gap:4}}>
+            <button onClick={e=>{e.stopPropagation();onVolDown()}}
+              style={{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.12)",color:"#ccc",width:36,height:36,borderRadius:5,cursor:"pointer",fontSize:16,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
+            <button onClick={e=>{e.stopPropagation();onMuteToggle()}}
+              style={{background:muted?"rgba(229,57,53,0.2)":"rgba(255,255,255,0.08)",border:muted?"1px solid rgba(229,57,53,0.4)":"1px solid rgba(255,255,255,0.12)",color:muted?"#f44336":"#ccc",width:36,height:36,borderRadius:5,cursor:"pointer",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center"}}>
+              {muted?"🔇":"🔊"}
+            </button>
+            <button onClick={e=>{e.stopPropagation();onVolUp()}}
+              style={{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.12)",color:"#ccc",width:36,height:36,borderRadius:5,cursor:"pointer",fontSize:16,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
+            <span style={{fontSize:11,color:"#555",minWidth:34,textAlign:"center"}}>{muted?"MUDO":`${vol}%`}</span>
+          </div>
+          <button onClick={e=>{e.stopPropagation();onFullscreen()}} style={{background:"rgba(255,255,255,0.1)",border:"1px solid rgba(255,255,255,0.15)",color:"#ccc",padding:"10px 18px",borderRadius:6,cursor:"pointer",fontSize:13,fontWeight:600}}>{isFullscreen?"↙ Sair":"⛶ Tela Cheia"}</button>
+        </div>
+      </div>
+    </div>
+  );
   const pct=Math.min((el/program.duracao)*100,100);
 
   return <div style={{
@@ -1629,6 +1707,8 @@ export default function TVWeb(){
     if (id === curCh) return;
     setFade(true);
     setPlayerError(false); // limpa erro ao trocar canal
+    // Mostra OSD automaticamente ao trocar de canal (5s)
+    showOSDNow();
     setTimeout(() => { setCurCh(id); setFade(false); }, 300);
     showOSDNow();
   }, [curCh, showOSDNow]);
@@ -1809,6 +1889,7 @@ export default function TVWeb(){
         videoIndex={videoIndex}
         videoTotal={videoTotal}
         episodioTitulo={episodioTitulo}
+        isHLS={isHLS}
       />
 
       {/* ===== OSD FOOTER ===== */}
@@ -1871,6 +1952,7 @@ export default function TVWeb(){
         @keyframes slideUp{from{transform:translateY(100%);opacity:0}to{transform:translateY(0);opacity:1}}
         @keyframes slideDown{from{transform:translateY(-20px);opacity:0}to{transform:translateY(0);opacity:1}}
         @keyframes pulseFull{0%,100%{opacity:.6;transform:translate(-50%,50%) scale(1)}50%{opacity:1;transform:translate(-50%,50%) scale(1.05)}}
+        @keyframes hlsLivePulse{0%{width:30%;opacity:0.5}50%{width:100%;opacity:1}100%{width:30%;opacity:0.5}}
         ::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:rgba(255,255,255,.02)}::-webkit-scrollbar-thumb{background:rgba(255,255,255,.1);border-radius:3px}
         *{box-sizing:border-box;margin:0;padding:0}
       `}</style>
