@@ -486,6 +486,7 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
   const [error,setError]=useState("");
   const [tipo,setTipo]=useState("geral");
   const [gcLayout,setGcLayout]=useState("inf-dir");
+  const [streamUrl,setStreamUrl]=useState("");
   const [saving,setSaving]=useState(false);
   const [startMode,setSM]=useState(isEdit?"custom":"auto");
   const [startH,setSH]=useState(isEdit?Math.floor(program.horarioInicio/3600):0);
@@ -756,9 +757,10 @@ function ChannelEditor({channels,onAdd,onDelete}){
   const [cor,setCor]=useState("");
   const [tipo,setTipo]=useState("geral");
   const [gcLayout,setGcLayout]=useState("inf-dir");
+  const [streamUrl,setStreamUrl]=useState("");
   const [saving,setSaving]=useState(false);
 
-  const startEdit=(ch)=>{setEditing(ch.id);setNome(ch.nome);setLogo(ch.logo);setLT(ch.logoType||"emoji");setLU(ch.logoUrl||null);setCor(ch.cor);setNumber(ch.numero||0);setTipo(ch.tipo||"geral");setGcLayout(ch.gcLayout||"inf-dir")};
+  const startEdit=(ch)=>{setEditing(ch.id);setNome(ch.nome);setLogo(ch.logo);setLT(ch.logoType||"emoji");setLU(ch.logoUrl||null);setCor(ch.cor);setNumber(ch.numero||0);setTipo(ch.tipo||"geral");setGcLayout(ch.gcLayout||"inf-dir");setStreamUrl(ch.streamUrl||"")};
   const save=async()=>{
     if(!nome.trim()){ alert("Digite um nome para o canal"); return; }
     if(!cor){ alert("Selecione uma cor"); return; }
@@ -774,6 +776,7 @@ function ChannelEditor({channels,onAdd,onDelete}){
         cor:      cor,
         tipo:     tipo || "geral",
         gcLayout: gcLayout || "inf-dir",
+        streamUrl: streamUrl.trim() || null,
       };
       await updateDoc(doc(db,"channels",editing), data);
       setEditing(null);
@@ -799,6 +802,27 @@ function ChannelEditor({channels,onAdd,onDelete}){
           </div>
           {logoType==="emoji"&&<div style={{display:"flex",gap:4,flexWrap:"wrap"}}>{EMOJI_LIST.map(e=><button key={e} onClick={()=>setLogo(e)} style={{width:36,height:36,borderRadius:4,cursor:"pointer",fontSize:18,background:logo===e?"rgba(26,115,232,0.3)":"rgba(255,255,255,0.04)",border:logo===e?"2px solid #1a73e8":"1px solid rgba(255,255,255,0.06)"}}>{e}</button>)}</div>}
           {logoType==="custom"&&<ImgUploader currentImage={logoUrl} imageType={logoUrl?"custom":"none"} onImageChange={({url})=>setLU(url)} label="" shape="square"/>}
+        </div>
+        {/* Stream m3u8 */}
+        <div style={{background:"rgba(76,175,80,0.05)",border:"1px solid rgba(76,175,80,0.15)",borderRadius:6,padding:"12px 14px"}}>
+          <label style={{...lS,color:"#81c784",marginBottom:6}}>📡 STREAM AO VIVO (m3u8 — opcional)</label>
+          <input
+            value={streamUrl}
+            onChange={e=>setStreamUrl(e.target.value)}
+            placeholder="https://exemplo.com/stream/live.m3u8"
+            style={{...iS,width:"100%",fontFamily:"monospace",fontSize:11}}
+          />
+          {streamUrl.trim() && (
+            <div style={{marginTop:6,fontSize:10,color:"#4caf50",display:"flex",alignItems:"center",gap:5}}>
+              <span style={{width:7,height:7,borderRadius:"50%",background:"#4caf50",display:"inline-block",boxShadow:"0 0 5px #4caf50"}}/>
+              Stream ativo — este canal irá ao vivo ignorando a programação YouTube
+            </div>
+          )}
+          {!streamUrl.trim() && (
+            <div style={{marginTop:5,fontSize:10,color:"#555"}}>
+              Deixe vazio para usar programação YouTube. Formatos: m3u8, HLS direto.
+            </div>
+          )}
         </div>
         <div><label style={lS}>COR</label>
           <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>{COLOR_LIST.map(c=><button key={c} onClick={()=>setCor(c)} style={{width:36,height:36,borderRadius:4,cursor:"pointer",background:c,border:cor===c?"3px solid #fff":"2px solid transparent"}}/>)}</div>
@@ -848,7 +872,14 @@ function ChannelEditor({channels,onAdd,onDelete}){
       :<div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
           <div style={{width:44,height:44,borderRadius:6,background:`${ch.cor}22`,border:`1px solid ${ch.cor}44`,display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden"}}><ChLogo ch={ch} size={ch.logoType==="custom"?44:28}/></div>
-          <div><div style={{fontSize:14,fontWeight:600,color:"#fff"}}>{ch.nome}</div><div style={{fontSize:11,color:"#888"}}>Canal {ch.numero}</div></div>
+          <div>
+            <div style={{fontSize:14,fontWeight:600,color:"#fff",display:"flex",alignItems:"center",gap:6}}>
+              {ch.nome}
+              {ch.streamUrl&&<span style={{fontSize:9,fontWeight:800,color:"#4caf50",background:"rgba(76,175,80,0.15)",border:"1px solid rgba(76,175,80,0.3)",padding:"2px 5px",borderRadius:3,letterSpacing:0.5}}>📡 LIVE</span>}
+              {ch.offline&&<span style={{fontSize:9,fontWeight:800,color:"#ff9800",background:"rgba(255,152,0,0.1)",border:"1px solid rgba(255,152,0,0.25)",padding:"2px 5px",borderRadius:3}}>📴 OFF</span>}
+            </div>
+            <div style={{fontSize:11,color:"#888"}}>Canal {ch.numero}</div>
+          </div>
           <div style={{width:16,height:16,borderRadius:4,background:ch.cor,marginLeft:8}}/>
         </div>
         <div style={{display:"flex",gap:8}}>
@@ -1698,6 +1729,7 @@ export default function AdminPanel({ onLogout }){
         cor:      COLOR_LIST[channels.length % COLOR_LIST.length] || "#2196F3",
         isInfo:   false,
         tipo:     "geral",
+        streamUrl: null,
       };
       await addDoc(collection(db,"channels"), newCh);
       notify("📺 Canal adicionado!","success");
