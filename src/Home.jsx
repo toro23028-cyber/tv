@@ -390,6 +390,89 @@ function RemindersPanel({ onClose, onWatch }){
   );
 }
 
+
+// ─── Modal lista completa de canais ──────────────────────────
+function AllChannelsModal({ channels, channelNow, onWatch, onClose }) {
+  const [search, setSearch] = useState("");
+  const filtered = channels.filter(ch =>
+    ch.nome.toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <div onClick={onClose} style={{position:"fixed",inset:0,zIndex:200,
+      background:"rgba(0,0,0,0.9)",display:"flex",flexDirection:"column",overflowY:"hidden"}}>
+      <div onClick={e=>e.stopPropagation()} style={{
+        background:"#0e1018",borderRadius:"12px 12px 0 0",
+        maxWidth:640,width:"100%",margin:"auto 0 0 auto",
+        height:"90vh",display:"flex",flexDirection:"column",
+        borderTop:"1px solid rgba(255,255,255,0.08)",
+        borderLeft:"1px solid rgba(255,255,255,0.06)",
+      }}>
+        {/* Header */}
+        <div style={{padding:"16px 20px",borderBottom:"1px solid rgba(255,255,255,0.07)",
+          display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
+          <button onClick={onClose} style={{background:"none",border:"none",color:"#666",
+            cursor:"pointer",fontSize:20,lineHeight:1,padding:0}}>✕</button>
+          <span style={{fontSize:15,fontWeight:700,color:"#fff",flex:1}}>
+            📺 Todos os canais <span style={{fontSize:12,color:"#555",fontWeight:400}}>({channels.length})</span>
+          </span>
+          <input value={search} onChange={e=>setSearch(e.target.value)}
+            placeholder="Buscar canal..."
+            style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",
+              borderRadius:6,color:"#fff",padding:"6px 12px",fontSize:12,outline:"none",width:160}}/>
+        </div>
+        {/* Lista */}
+        <div style={{flex:1,overflowY:"auto"}}>
+          {filtered.map(ch => {
+            const prog = channelNow[ch.id];
+            return (
+              <div key={ch.id} onClick={()=>{onWatch(ch.id);onClose();}}
+                style={{display:"flex",alignItems:"center",gap:12,
+                  padding:"12px 20px",cursor:"pointer",
+                  borderBottom:"1px solid rgba(255,255,255,0.04)",
+                  transition:"background 0.15s"}}
+                onMouseEnter={e=>e.currentTarget.style.background="rgba(255,255,255,0.04)"}
+                onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                {/* Número */}
+                <div style={{width:32,fontSize:13,fontWeight:700,color:"#555",
+                  textAlign:"right",flexShrink:0}}>{ch.numero}</div>
+                {/* Logo */}
+                <div style={{width:40,height:40,borderRadius:6,flexShrink:0,
+                  background:`${ch.cor}22`,border:`1px solid ${ch.cor}44`,
+                  display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden"}}>
+                  <ChLogo ch={ch} size={ch.logoType==="custom"?40:24}/>
+                </div>
+                {/* Info */}
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:14,fontWeight:600,color:"#fff",
+                    display:"flex",alignItems:"center",gap:8,marginBottom:2}}>
+                    <span>{ch.nome}</span>
+                    {ch.streamUrl && <span style={{fontSize:9,fontWeight:800,color:"#4caf50",
+                      background:"rgba(76,175,80,0.12)",border:"1px solid rgba(76,175,80,0.25)",
+                      padding:"1px 5px",borderRadius:3}}>📡 LIVE</span>}
+                  </div>
+                  <div style={{fontSize:12,color:"#555",overflow:"hidden",
+                    textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                    {prog ? prog.nome : "Sem programação"}
+                  </div>
+                </div>
+                {/* Dot ao vivo */}
+                {prog && <div style={{width:7,height:7,borderRadius:"50%",
+                  background:"#ff3b3b",boxShadow:"0 0 5px #ff3b3b",flexShrink:0}}/>}
+              </div>
+            );
+          })}
+          {filtered.length === 0 && (
+            <div style={{padding:40,textAlign:"center",color:"#444",fontSize:13}}>
+              Nenhum canal encontrado
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── MAIN LANDING PAGE ────────────────────────────────────────
 export default function Home(){
   const navigate  = useNavigate();
@@ -397,9 +480,10 @@ export default function Home(){
   const [programs,  setPrograms]  = useState([]);
   const [loading,   setLoading]   = useState(true);
   const [clock,     setClock]     = useState(new Date());
-  const [showGuia,  setShowGuia]  = useState(false);
-  const [showRems,  setShowRems]  = useState(false);
-  const [showAllCh, setShowAllCh] = useState(false);
+  const [showGuia,    setShowGuia]    = useState(false);
+  const [showRems,    setShowRems]    = useState(false);
+  const [showAllCh,   setShowAllCh]   = useState(false);
+  const [showChList,  setShowChList]  = useState(false); // modal lista todos os canais
   const { reminders } = useReminders();
 
   useEffect(()=>{ const i=setInterval(()=>setClock(new Date()),1000); return()=>clearInterval(i); },[]);
@@ -480,25 +564,68 @@ export default function Home(){
       {/* ── HERO CAROUSEL ── */}
       <HeroCarousel heroItems={heroItems} onWatch={goWatch}/>
 
-      {/* ── GRID DE CANAIS ── */}
-      <section style={{padding:"32px clamp(12px,4vw,40px) 24px"}}>
-        <h2 style={{fontSize:"clamp(16px,2.5vw,22px)",fontWeight:800,color:"#fff",margin:"0 0 16px",display:"flex",alignItems:"center",gap:10}}>
-          <span style={{width:4,height:22,borderRadius:2,background:"#e53935",display:"inline-block"}}/>
-          Ao vivo agora
-          <span style={{fontSize:13,fontWeight:600,color:"#555",marginLeft:4}}>— {channels.filter(ch=>channelNow[ch.id]).length} canais no ar</span>
-        </h2>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(clamp(160px,22vw,240px),1fr))",gap:"clamp(8px,1.5vw,16px)"}}>
-          {visibleChannels.map(ch=><ChannelCard key={ch.id} channel={ch} program={channelNow[ch.id]} onWatch={goWatch}/>)}
-        </div>
-        {channels.length>INITIAL_SHOW&&(
-          <div style={{textAlign:"center",marginTop:20}}>
-            <button onClick={()=>setShowAllCh(x=>!x)}
-              style={{padding:"10px 28px",borderRadius:8,cursor:"pointer",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.12)",color:"#aaa",fontSize:13,fontWeight:600}}>
-              {showAllCh?`▲ Ver menos`:`▼ Ver mais ${channels.length-INITIAL_SHOW} canais`}
-            </button>
+      {/* ── CONTEÚDO PRINCIPAL: GRID + LISTA LATERAL ── */}
+      <div style={{display:"flex",gap:0,alignItems:"flex-start",
+        padding:"32px clamp(12px,4vw,40px) 24px",gap:"clamp(12px,2vw,24px)"}}>
+
+        {/* ── GRID DE CANAIS (área principal) ── */}
+        <section style={{flex:1,minWidth:0}}>
+          <h2 style={{fontSize:"clamp(16px,2.5vw,22px)",fontWeight:800,color:"#fff",margin:"0 0 16px",display:"flex",alignItems:"center",gap:10}}>
+            <span style={{width:4,height:22,borderRadius:2,background:"#e53935",display:"inline-block"}}/>
+            Ao vivo agora
+            <span style={{fontSize:13,fontWeight:600,color:"#555",marginLeft:4}}>— {channels.filter(ch=>channelNow[ch.id]).length} no ar</span>
+          </h2>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(clamp(150px,20vw,220px),1fr))",gap:"clamp(8px,1.5vw,14px)"}}>
+            {channels.slice(0,6).map(ch=><ChannelCard key={ch.id} channel={ch} program={channelNow[ch.id]} onWatch={goWatch}/>)}
           </div>
-        )}
-      </section>
+        </section>
+
+        {/* ── LISTA LATERAL DE CANAIS ── */}
+        <aside style={{width:220,flexShrink:0,background:"rgba(255,255,255,0.02)",
+          borderRadius:10,border:"1px solid rgba(255,255,255,0.06)",overflow:"hidden"}}>
+          <div style={{padding:"12px 14px",borderBottom:"1px solid rgba(255,255,255,0.06)",
+            display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+            <span style={{fontSize:12,fontWeight:700,color:"#888",letterSpacing:0.5}}>CANAIS</span>
+            <span style={{fontSize:11,color:"#555"}}>{channels.length} total</span>
+          </div>
+          <div style={{maxHeight:360,overflowY:"auto"}}>
+            {channels.map(ch=>{
+              const prog = channelNow[ch.id];
+              return (
+                <div key={ch.id} onClick={()=>goWatch(ch.id)}
+                  style={{display:"flex",alignItems:"center",gap:8,padding:"9px 14px",
+                    cursor:"pointer",borderBottom:"1px solid rgba(255,255,255,0.03)",
+                    transition:"background 0.15s"}}
+                  onMouseEnter={e=>e.currentTarget.style.background="rgba(255,255,255,0.04)"}
+                  onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                  <span style={{fontSize:10,color:"#555",minWidth:20,textAlign:"right",flexShrink:0}}>{ch.numero}</span>
+                  <div style={{width:28,height:28,borderRadius:4,flexShrink:0,
+                    background:`${ch.cor}22`,border:`1px solid ${ch.cor}33`,
+                    display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden"}}>
+                    <ChLogo ch={ch} size={ch.logoType==="custom"?28:16}/>
+                  </div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:12,fontWeight:600,color:"#ddd",
+                      overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ch.nome}</div>
+                    {prog && <div style={{fontSize:10,color:"#555",
+                      overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{prog.nome}</div>}
+                  </div>
+                  {prog && <div style={{width:5,height:5,borderRadius:"50%",
+                    background:"#ff3b3b",flexShrink:0}}/>}
+                </div>
+              );
+            })}
+          </div>
+          {/* Botão ver todos */}
+          <button onClick={()=>setShowChList(true)}
+            style={{width:"100%",padding:"11px 0",background:"rgba(26,115,232,0.08)",
+              border:"none",borderTop:"1px solid rgba(26,115,232,0.15)",cursor:"pointer",
+              color:"#4fc3f7",fontSize:12,fontWeight:700,
+              display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
+            ☰ Todos os canais ({channels.length})
+          </button>
+        </aside>
+      </div>
 
       {/* ── A SEGUIR ── */}
       <UpcomingList channels={channels} allPrograms={programs}/>
@@ -516,6 +643,7 @@ export default function Home(){
       </footer>
 
       {/* ── MODAIS ── */}
+      {showChList&&<AllChannelsModal channels={channels} channelNow={channelNow} onWatch={goWatch} onClose={()=>setShowChList(false)}/>}
       {showGuia&&<GuiaModal channels={channels} allPrograms={programs} initialChannelId={channels[0]?.id} onClose={()=>setShowGuia(false)} onWatch={(id)=>{goWatch(id);setShowGuia(false);}}/>}
       {showRems&&<RemindersPanel onClose={()=>setShowRems(false)} onWatch={goWatch}/>}
 
