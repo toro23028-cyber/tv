@@ -21,7 +21,10 @@ const VOLTAMOS_JA = {
 // HELPERS
 // ============================================
 function getNow(){ const n=new Date(); return n.getHours()*3600+n.getMinutes()*60+n.getSeconds() }
-function fmtHM(s){ return `${String(Math.floor(s/3600)).padStart(2,"0")}:${String(Math.floor((s%3600)/60)).padStart(2,"0")}` }
+function fmtHM(s){
+  const norm = ((Number(s) % 86400) + 86400) % 86400;
+  return `${String(Math.floor(norm/3600)).padStart(2,"0")}:${String(Math.floor((norm%3600)/60)).padStart(2,"0")}`;
+}
 function fD(s){ const h=Math.floor(s/3600),m=Math.floor((s%3600)/60); return h>0?`${h}h${m>0?String(m).padStart(2,"0")+"min":""}`: `${m}min` }
 const CC={L:"#0f0","10":"#00bfff","12":"#ff0","14":"#f80","16":"#f00","18":"#000"};
 function getToday(){
@@ -69,16 +72,39 @@ function absoluteToDateSeconds(absSeconds) {
 // SCHEDULE BUILDER
 // ============================================
 function buildSchedule(programs, channelId) {
-  const today = getToday();
-  const dayProgs = programs
+  const today     = getToday();
+  // Dia anterior para capturar programas que cruzam meia-noite
+  const prevDate  = new Date(today + "T00:00:00");
+  prevDate.setDate(prevDate.getDate() - 1);
+  const yesterday = prevDate.toISOString().split("T")[0];
+
+  const toEntry = (p) => ({
+    ...p,
+    horarioInicio: Number(p.horarioInicio),
+    horarioFim:    Number(p.horarioFim),
+    duracao:       Number(p.duracao),
+    horarioTexto:    fmtHM(Number(p.horarioInicio)),
+    horarioFimTexto: fmtHM(Number(p.horarioFim)),
+  });
+
+  // Programas de hoje
+  let dayProgs = programs
     .filter(p => p.canalId === channelId && p.data === today)
-    .sort((a,b) => Number(a.horarioInicio) - Number(b.horarioInicio))
-    .map(p => ({
+    .map(toEntry)
+    .sort((a,b) => a.horarioInicio - b.horarioInicio);
+
+  // Programas de ontem que terminam depois da meia-noite (horarioFim > 86400)
+  // Ajustamos horarioInicio/Fim para o contexto de "hoje" (subtraindo 86400)
+  const overnight = programs
+    .filter(p => p.canalId === channelId && p.data === yesterday && Number(p.horarioFim) > 86400)
+    .map(p => toEntry({
       ...p,
-      horarioInicio: Number(p.horarioInicio), horarioFim: Number(p.horarioFim),
-      duracao: Number(p.duracao),
-      horarioTexto: fmtHM(Number(p.horarioInicio)), horarioFimTexto: fmtHM(Number(p.horarioFim)),
+      horarioInicio: Number(p.horarioInicio) - 86400, // pode ser negativo, fica antes de 00:00
+      horarioFim:    Number(p.horarioFim)    - 86400, // ex: 87600 → 1200 (00:20)
+      duracao:       Math.min(Number(p.duracao), Number(p.horarioFim) - 86400), // só a parte de hoje
     }));
+
+  dayProgs = [...overnight, ...dayProgs].sort((a,b) => a.horarioInicio - b.horarioInicio);
 
   if (dayProgs.length > 0) {
     const withGaps = [];
@@ -334,20 +360,20 @@ function useGCTimer(cp, videoIndex) {
 // GCBlock — bloco visual de GC com barra de progresso
 // ─────────────────────────────────────────────────────────────
 // Barra de progresso decrescente para GC musical
-function GCProgressBar({ duracao, cor }) {
+function GCProgressBar({ duracao, cor, phase }) {
   const [pct, setPct] = useState(100);
   useEffect(() => {
+    // Reinicia a barra quando aparece (phase muda) ou quando duracao muda
     setPct(100);
-    const total = duracao * 1000;
+    const total = Math.max(1, duracao) * 1000;
     const start = Date.now();
-    const tick  = setInterval(() => {
-      const elapsed = Date.now() - start;
-      const rem = Math.max(0, 100 - (elapsed / total) * 100);
+    const t = setInterval(() => {
+      const rem = Math.max(0, 100 - ((Date.now()-start) / total) * 100);
       setPct(rem);
-      if (rem <= 0) clearInterval(tick);
+      if (rem <= 0) clearInterval(t);
     }, 80);
-    return () => clearInterval(tick);
-  }, [duracao]);
+    return () => clearInterval(t);
+  }, [duracao, phase]); // phase como dep faz reiniciar a cada intro/outro
   return (
     <div style={{position:"absolute",bottom:0,left:0,right:0,height:2,
       background:"rgba(255,255,255,0.08)"}}>
@@ -474,63 +500,87 @@ function GCOverlay({ channel, program, nextProgram, videoIndex, episodioTitulo, 
   return (
     <div style={{
       position:"absolute",
-      // Inferior direito — altura de GC de TV aberta (~12% do fundo, acima do rodapé)
-      bottom:"clamp(60px, 9vh, 120px)",
+      // Safe area: 148px acima do fundo garante que fica acima do OSDFooter
+      // (footer tem ~130px de altura). Valor fixo é mais previsível que clamp.
+      bottom:148,
       right:0,
-      zIndex:3,
+      zIndex:11,  // acima do OSDFooter (z:10) para nunca ser coberto
       pointerEvents:"none",
       display:"flex", flexDirection:"column", alignItems:"flex-end", gap:8,
-      maxWidth:"clamp(220px, 38vw, 440px)",
+      maxWidth:"clamp(240px, 40vw, 480px)",
     }}>
       {/* Classificação indicativa — canto inferior direito */}
       {showProg && showClass && (
         <div style={{
-          display:"flex", alignItems:"center", gap:8,
-          background:"rgba(0,0,0,0.80)", backdropFilter:"blur(6px)",
-          borderRight:`4px solid ${classColor}`,
-          borderRadius:"6px 0 0 6px",
-          padding:"7px 14px 7px 12px",
-          opacity:musicPhase?1:0, transition:"opacity 0.6s",
+          display:"flex", alignItems:"center", gap:10,
+          background:"rgba(0,0,0,0.92)", backdropFilter:"blur(8px)",
+          borderRight:`5px solid ${classColor}`,
+          borderRadius:"8px 0 0 8px",
+          padding:"9px 16px 9px 14px",
+          opacity:musicPhase?1:0, transition:"opacity 0.5s ease",
+          boxShadow:"0 4px 24px rgba(0,0,0,0.7)",
         }}>
-          <div style={{fontSize:13,color:"rgba(255,255,255,0.8)",lineHeight:1.3}}>
+          <div style={{fontSize:13,color:"rgba(255,255,255,0.9)",lineHeight:1.4,
+            fontWeight:500, textShadow:"0 1px 4px rgba(0,0,0,0.8)"}}>
             {CLASS_DESC[classif]}
           </div>
-          <div style={{width:30,height:30,borderRadius:4,flexShrink:0,
-            background:classColor,display:"flex",alignItems:"center",justifyContent:"center",
-            fontSize:14,fontWeight:900,
-            color:classif==="L"||classif==="18"?"#fff":"#000"}}>{classif}</div>
+          <div style={{width:32,height:32,borderRadius:5,flexShrink:0,
+            background:classColor, display:"flex", alignItems:"center",
+            justifyContent:"center", fontSize:14, fontWeight:900,
+            color:classif==="L"||classif==="18"?"#fff":"#000",
+            boxShadow:`0 0 10px ${classColor}66`}}>
+            {classif}
+          </div>
         </div>
       )}
 
-      {/* GC Musical — canto inferior direito */}
+      {/* GC Musical — canto inferior direito, safe area */}
       {showProg && isMusica && curTitle && (
         <div style={{
-          background:"rgba(0,0,0,0.82)", backdropFilter:"blur(6px)",
-          borderRight:`4px solid ${cor}`,
-          borderRadius:"6px 0 0 6px",
-          padding:"10px 16px 12px 14px",
-          opacity:musicPhase?1:0, transition:"opacity 0.6s",
-          position:"relative", overflow:"hidden",
-          minWidth:220,
+          background:"rgba(0,0,0,0.92)",
+          backdropFilter:"blur(8px)",
+          borderRight:`5px solid ${cor}`,
+          borderRadius:"8px 0 0 8px",
+          padding:"12px 20px 14px 16px",
+          opacity:musicPhase?1:0,
+          transition:"opacity 0.5s ease",
+          position:"relative",
+          overflow:"hidden",
+          minWidth:260,
+          boxShadow:"0 4px 24px rgba(0,0,0,0.7)",
         }}>
-          <div style={{fontSize:11,color:"rgba(255,255,255,0.45)",marginBottom:4,
-            fontWeight:600,letterSpacing:0.8,textTransform:"uppercase"}}>
+          {/* Label */}
+          <div style={{
+            fontSize:10, fontWeight:700, letterSpacing:1.2,
+            textTransform:"uppercase", marginBottom:6,
+            color:cor, opacity:0.9,
+          }}>
             🎵 Você está ouvindo
           </div>
-          <div style={{fontSize:15,fontWeight:600,color:"#fff",lineHeight:1.4,
-            marginBottom:nextTitle?8:0}}>
+          {/* Título da música */}
+          <div style={{
+            fontSize:16, fontWeight:700, color:"#fff", lineHeight:1.4,
+            marginBottom:nextTitle?10:0,
+            textShadow:"0 1px 6px rgba(0,0,0,0.8)",
+          }}>
             {curTitle}
           </div>
+          {/* A seguir */}
           {nextTitle && (
-            <div style={{fontSize:11,color:"rgba(255,255,255,0.45)",
-              borderTop:"1px solid rgba(255,255,255,0.08)",paddingTop:6}}>
-              <span style={{color:"rgba(255,255,255,0.3)"}}>A seguir </span>
-              <span style={{color:"rgba(255,255,255,0.6)"}}>{nextTitle}</span>
+            <div style={{
+              fontSize:12, borderTop:`1px solid rgba(255,255,255,0.1)`,
+              paddingTop:7, display:"flex", alignItems:"center", gap:5,
+            }}>
+              <span style={{color:"rgba(255,255,255,0.38)",fontWeight:600,
+                fontSize:10,letterSpacing:0.5}}>A SEGUIR</span>
+              <span style={{color:"rgba(255,255,255,0.75)",fontWeight:500}}>
+                {nextTitle}
+              </span>
             </div>
           )}
-          {/* Barra de progresso decrescente */}
+          {/* Barra de progresso decrescente na base */}
           {musicPhase && (
-            <GCProgressBar duracao={GC_DURACAO} cor={cor} key={`${cp?.id}_${videoIndex}_${musicPhase}`}/>
+            <GCProgressBar duracao={GC_DURACAO} cor={cor} phase={musicPhase}/>
           )}
         </div>
       )}
@@ -645,7 +695,7 @@ function OSDHeader({channel,program,visible,videoIndex,videoTotal,episodioTitulo
 // ============================================
 // OSD FOOTER
 // ============================================
-function OSDFooter({program,nextProgram,onOpenEPG,onOpenFull,onFullscreen,visible}){
+function OSDFooter({program,nextProgram,onOpenEPG,onOpenFull,onFullscreen,visible,muted,vol,onVolUp,onVolDown,onMuteToggle}){
   const[el,setEl]=useState(0);
   const[isFullscreen,setIsFullscreen]=useState(false);
 
@@ -684,10 +734,31 @@ function OSDFooter({program,nextProgram,onOpenEPG,onOpenFull,onFullscreen,visibl
         <LiveDot big/>
         {nextProgram && <span style={{fontSize:13,color:"#777"}}>A seguir: <span style={{color:"#bbb",fontWeight:600}}>{nextProgram.nome}</span> · {nextProgram.horarioTexto}</span>}
       </div>
-      <div style={{display:"flex",gap:10}}>
-        <button onClick={e=>{e.stopPropagation();onOpenEPG()}} style={{background:"rgba(255,255,255,0.1)",border:"1px solid rgba(255,255,255,0.15)",color:"#ccc",padding:"10px 22px",borderRadius:6,cursor:"pointer",fontSize:14,fontWeight:600}}>▲ Guia Rápido</button>
-        <button onClick={e=>{e.stopPropagation();onOpenFull()}} style={{background:"rgba(26,115,232,0.2)",border:"1px solid rgba(26,115,232,0.3)",color:"#4fc3f7",padding:"10px 22px",borderRadius:6,cursor:"pointer",fontSize:14,fontWeight:600}}>📺 Programação</button>
-        <button onClick={e=>{e.stopPropagation();onFullscreen()}} style={{background:"rgba(255,255,255,0.1)",border:"1px solid rgba(255,255,255,0.15)",color:"#ccc",padding:"10px 22px",borderRadius:6,cursor:"pointer",fontSize:14,fontWeight:600}}>{isFullscreen?"↙ Sair":"⛶ Tela Cheia"}</button>
+      <div style={{display:"flex",gap:8,alignItems:"center"}}>
+        {/* Home */}
+        <a href="/" onClick={e=>e.stopPropagation()}
+          style={{display:"flex",alignItems:"center",gap:6,textDecoration:"none",
+            background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.15)",
+            color:"#ccc",padding:"10px 16px",borderRadius:6,fontSize:13,fontWeight:600}}>
+          ← Home
+        </a>
+        {/* Volume */}
+        <div style={{display:"flex",alignItems:"center",gap:4}}>
+          <button onClick={e=>{e.stopPropagation();onVolDown()}}
+            style={{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.12)",color:"#ccc",width:36,height:36,borderRadius:5,cursor:"pointer",fontSize:16,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
+          <button onClick={e=>{e.stopPropagation();onMuteToggle()}}
+            style={{background:muted?"rgba(229,57,53,0.2)":"rgba(255,255,255,0.08)",border:muted?"1px solid rgba(229,57,53,0.4)":"1px solid rgba(255,255,255,0.12)",color:muted?"#f44336":"#ccc",width:36,height:36,borderRadius:5,cursor:"pointer",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center"}}>
+            {muted?"🔇":"🔊"}
+          </button>
+          <button onClick={e=>{e.stopPropagation();onVolUp()}}
+            style={{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.12)",color:"#ccc",width:36,height:36,borderRadius:5,cursor:"pointer",fontSize:16,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
+          <span style={{fontSize:11,color:"#555",minWidth:34,textAlign:"center"}}>
+            {muted?"MUDO":`${vol}%`}
+          </span>
+        </div>
+        <button onClick={e=>{e.stopPropagation();onOpenEPG()}} style={{background:"rgba(255,255,255,0.1)",border:"1px solid rgba(255,255,255,0.15)",color:"#ccc",padding:"10px 18px",borderRadius:6,cursor:"pointer",fontSize:13,fontWeight:600}}>▲ Guia Rápido</button>
+        <button onClick={e=>{e.stopPropagation();onOpenFull()}} style={{background:"rgba(26,115,232,0.2)",border:"1px solid rgba(26,115,232,0.3)",color:"#4fc3f7",padding:"10px 18px",borderRadius:6,cursor:"pointer",fontSize:13,fontWeight:600}}>📺 Programação</button>
+        <button onClick={e=>{e.stopPropagation();onFullscreen()}} style={{background:"rgba(255,255,255,0.1)",border:"1px solid rgba(255,255,255,0.15)",color:"#ccc",padding:"10px 18px",borderRadius:6,cursor:"pointer",fontSize:13,fontWeight:600}}>{isFullscreen?"↙ Sair":"⛶ Tela Cheia"}</button>
       </div>
     </div>
   </div>;
@@ -697,7 +768,8 @@ function OSDFooter({program,nextProgram,onOpenEPG,onOpenFull,onFullscreen,visibl
 // EPG COMPACTO
 // ============================================
 function EPGCompact({channels,allPrograms,currentChannelId,onSelectChannel,onSelectProgram,onOpenFull,onClose}){
-  const scrollRef  = useRef(null);
+  const scrollRef   = useRef(null);
+  const chListRef   = useRef(null);   // scroll vertical dos canais
   const RULER_H    = 36;
   const ROW_H      = 82;
   const PX_PER_SEC = 0.11;  // ~396px/hora
@@ -741,6 +813,11 @@ function EPGCompact({channels,allPrograms,currentChannelId,onSelectChannel,onSel
   const scrollNext = () => {
     if (scrollRef.current) scrollRef.current.scrollLeft += 300;
   };
+  const scrollPrev = () => {
+    if (scrollRef.current) scrollRef.current.scrollLeft -= 300;
+  };
+  const scrollChUp   = () => { if (chListRef.current) chListRef.current.scrollTop -= ROW_H * 2; };
+  const scrollChDown = () => { if (chListRef.current) chListRef.current.scrollTop += ROW_H * 2; };
 
   const sortedChannels = useMemo(() => [
     ...channels.filter(ch => ch.id === currentChannelId),
@@ -808,7 +885,13 @@ function EPGCompact({channels,allPrograms,currentChannelId,onSelectChannel,onSel
 
         {/* Coluna fixa de canais */}
         <div style={{width:130,borderRight:"1px solid rgba(255,255,255,0.08)",
-          flexShrink:0,background:"rgba(10,12,18,0.98)"}}>
+          flexShrink:0,background:"rgba(10,12,18,0.98)",display:"flex",flexDirection:"column"}}>
+          {/* Seta ↑ canais */}
+          <button onMouseDown={e=>{e.stopPropagation();scrollChUp();}}
+            style={{flexShrink:0,height:22,background:"rgba(0,0,0,0.6)",border:"none",
+              borderBottom:"1px solid rgba(255,255,255,0.06)",color:"rgba(255,255,255,0.5)",
+              cursor:"pointer",fontSize:13,display:"flex",alignItems:"center",justifyContent:"center"}}>▲</button>
+          <div ref={chListRef} style={{flex:1,overflowY:"auto",scrollbarWidth:"none"}}>
           <div style={{height:RULER_H,borderBottom:"1px solid rgba(255,255,255,0.07)"}}/>
           {sortedChannels.map(ch => {
             const isCur = ch.id === currentChannelId;
@@ -828,9 +911,28 @@ function EPGCompact({channels,allPrograms,currentChannelId,onSelectChannel,onSel
               </div>
             );
           })}
+          </div>
+          {/* Seta ↓ canais */}
+          <button onMouseDown={e=>{e.stopPropagation();scrollChDown();}}
+            style={{flexShrink:0,height:22,background:"rgba(0,0,0,0.6)",border:"none",
+              borderTop:"1px solid rgba(255,255,255,0.06)",color:"rgba(255,255,255,0.5)",
+              cursor:"pointer",fontSize:13,display:"flex",alignItems:"center",justifyContent:"center"}}>▼</button>
         </div>
 
         {/* Grid scrollável */}
+
+        {/* ── Seta ← timeline ── */}
+        <button onMouseDown={e=>{e.stopPropagation();scrollPrev();}}
+          style={{position:"absolute",left:140,top:"50%",transform:"translateY(-50%)",zIndex:8,
+            background:"rgba(0,0,0,0.75)",border:"1px solid rgba(255,255,255,0.12)",
+            color:"rgba(255,255,255,0.7)",width:26,height:48,borderRadius:"4px 0 0 4px",
+            cursor:"pointer",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>‹</button>
+        {/* ── Seta → timeline ── */}
+        <button onMouseDown={e=>{e.stopPropagation();scrollNext();}}
+          style={{position:"absolute",right:0,top:"50%",transform:"translateY(-50%)",zIndex:8,
+            background:"rgba(0,0,0,0.75)",border:"1px solid rgba(255,255,255,0.12)",
+            color:"rgba(255,255,255,0.7)",width:26,height:48,borderRadius:"0 4px 4px 0",
+            cursor:"pointer",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>›</button>
         <div ref={scrollRef} onScroll={handleScroll}
           style={{flex:1,overflowX:"auto",overflowY:"hidden",position:"relative"}}>
 
@@ -1267,7 +1369,8 @@ export default function TVWeb(){
 
     const unsubCh = onSnapshot(collection(db, "channels"), (snap) => {
       const list = snap.docs.map(d => ({ ...d.data(), id: d.id }));
-      const sorted = list.sort((a,b) => (a.numero||0) - (b.numero||0));
+      // Canais offline ficam ocultos no player
+      const sorted = list.filter(c => !c.offline).sort((a,b) => (a.numero||0) - (b.numero||0));
       if (sorted.length > 0) { setChannels(sorted); setCurCh(prev => prev || sorted[0].id); }
       else { setChannels(FALLBACK_CHANNELS); setCurCh(prev => prev || "_info"); }
       loaded.channels = true;
@@ -1352,8 +1455,10 @@ export default function TVWeb(){
   }, [cp?.id, curCh]);
 
   // ─────────────────────────────────────────────────────────────
-  // AUTO-AVANÇO DE EPISÓDIO dentro de playlist (roda a cada tick)
+  // AUTO-AVANÇO DE EPISÓDIO — roda no tick (5s)
+  // Ref de debounce evita troca dupla no mesmo tick
   // ─────────────────────────────────────────────────────────────
+  const lastAdvanceRef = useRef(-1);
   useEffect(() => {
     if (!cp || !playerState.ytKey) return;
     const { videoIndex, videoTotal } = playerState;
@@ -1361,7 +1466,11 @@ export default function TVWeb(){
     const list    = getVideoList(cp);
     const elapsed = getElapsed(cp);
     const { index: shouldBeIdx } = resolveVideoIndex(list, elapsed);
-    if (shouldBeIdx > videoIndex) nextVideo(muted);
+    // Só avança se mudou E não foi já neste tick (debounce por índice)
+    if (shouldBeIdx > videoIndex && shouldBeIdx !== lastAdvanceRef.current) {
+      lastAdvanceRef.current = shouldBeIdx;
+      nextVideo(muted);
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tick]);
 
@@ -1558,75 +1667,10 @@ export default function TVWeb(){
           : np?.nome || null}
       />
 
-      {/* ===== TOP BAR: Home + Watermark ===== */}
-      <div style={{position:"absolute",top:0,left:0,right:0,zIndex:4,
-        display:"flex",justifyContent:"space-between",alignItems:"center",
-        padding:"14px 20px",pointerEvents:"none",
-        opacity:showOSD&&!showEPG&&!showFull?1:0,transition:"opacity 0.4s"}}>
-        {/* Botão Home */}
-        <a href="/" onClick={e=>{e.stopPropagation();}}
-          style={{pointerEvents:"auto",display:"flex",alignItems:"center",gap:7,
-            textDecoration:"none",color:"#fff",fontSize:13,fontWeight:700,
-            background:"rgba(0,0,0,0.6)",padding:"7px 14px",borderRadius:22,
-            border:"1px solid rgba(255,255,255,0.15)",backdropFilter:"blur(6px)",
-            boxShadow:"0 2px 8px rgba(0,0,0,0.4)"}}>
-          ← Home
-        </a>
-        <div style={{fontSize:13,fontWeight:800,color:"rgba(255,255,255,0.15)",letterSpacing:3}}>TREND TV</div>
-      </div>
+      {/* WATERMARK */}
+      <div style={{position:"absolute",top:16,right:20,zIndex:3,fontSize:13,fontWeight:800,color:"rgba(255,255,255,0.1)",letterSpacing:3,pointerEvents:"none"}}>TREND TV</div>
 
-      {/* ===== CONTROLES DE VOLUME (canto inferior esquerdo) ===== */}
-      <div style={{
-        position:"absolute",bottom:"clamp(70px,10vh,130px)",left:20,zIndex:4,
-        display:"flex",flexDirection:"column",alignItems:"center",gap:6,
-        opacity:showOSD&&!showEPG&&!showFull?1:0,transition:"opacity 0.4s",
-        pointerEvents:showOSD&&!showEPG&&!showFull?"auto":"none",
-      }}>
-        {/* Botão + volume */}
-        <button onClick={handleVolumeUp}
-          style={{width:38,height:38,borderRadius:"50%",border:"none",cursor:"pointer",
-            background:"rgba(0,0,0,0.65)",backdropFilter:"blur(6px)",
-            color:"#fff",fontSize:18,fontWeight:700,
-            border:"1px solid rgba(255,255,255,0.15)",
-            display:"flex",alignItems:"center",justifyContent:"center",
-            boxShadow:"0 2px 8px rgba(0,0,0,0.4)"}}>
-          +
-        </button>
-        {/* Indicador de volume */}
-        <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
-          <div style={{width:4,height:48,background:"rgba(255,255,255,0.1)",
-            borderRadius:2,overflow:"hidden",position:"relative"}}>
-            <div style={{position:"absolute",bottom:0,left:0,right:0,
-              background:muted?"#555":"#fff",
-              height:`${muted?0:volume}%`,
-              transition:"height 0.2s,background 0.2s",borderRadius:2}}/>
-          </div>
-          <div style={{fontSize:9,color:"rgba(255,255,255,0.4)",fontWeight:600,
-            letterSpacing:0.5}}>
-            {muted?"MUDO":`${volume}%`}
-          </div>
-        </div>
-        {/* Botão mute/unmute */}
-        <button onClick={handleMuteToggle}
-          style={{width:38,height:38,borderRadius:"50%",cursor:"pointer",
-            background:muted?"rgba(229,57,53,0.3)":"rgba(0,0,0,0.65)",
-            backdropFilter:"blur(6px)",color:"#fff",fontSize:15,
-            border:muted?"1px solid rgba(229,57,53,0.5)":"1px solid rgba(255,255,255,0.15)",
-            display:"flex",alignItems:"center",justifyContent:"center",
-            boxShadow:"0 2px 8px rgba(0,0,0,0.4)"}}>
-          {muted?"🔇":"🔊"}
-        </button>
-        {/* Botão - volume */}
-        <button onClick={handleVolumeDown}
-          style={{width:38,height:38,borderRadius:"50%",border:"none",cursor:"pointer",
-            background:"rgba(0,0,0,0.65)",backdropFilter:"blur(6px)",
-            color:"#fff",fontSize:20,fontWeight:700,
-            border:"1px solid rgba(255,255,255,0.15)",
-            display:"flex",alignItems:"center",justifyContent:"center",
-            boxShadow:"0 2px 8px rgba(0,0,0,0.4)"}}>
-          −
-        </button>
-      </div>
+
 
       {/* ===== UNMUTE BUTTON ===== */}
       {muted && (
@@ -1682,6 +1726,10 @@ export default function TVWeb(){
           if (!document.fullscreenElement) cRef.current?.requestFullscreen?.();
           else document.exitFullscreen?.();
         }}
+        muted={muted} vol={volume}
+        onVolUp={handleVolumeUp}
+        onVolDown={handleVolumeDown}
+        onMuteToggle={handleMuteToggle}
       />
 
       {/* ===== CHANNEL SIDEBAR ===== */}
