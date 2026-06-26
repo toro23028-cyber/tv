@@ -14,7 +14,11 @@ const COLOR_LIST = ["#2196F3","#E91E63","#4CAF50","#FF9800","#9C27B0","#f44336",
 // ============================================
 // HELPERS
 // ============================================
-function fmtSec(s){ const h=Math.floor(s/3600),m=Math.floor((s%3600)/60); return`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}` }
+function fmtSec(s){
+  const norm=((Number(s)%86400)+86400)%86400;
+  const h=Math.floor(norm/3600),m=Math.floor((norm%3600)/60);
+  return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`;
+}
 function getDayLabel(d){ const x=new Date(d+"T00:00:00"); const ds=["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"]; return`${ds[x.getDay()]} ${x.getDate()}/${x.getMonth()+1}` }
 function secTo(s){ return{h:Math.floor(s/3600),m:Math.floor((s%3600)/60)} }
 function parseDur(h,m){ return(parseInt(h)||0)*3600+(parseInt(m)||0)*60 }
@@ -455,6 +459,11 @@ function PlaylistImporter({ onImport }) {
 // PROGRAM MODAL
 // ============================================
 function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existingPrograms,onSave,onClose}){
+  const isDirtyRef = useRef(false);
+  const safeClose  = useCallback(()=>{
+    if(isDirtyRef.current&&!window.confirm("Há alterações não salvas. Fechar assim mesmo?")) return;
+    onClose();
+  },[onClose]);
   const isEdit=mode==="edit";
   const [nome,setNome]=useState(program?.nome||"");
   const [canalId,setCanalId]=useState(program?.canalId??selectedChannel);
@@ -531,11 +540,11 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
     }
   };
 
-  return <div onClick={onClose} style={{position:"fixed",inset:0,zIndex:100,background:"rgba(0,0,0,0.7)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+  return <div onClick={safeClose} style={{position:"fixed",inset:0,zIndex:100,background:"rgba(0,0,0,0.7)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
     <div onClick={e=>e.stopPropagation()} style={{background:"#14161e",borderRadius:12,maxWidth:640,width:"100%",border:"1px solid rgba(255,255,255,0.1)",maxHeight:"92vh",overflowY:"auto"}}>
       <div style={{padding:"16px 20px",borderBottom:"1px solid rgba(255,255,255,0.08)",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <span style={{fontSize:16,fontWeight:700,color:"#fff"}}>{isEdit?"✏️ Editar":"➕ Novo"} Programa</span>
-        <button onClick={onClose} style={{background:"none",border:"none",color:"#888",cursor:"pointer",fontSize:18}}>✕</button>
+        <button onClick={safeClose} style={{background:"none",border:"none",color:"#888",cursor:"pointer",fontSize:18}}>✕</button>
       </div>
       <div style={{padding:20,display:"flex",flexDirection:"column",gap:16}}>
         {/* Canal */}
@@ -547,7 +556,7 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
 
         {/* Nome */}
         <div><label style={lS}>NOME DO PROGRAMA</label>
-          <input value={nome} onChange={e=>setNome(e.target.value)} placeholder="Ex: Documentário" style={{...iS,width:"100%"}}/></div>
+          <input value={nome} onChange={e=>{setNome(e.target.value);isDirtyRef.current=true;}} placeholder="Ex: Documentário" style={{...iS,width:"100%"}}/></div>
 
         {/* Start time */}
         <div><label style={lS}>HORÁRIO DE INÍCIO</label>
@@ -725,7 +734,7 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
         {error&&<div style={{padding:10,background:"rgba(244,67,54,0.1)",borderRadius:6,border:"1px solid rgba(244,67,54,0.3)",fontSize:12,color:"#f44336"}}>⚠️ {error}</div>}
 
         <div style={{display:"flex",gap:8}}>
-          <button onClick={onClose} style={{flex:1,padding:12,borderRadius:6,cursor:"pointer",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",color:"#aaa",fontSize:13,fontWeight:600}}>Cancelar</button>
+          <button onClick={safeClose} style={{flex:1,padding:12,borderRadius:6,cursor:"pointer",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",color:"#aaa",fontSize:13,fontWeight:600}}>Cancelar</button>
           <button onClick={save} disabled={hasOverlap||saving} style={{flex:2,padding:12,borderRadius:6,cursor:hasOverlap||saving?"not-allowed":"pointer",background:hasOverlap||saving?"#333":"#1a73e8",border:"none",color:"#fff",fontSize:13,fontWeight:700,opacity:hasOverlap||saving?0.5:1}}>{saving?"⏳ Salvando...":isEdit?"💾 Salvar":"✅ Agendar"}</button>
         </div>
       </div>
@@ -822,10 +831,28 @@ function ChannelEditor({channels,onAdd,onDelete}){
         </div>
         <div style={{display:"flex",gap:8}}>
           <button onClick={()=>startEdit(ch)} style={{padding:"8px 16px",borderRadius:4,cursor:"pointer",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",color:"#aaa",fontSize:12}}>✏️ Editar</button>
+          <button onClick={async()=>{
+            try{ await updateDoc(doc(db,"channels",ch.id),{offline:!ch.offline});
+              notify(ch.offline?"✅ Canal no ar!":"📴 Canal fora do ar!","success");
+            }catch(e){notify("Erro: "+e.message,"error");}
+          }} style={{padding:"8px 16px",borderRadius:4,cursor:"pointer",fontSize:12,fontWeight:600,
+            background:ch.offline?"rgba(76,175,80,0.1)":"rgba(255,152,0,0.1)",
+            border:ch.offline?"1px solid rgba(76,175,80,0.25)":"1px solid rgba(255,152,0,0.25)",
+            color:ch.offline?"#4caf50":"#ff9800"}}>
+            {ch.offline?"📡 No ar":"📴 Fora do ar"}
+          </button>
           <button onClick={()=>onDelete(ch)} style={{padding:"8px 16px",borderRadius:4,cursor:"pointer",background:"rgba(244,67,54,0.1)",border:"1px solid rgba(244,67,54,0.2)",color:"#f44336",fontSize:12}}>🗑️ Deletar</button>
         </div>
       </div>}
     </div>)}
+    <button onClick={async()=>{
+      const anyOn=channels.some(c=>!c.offline);
+      await Promise.allSettled(channels.map(c=>updateDoc(doc(db,"channels",c.id),{offline:anyOn})));
+      notify(anyOn?"📴 Todos fora do ar!":"✅ Todos no ar!","success");
+    }} style={{padding:10,borderRadius:6,cursor:"pointer",fontSize:12,fontWeight:600,marginBottom:6,
+      background:"rgba(255,152,0,0.08)",border:"1px solid rgba(255,152,0,0.2)",color:"#ff9800"}}>
+      {channels.some(c=>!c.offline)?"📴 Tirar todos do ar":"📡 Colocar todos no ar"}
+    </button>
     <button onClick={onAdd} style={{padding:14,borderRadius:8,cursor:"pointer",background:"rgba(76,175,80,0.08)",border:"2px dashed rgba(76,175,80,0.3)",color:"#4caf50",fontSize:13,fontWeight:600}}>+ Adicionar Novo Canal</button>
   </div>;
 }
