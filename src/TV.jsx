@@ -1217,12 +1217,16 @@ function EPGCompact({channels,allPrograms,currentChannelId,onSelectChannel,onSel
           {sortedChannels.map(ch => {
             const isCurrent  = ch.id === currentChannelId;
             const multiSched = buildMultiDaySchedule(allPrograms, ch.id, EPG_DAYS, ch);
-            const cur        = getCurProg(buildSchedule(allPrograms, ch.id));
+            // Para HLS: getCurProg via buildSchedule com channel
+            const cur        = ch.streamUrl
+              ? multiSched.find(p => p.dayOffset === 0) || null
+              : getCurProg(buildSchedule(allPrograms, ch.id));
 
-            // Filtra: só programas visíveis no range (não placeholders, não encerrados)
+            // Filtra: só programas visíveis no range
+            // Para HLS isLive=true, não é placeholder → passa normalmente
             const visible = multiSched.filter(p =>
               !p.isPlaceholder &&
-              p.absEnd > nowAbs &&
+              p.absEnd > rulerStart &&   // dentro do range visível
               p.absStart < rulerEnd
             );
 
@@ -1243,11 +1247,24 @@ function EPGCompact({channels,allPrograms,currentChannelId,onSelectChannel,onSel
                 })}
 
                 {visible.map(prog => {
-                  const isNow      = cur?.id === prog.id || cur?.id === prog.id?.replace(/_rep\d+$/, "");
-                  const visualLeft = isNow ? nowPx : Math.max(0, absToPx(prog.absStart));
-                  const visualW    = Math.max(absToPx(prog.absEnd) - visualLeft, 48);
+                  // isNow: programa atual (normal) ou programa HLS do dia de hoje
+                  const isNow = prog.isLive
+                    ? prog.dayOffset === 0   // bloco HLS de hoje é sempre "ao vivo"
+                    : cur?.id === prog.id || cur?.id === prog.id?.replace(/_rep\d+$/, "");
 
-                  const pct = isNow
+                  // visualLeft: se é o programa ao vivo, começa na linha AGORA
+                  // Para HLS day0: o bloco começa em absStart=0 mas mostramos a partir do nowPx
+                  const rawLeft  = absToPx(prog.absStart);
+                  const visualLeft = isNow
+                    ? nowPx                          // começa na linha vermelha AGORA
+                    : Math.max(absToPx(rulerStart), rawLeft); // nunca antes do início visível
+
+                  // visualW: vai até o absEnd do bloco
+                  const rawRight = absToPx(prog.absEnd);
+                  const visualW  = Math.max(rawRight - visualLeft, 48);
+
+                  // Para HLS ao vivo: não tem % de progresso real (barra vermelha fixa)
+                  const pct = (isNow && !prog.isLive)
                     ? Math.min(100, ((nowAbs - prog.absStart) / (prog.absEnd - prog.absStart)) * 100)
                     : 0;
 
@@ -1287,11 +1304,14 @@ function EPGCompact({channels,allPrograms,currentChannelId,onSelectChannel,onSel
                             ? isCurrent ? "rgba(22,28,46,0.85)" : "rgba(15,18,32,0.8)"
                             : isCurrent ? "rgba(28,34,50,0.9)"  : "rgba(20,24,38,0.85)"}
                     >
-                      {/* Barra de progresso no bloco ao vivo */}
+                      {/* Barra de progresso: % para YT, vermelha fixa para HLS */}
                       {isNow && (
-                        <div style={{position:"absolute",bottom:0,left:0,height:2,
-                          width:`${pct}%`,background:"#e53935",
-                          transition:"width 1s linear",borderRadius:"0 1px 0 0"}}/>
+                        prog.isLive
+                          ? <div style={{position:"absolute",bottom:0,left:0,right:0,height:2,
+                              background:"#ff3b3b",borderRadius:"0 1px 0 0"}}/>
+                          : <div style={{position:"absolute",bottom:0,left:0,height:2,
+                              width:`${pct}%`,background:"#e53935",
+                              transition:"width 1s linear",borderRadius:"0 1px 0 0"}}/>
                       )}
 
                       <div style={{padding:"5px 8px 4px 9px"}}>
