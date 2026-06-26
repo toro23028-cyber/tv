@@ -193,9 +193,29 @@ function dayLabel(dateStr) {
   const ds = ["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"];
   return `${ds[d.getDay()]} ${d.getDate()}/${d.getMonth()+1}`;
 }
-function buildMultiDaySchedule(programs, channelId, days = 3) {
+function buildMultiDaySchedule(programs, channelId, days = 3, channel = null) {
   const today = getToday();
   const result = [];
+
+  // Canal HLS: gera bloco "Programação [nome]" cobrindo cada dia do EPG
+  if (channel?.streamUrl) {
+    for (let d = 0; d < days; d++) {
+      const dateStr = addDays(today, d);
+      const offset  = d * 86400;
+      result.push({
+        id: `_live_${channelId}_${d}`,
+        canalId: channelId,
+        nome: `Programação ${channel.nome || "ao vivo"}`,
+        horarioInicio: 0, horarioFim: 86400, duracao: 86400,
+        absStart: offset, absEnd: offset + 86400,
+        horarioTexto: "00:00", horarioFimTexto: "23:59",
+        dateLabel: dayLabel(dateStr), dayOffset: d,
+        classificacao: "L", tags: ["AO VIVO"], isLive: true,
+      });
+    }
+    return result;
+  }
+
   for (let d = 0; d < days; d++) {
     const dateStr  = addDays(today, d);
     const offset   = d * 86400; // segundos do início deste dia no timeline absoluto
@@ -1196,7 +1216,7 @@ function EPGCompact({channels,allPrograms,currentChannelId,onSelectChannel,onSel
           {/* ── LINHAS DE CANAL ── */}
           {sortedChannels.map(ch => {
             const isCurrent  = ch.id === currentChannelId;
-            const multiSched = buildMultiDaySchedule(allPrograms, ch.id, EPG_DAYS);
+            const multiSched = buildMultiDaySchedule(allPrograms, ch.id, EPG_DAYS, ch);
             const cur        = getCurProg(buildSchedule(allPrograms, ch.id));
 
             // Filtra: só programas visíveis no range (não placeholders, não encerrados)
@@ -1940,14 +1960,7 @@ export default function TVWeb(){
         isHLS={isHLS}
       />
 
-      {/* ===== CHANNEL SIDEBAR ===== */}
-      <div style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",zIndex:15,display:"flex",flexDirection:"column",gap:4,opacity:showOSD&&!showEPG&&!showFull?0.7:0,transition:"opacity 0.3s",pointerEvents:showOSD&&!showEPG&&!showFull?"auto":"none"}}>
-        {channels.map(c => (
-          <div key={c.id} onClick={e=>{e.stopPropagation();swCh(c.id)}} style={{width:40,height:40,borderRadius:4,background:c.id===curCh?"rgba(26,115,232,0.3)":"rgba(0,0,0,0.5)",border:c.id===curCh?"1px solid #1a73e8":"1px solid rgba(255,255,255,0.1)",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",overflow:"hidden"}}>
-            <ChLogo ch={c} size={c.logoType==="custom"?40:22}/>
-          </div>
-        ))}
-      </div>
+      {/* Barra lateral de canais removida — navegar pelo Guia ou Home */}
 
       {/* ===== FIREBASE ERROR NOTICE ===== */}
       {firebaseError && (
