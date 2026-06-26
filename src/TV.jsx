@@ -384,7 +384,7 @@ function GCProgressBar({ duracao, cor, phase }) {
   );
 }
 
-function GCBlock({ mensagem, fonte, estilo, cor, duracao }) {
+function GCBlock({ mensagem, fonte, estilo, cor, duracao, lado }) {
   const sizes = { pequena:12, normal:15, grande:18, destaque:22 };
   const fs    = sizes[fonte] || 15;
   const bold  = fonte === "destaque";
@@ -410,8 +410,11 @@ function GCBlock({ mensagem, fonte, estilo, cor, duracao }) {
       padding:"10px 16px", borderRadius:6 },
     canal:   { ...base, background:`${cor}e0`, color:"#fff",
       padding:"10px 16px", borderRadius:6 },
-    borda:   { ...base, background:"rgba(0,0,0,0.80)", color:"#fff",
-      padding:"10px 16px 10px 14px", borderLeft:`4px solid ${cor}`, borderRadius:"0 6px 6px 0" },
+    borda:   lado==="esq"
+      ? { ...base, background:"rgba(0,0,0,0.80)", color:"#fff",
+          padding:"10px 16px 10px 14px", borderLeft:`4px solid ${cor}`, borderRadius:"0 6px 6px 0" }
+      : { ...base, background:"rgba(0,0,0,0.80)", color:"#fff",
+          padding:"10px 16px 14px 10px", borderRight:`4px solid ${cor}`, borderRadius:"6px 0 0 6px" },
     simples: { ...base, background:"rgba(0,0,0,0.55)", color:"#fff",
       padding:"10px 16px", borderRadius:6,
       textShadow:"0 1px 8px rgba(0,0,0,0.9)" },
@@ -497,25 +500,32 @@ function GCOverlay({ channel, program, nextProgram, videoIndex, episodioTitulo, 
   // Duração de cada GC em segundos (para a barra de progresso)
   const GC_DURACAO = 23; // intro: 2-25s = 23s visível
 
+  // Posição configurável via channel.gcLayout
+  const layout = channel?.gcLayout || "inf-dir";
+  const isLeft  = layout === "inf-esq" || layout === "sup-esq";
+  const isTop   = layout === "sup-dir" || layout === "sup-esq";
+  const posStyle = {
+    position:"absolute",
+    ...(isTop  ? { top:80 }    : { bottom:148 }),
+    ...(isLeft ? { left:0 }    : { right:0 }),
+    zIndex:11,
+    pointerEvents:"none",
+    display:"flex", flexDirection:"column",
+    alignItems: isLeft ? "flex-start" : "flex-end",
+    gap:8,
+    maxWidth:"clamp(240px, 40vw, 480px)",
+  };
+
   return (
-    <div style={{
-      position:"absolute",
-      // Safe area: 148px acima do fundo garante que fica acima do OSDFooter
-      // (footer tem ~130px de altura). Valor fixo é mais previsível que clamp.
-      bottom:148,
-      right:0,
-      zIndex:11,  // acima do OSDFooter (z:10) para nunca ser coberto
-      pointerEvents:"none",
-      display:"flex", flexDirection:"column", alignItems:"flex-end", gap:8,
-      maxWidth:"clamp(240px, 40vw, 480px)",
-    }}>
+    <div style={posStyle}>
       {/* Classificação indicativa — canto inferior direito */}
       {showProg && showClass && (
         <div style={{
           display:"flex", alignItems:"center", gap:10,
           background:"rgba(0,0,0,0.92)", backdropFilter:"blur(8px)",
-          borderRight:`5px solid ${classColor}`,
-          borderRadius:"8px 0 0 8px",
+          ...(isLeft
+            ? { borderLeft:`5px solid ${classColor}`, borderRadius:"0 8px 8px 0" }
+            : { borderRight:`5px solid ${classColor}`, borderRadius:"8px 0 0 8px" }),
           padding:"9px 16px 9px 14px",
           opacity:musicPhase?1:0, transition:"opacity 0.5s ease",
           boxShadow:"0 4px 24px rgba(0,0,0,0.7)",
@@ -539,8 +549,9 @@ function GCOverlay({ channel, program, nextProgram, videoIndex, episodioTitulo, 
         <div style={{
           background:"rgba(0,0,0,0.92)",
           backdropFilter:"blur(8px)",
-          borderRight:`5px solid ${cor}`,
-          borderRadius:"8px 0 0 8px",
+          ...(isLeft
+            ? { borderLeft:`5px solid ${cor}`, borderRadius:"0 8px 8px 0" }
+            : { borderRight:`5px solid ${cor}`, borderRadius:"8px 0 0 8px" }),
           padding:"12px 20px 14px 16px",
           opacity:musicPhase?1:0,
           transition:"opacity 0.5s ease",
@@ -592,7 +603,8 @@ function GCOverlay({ channel, program, nextProgram, videoIndex, episodioTitulo, 
             fonte={program.gcFonte||"normal"}
             estilo={program.gcEstilo||"borda"}
             cor={cor}
-            duracao={GC_DURACAO}/>
+            duracao={GC_DURACAO}
+            lado={isLeft?"esq":"dir"}/>
         </div>
       )}
 
@@ -602,7 +614,8 @@ function GCOverlay({ channel, program, nextProgram, videoIndex, episodioTitulo, 
           fonte={activeChannelGC.fonte||"normal"}
           estilo={activeChannelGC.estilo||"borda"}
           cor={cor}
-          duracao={Number(activeChannelGC.duracao)||20}/>
+          duracao={Number(activeChannelGC.duracao)||20}
+          lado={isLeft?"esq":"dir"}/>
       )}
     </div>
   );
