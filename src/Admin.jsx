@@ -487,6 +487,7 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
   const [tipo,setTipo]=useState("geral");
   const [gcLayout,setGcLayout]=useState("inf-dir");
   const [streamUrl,setStreamUrl]=useState("");
+  const [showIPTV,setShowIPTV]=useState(false);
   const [saving,setSaving]=useState(false);
   const [startMode,setSM]=useState(isEdit?"custom":"auto");
   const [startH,setSH]=useState(isEdit?Math.floor(program.horarioInicio/3600):0);
@@ -745,6 +746,187 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
 }
 
 // ============================================
+// IPTV SEARCH MODAL
+// Busca canais na API do iptv-org e preenche o formulário
+// ============================================
+function IPTVSearchModal({ onSelect, onClose }) {
+  const [query,    setQuery]    = useState("");
+  const [country,  setCountry]  = useState("BR");
+  const [results,  setResults]  = useState([]);
+  const [streams,  setStreams]   = useState({});   // channel_id → url
+  const [loading,  setLoading]  = useState(false);
+  const [loaded,   setLoaded]   = useState(false);
+  const [allChs,   setAllChs]   = useState([]);
+  const [error,    setError]    = useState(null);
+
+  // Carrega channels.json e streams.json uma vez
+  useEffect(() => {
+    setLoading(true);
+    Promise.all([
+      fetch("https://iptv-org.github.io/api/channels.json").then(r=>r.json()),
+      fetch("https://iptv-org.github.io/api/streams.json").then(r=>r.json()),
+    ]).then(([chs, strs]) => {
+      setAllChs(chs);
+      // Mapeia channel_id → primeira url disponível sem label de bloqueio
+      const map = {};
+      strs.forEach(s => {
+        if (s.channel && !map[s.channel] && s.label !== "Geo-blocked") {
+          map[s.channel] = s.url;
+        }
+      });
+      setStreams(map);
+      setLoaded(true);
+      setLoading(false);
+    }).catch(e => {
+      setError("Erro ao carregar dados: " + e.message);
+      setLoading(false);
+    });
+  }, []);
+
+  // Filtra resultados
+  useEffect(() => {
+    if (!loaded || query.trim().length < 2) { setResults([]); return; }
+    const q = query.toLowerCase();
+    const filtered = allChs
+      .filter(ch => {
+        const matchName    = ch.name.toLowerCase().includes(q) ||
+                             (ch.alt_names||[]).some(n=>n.toLowerCase().includes(q));
+        const matchCountry = !country || ch.country === country;
+        return matchName && matchCountry && !ch.closed;
+      })
+      .slice(0, 30);
+    setResults(filtered);
+  }, [query, country, loaded, allChs]);
+
+  const COUNTRIES = [
+    ["","Todos os países"],["BR","🇧🇷 Brasil"],["US","🇺🇸 EUA"],
+    ["PT","🇵🇹 Portugal"],["GB","🇬🇧 Reino Unido"],["AR","🇦🇷 Argentina"],
+    ["ES","🇪🇸 Espanha"],["MX","🇲🇽 México"],["FR","🇫🇷 França"],
+    ["DE","🇩🇪 Alemanha"],["IT","🇮🇹 Itália"],["JP","🇯🇵 Japão"],
+  ];
+
+  const handleSelect = (ch) => {
+    const url = streams[ch.id] || null;
+    // Tenta pegar logo da API de logos
+    onSelect({
+      nome:      ch.name,
+      logoUrl:   null,         // logo será buscada separadamente
+      streamUrl: url || "",
+      iptvId:    ch.id,
+      pais:      ch.country,
+      aviso:     !url,         // sem stream disponível → avisa
+    });
+    onClose();
+  };
+
+  return (
+    <div onClick={onClose} style={{position:"fixed",inset:0,zIndex:300,
+      background:"rgba(0,0,0,0.88)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+      <div onClick={e=>e.stopPropagation()} style={{
+        background:"#14161e",borderRadius:12,width:"100%",maxWidth:560,
+        maxHeight:"80vh",display:"flex",flexDirection:"column",
+        border:"1px solid rgba(255,255,255,0.08)",overflow:"hidden",
+      }}>
+        {/* Header */}
+        <div style={{padding:"16px 20px",borderBottom:"1px solid rgba(255,255,255,0.07)",
+          display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
+          <div>
+            <div style={{fontSize:15,fontWeight:700,color:"#fff"}}>🔍 Buscar Canal IPTV</div>
+            <div style={{fontSize:11,color:"#555",marginTop:2}}>Fonte: iptv-org · {allChs.length>0?`${allChs.length.toLocaleString()} canais`:"carregando..."}</div>
+          </div>
+          <button onClick={onClose} style={{background:"none",border:"none",color:"#666",cursor:"pointer",fontSize:20}}>✕</button>
+        </div>
+
+        {/* Filtros */}
+        <div style={{padding:"12px 20px",borderBottom:"1px solid rgba(255,255,255,0.05)",flexShrink:0}}>
+          <div style={{display:"flex",gap:8}}>
+            <input
+              autoFocus
+              value={query}
+              onChange={e=>setQuery(e.target.value)}
+              placeholder="Nome do canal (ex: CNN, Globo, ESPN...)"
+              style={{...iS,flex:1,fontSize:13}}
+            />
+            <select value={country} onChange={e=>setCountry(e.target.value)}
+              style={{...iS,width:160,fontSize:12}}>
+              {COUNTRIES.map(([v,l])=><option key={v} value={v}>{l}</option>)}
+            </select>
+          </div>
+        </div>
+
+        {/* Resultados */}
+        <div style={{flex:1,overflowY:"auto",padding:"8px 0"}}>
+          {loading && (
+            <div style={{padding:40,textAlign:"center",color:"#555",fontSize:13}}>
+              ⏳ Carregando banco de dados...
+            </div>
+          )}
+          {error && (
+            <div style={{padding:20,textAlign:"center",color:"#f44336",fontSize:12}}>{error}</div>
+          )}
+          {!loading && query.trim().length < 2 && (
+            <div style={{padding:32,textAlign:"center",color:"#444",fontSize:12}}>
+              Digite ao menos 2 letras para buscar
+            </div>
+          )}
+          {!loading && query.trim().length >= 2 && results.length === 0 && (
+            <div style={{padding:32,textAlign:"center",color:"#444",fontSize:12}}>
+              Nenhum canal encontrado para "{query}"
+              {country && <div style={{marginTop:6,color:"#555"}}>Tente sem filtro de país</div>}
+            </div>
+          )}
+          {results.map(ch => {
+            const hasStream = !!streams[ch.id];
+            return (
+              <div key={ch.id} onClick={()=>handleSelect(ch)}
+                style={{display:"flex",alignItems:"center",gap:12,padding:"10px 20px",
+                  cursor:"pointer",borderBottom:"1px solid rgba(255,255,255,0.04)",
+                  transition:"background 0.15s"}}
+                onMouseEnter={e=>e.currentTarget.style.background="rgba(255,255,255,0.04)"}
+                onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                {/* Logo placeholder */}
+                <div style={{width:36,height:36,borderRadius:5,background:"rgba(255,255,255,0.06)",
+                  display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,fontSize:18}}>
+                  📺
+                </div>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:13,fontWeight:600,color:"#fff",
+                    overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                    {ch.name}
+                  </div>
+                  <div style={{fontSize:10,color:"#555",marginTop:2,display:"flex",gap:8}}>
+                    <span>{ch.country}</span>
+                    {ch.categories?.length > 0 && <span>{ch.categories[0]}</span>}
+                  </div>
+                </div>
+                <div style={{flexShrink:0,display:"flex",flexDirection:"column",alignItems:"flex-end",gap:3}}>
+                  {hasStream
+                    ? <span style={{fontSize:9,fontWeight:800,color:"#4caf50",
+                        background:"rgba(76,175,80,0.12)",border:"1px solid rgba(76,175,80,0.25)",
+                        padding:"2px 6px",borderRadius:3}}>📡 STREAM</span>
+                    : <span style={{fontSize:9,color:"#555",
+                        background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.06)",
+                        padding:"2px 6px",borderRadius:3}}>só metadados</span>
+                  }
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Footer */}
+        <div style={{padding:"10px 20px",borderTop:"1px solid rgba(255,255,255,0.05)",
+          fontSize:10,color:"#444",flexShrink:0}}>
+          ⚠️ Streams podem ter restrição geográfica ou CORS. Teste antes de usar.
+          Metadados: <a href="https://github.com/iptv-org/database" target="_blank"
+            rel="noopener noreferrer" style={{color:"#1a73e8",textDecoration:"none"}}>iptv-org/database</a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================
 // CHANNEL EDITOR
 // ============================================
 function ChannelEditor({channels,onAdd,onDelete}){
@@ -758,7 +940,17 @@ function ChannelEditor({channels,onAdd,onDelete}){
   const [tipo,setTipo]=useState("geral");
   const [gcLayout,setGcLayout]=useState("inf-dir");
   const [streamUrl,setStreamUrl]=useState("");
+  const [showIPTV,setShowIPTV]=useState(false);
   const [saving,setSaving]=useState(false);
+
+  const handleIPTVSelect = ({ nome:n, streamUrl:su, iptvId, aviso }) => {
+    setNome(n);
+    setStreamUrl(su || "");
+    if (!logo) setLogo("📺");
+    if (!cor)  setCor(COLOR_LIST[Math.floor(Math.random()*COLOR_LIST.length)]);
+    if (aviso) notify(`"${n}" importado sem stream — cole a URL m3u8 manualmente se tiver.`,"info");
+    else       notify(`✅ "${n}" importado com stream!`,"success");
+  };
 
   const startEdit=(ch)=>{setEditing(ch.id);setNome(ch.nome);setLogo(ch.logo);setLT(ch.logoType||"emoji");setLU(ch.logoUrl||null);setCor(ch.cor);setNumber(ch.numero||0);setTipo(ch.tipo||"geral");setGcLayout(ch.gcLayout||"inf-dir");setStreamUrl(ch.streamUrl||"")};
   const save=async()=>{
@@ -805,11 +997,18 @@ function ChannelEditor({channels,onAdd,onDelete}){
         </div>
         {/* Stream m3u8 */}
         <div style={{background:"rgba(76,175,80,0.05)",border:"1px solid rgba(76,175,80,0.15)",borderRadius:6,padding:"12px 14px"}}>
-          <label style={{...lS,color:"#81c784",marginBottom:6}}>📡 STREAM AO VIVO (m3u8 — opcional)</label>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+            <label style={{...lS,color:"#81c784",marginBottom:0}}>📡 STREAM AO VIVO (m3u8 — opcional)</label>
+            <button onClick={()=>setShowIPTV(true)}
+              style={{padding:"4px 10px",borderRadius:4,cursor:"pointer",fontSize:10,fontWeight:700,
+                background:"rgba(26,115,232,0.15)",border:"1px solid rgba(26,115,232,0.3)",color:"#4fc3f7"}}>
+              🔍 Buscar IPTV
+            </button>
+          </div>
           <input
             value={streamUrl}
             onChange={e=>setStreamUrl(e.target.value)}
-            placeholder="https://exemplo.com/stream/live.m3u8"
+            placeholder="https://exemplo.com/stream/live.m3u8 — ou use Buscar IPTV"
             style={{...iS,width:"100%",fontFamily:"monospace",fontSize:11}}
           />
           {streamUrl.trim() && (
@@ -906,7 +1105,21 @@ function ChannelEditor({channels,onAdd,onDelete}){
       background:"rgba(255,152,0,0.08)",border:"1px solid rgba(255,152,0,0.2)",color:"#ff9800"}}>
       {channels.some(c=>!c.offline)?"📴 Tirar todos do ar":"📡 Colocar todos no ar"}
     </button>
-    <button onClick={onAdd} style={{padding:14,borderRadius:8,cursor:"pointer",background:"rgba(76,175,80,0.08)",border:"2px dashed rgba(76,175,80,0.3)",color:"#4caf50",fontSize:13,fontWeight:600}}>+ Adicionar Novo Canal</button>
+    <div style={{display:"flex",gap:8}}>
+      <button onClick={()=>setShowIPTV(true)}
+        style={{flex:1,padding:12,borderRadius:8,cursor:"pointer",
+          background:"rgba(26,115,232,0.08)",border:"2px dashed rgba(26,115,232,0.2)",
+          color:"#4fc3f7",fontSize:13,fontWeight:600}}>
+        🔍 Buscar canal IPTV
+      </button>
+      <button onClick={onAdd}
+        style={{flex:1,padding:12,borderRadius:8,cursor:"pointer",
+          background:"rgba(76,175,80,0.08)",border:"2px dashed rgba(76,175,80,0.3)",
+          color:"#4caf50",fontSize:13,fontWeight:600}}>
+        + Novo canal manual
+      </button>
+    </div>
+    {showIPTV&&<IPTVSearchModal onSelect={e=>{onAdd();setTimeout(()=>handleIPTVSelect(e),100);}} onClose={()=>setShowIPTV(false)}/>}
   </div>;
 }
 
