@@ -58,8 +58,53 @@ function getAbsoluteNow(){
 // YouTube metadata extraction
 function extractYouTubeId(url){
   if(!url)return null;
-  const patterns=[/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&\n?#]+)/,/^([a-zA-Z0-9_-]{11})$/];
+  const patterns=[/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/,/^([a-zA-Z0-9_-]{11})$/];
   for(const p of patterns){const m=url.match(p);if(m)return m[1]}return null;
+}
+// Extrai um playlist ID de uma URL (list=... funciona em qualquer contexto)
+function extractPlaylistId(url){
+  if(!url)return null;
+  const m=url.match(/[?&]list=([a-zA-Z0-9_-]+)/);
+  return m?m[1]:null;
+}
+// Reconhece MUITAS URLs/IDs colados de uma vez.
+// Aceita: uma por linha, separadas por espaço, vírgula, ponto-e-vírgula ou tab.
+// Extrai IDs válidos de qualquer texto misturado (títulos, numeração, etc).
+function parseYouTubeBulk(text){
+  if(!text)return [];
+  const seen=new Set(), out=[];
+  const parts=text.split(/[\s,;|]+/).map(s=>s.trim()).filter(Boolean);
+  for(const p of parts){
+    const id=extractYouTubeId(p);
+    if(id&&!seen.has(id)){seen.add(id);out.push({youtubeUrl:p,titulo:""})}
+  }
+  // fallback: varre o texto inteiro atrás de IDs (para colagens sem separadores claros)
+  if(out.length===0){
+    const re=/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/g;
+    let m; while((m=re.exec(text))){ if(!seen.has(m[1])){seen.add(m[1]);out.push({youtubeUrl:`https://youtu.be/${m[1]}`,titulo:""})} }
+  }
+  return out;
+}
+// Busca os vídeos de uma playlist do YouTube (até 200) via Data API v3
+async function fetchYouTubePlaylistItems(playlistId){
+  if(!playlistId)return [];
+  const API_KEY="AIzaSyCt0t7IvYYPMXTfXB1zZ6AB4Na9JpL50EQ";
+  const items=[];let pageToken="";
+  try{
+    for(let i=0;i<4;i++){ // até 4 páginas (200 vídeos)
+      const url=`https://www.googleapis.com/youtube/v3/playlistItems?playlistId=${playlistId}&key=${API_KEY}&part=snippet&maxResults=50${pageToken?`&pageToken=${pageToken}`:""}`;
+      const res=await fetch(url);
+      if(!res.ok)break;
+      const data=await res.json();
+      for(const it of (data.items||[])){
+        const vid=it.snippet?.resourceId?.videoId;
+        if(vid)items.push({youtubeUrl:`https://youtu.be/${vid}`,titulo:it.snippet.title||""});
+      }
+      if(!data.nextPageToken)break;
+      pageToken=data.nextPageToken;
+    }
+  }catch(err){console.error("Playlist fetch err:",err)}
+  return items;
 }
 async function fetchYouTubeMetadata(videoId){
   if(!videoId)return null;
@@ -249,6 +294,9 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
   const [customM,setCM]=useState(program?Math.floor((program.duracao%3600)/60):0);
   const [videos,setVideos]=useState(program?.videos||[{youtubeUrl:program?.youtubeId||"",titulo:""}]);
   const [selectedVideos,setSelectedVideos]=useState(new Set());
+  const [showBulkPaste,setShowBulkPaste]=useState(false);
+  const [bulkText,setBulkText]=useState("");
+  const [bulkStatus,setBulkStatus]=useState("");
   const [thumbnailType,setTT]=useState(program?.thumbnailType||"youtube");
   const [thumbnailUrl,setTU]=useState(program?.thumbnailUrl||null);
   const [gcAlways,setGcAlways]=useState(program?.gcAlways||false);
@@ -320,20 +368,39 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
 
         {/* Videos */}
         <div>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-            <label style={{...lS,marginBottom:0}}>VÍDEOS</label>
-            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8,flexWrap:"wrap",gap:6}}>
+            <label style={{...lS,marginBottom:0}}>VÍDEOS / PLAYLIST</label>
+            <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
               <span style={{fontSize:10,color:"#555"}}>{videos.length} vídeo(s)</span>
               <input type="checkbox" checked={videos.length>0&&selectedVideos.size===videos.length} onChange={e=>{if(e.target.checked){const newSel=new Set();for(let i=0;i<videos.length;i++)newSel.add(i);setSelectedVideos(newSel)}else{setSelectedVideos(new Set())}}} title="Marcar/desmarcar todos" style={{width:14,height:14,cursor:"pointer",accentColor:"#4caf50"}}/>
+              <button onClick={()=>{setBulkText("");setBulkStatus("");setShowBulkPaste(true)}} style={{fontSize:11,color:"#ffca28",background:"rgba(255,202,40,0.1)",border:"1px solid rgba(255,202,40,0.35)",padding:"4px 10px",borderRadius:3,cursor:"pointer",fontWeight:700}}>📋 Colar Playlist</button>
               <button onClick={async()=>{const videoCopy=[...videos];for(let i=0;i<videoCopy.length;i++){const vId=extractYouTubeId(videoCopy[i].youtubeUrl);if(vId){const meta=await fetchYouTubeMetadata(vId);if(meta){const nv=[...videoCopy];nv[i]={...nv[i],youtubeUrl:videoCopy[i].youtubeUrl,titulo:meta.title};setVideos(nv);videoCopy[i]=nv[i];if(i===0){setCH(Math.floor(meta.duration/3600));setCM(Math.floor((meta.duration%3600)/60));setSinopse(meta.description)}}}}}} style={{fontSize:10,color:"#4caf50",background:"rgba(76,175,80,0.1)",border:"1px solid rgba(76,175,80,0.3)",padding:"2px 8px",borderRadius:3,cursor:"pointer",fontWeight:600}}>🔍 Buscar Todos</button>
             </div>
           </div>
+          <div style={{fontSize:10,color:"#666",marginBottom:8,fontStyle:"italic"}}>💡 Dica: cole várias URLs de uma vez em qualquer campo abaixo — cada uma vira uma linha automaticamente. Ou use "📋 Colar Playlist" para uma lista grande.</div>
           <div style={{display:"flex",flexDirection:"column",gap:6}}>
             {videos.map((v,i)=><div key={i} style={{display:"flex",gap:8,alignItems:"center",padding:"8px 10px",background:"rgba(255,255,255,0.02)",borderRadius:4,border:"1px solid rgba(255,255,255,0.06)"}}>
               <input type="checkbox" checked={selectedVideos.has(i)} onChange={()=>{const newSel=new Set(selectedVideos);if(newSel.has(i))newSel.delete(i);else newSel.add(i);setSelectedVideos(newSel)}} style={{width:16,height:16,cursor:"pointer",accentColor:"#4caf50",flexShrink:0}}/>
               <span style={{fontSize:11,color:"#555",fontWeight:700,minWidth:20}}>#{i+1}</span>
               {(()=>{const t=ytThumb(v.youtubeUrl);return t?<img src={t} alt="" style={{width:40,height:26,borderRadius:3,objectFit:"cover"}}/>:null})()}
-              <input value={v.youtubeUrl} onChange={e=>{const nv=[...videos];nv[i]={...v,youtubeUrl:e.target.value};setVideos(nv)}} placeholder="YouTube URL ou ID" style={{...iS,flex:1}}/>
+              <input value={v.youtubeUrl}
+                onChange={e=>{const nv=[...videos];nv[i]={...v,youtubeUrl:e.target.value};setVideos(nv)}}
+                onPaste={async e=>{
+                  const pasted=e.clipboardData.getData("text");
+                  // Smart paste: se tem várias URLs OU é uma URL de playlist, expande em várias linhas
+                  const plId=extractPlaylistId(pasted);
+                  const bulk=parseYouTubeBulk(pasted);
+                  if(plId||bulk.length>1){
+                    e.preventDefault();
+                    const items=plId?await fetchYouTubePlaylistItems(plId):bulk;
+                    if(items.length===0){setError("Nenhuma URL válida encontrada");return}
+                    const before=videos.slice(0,i).filter(x=>x.youtubeUrl.trim());
+                    const after=videos.slice(i+1).filter(x=>x.youtubeUrl.trim());
+                    setVideos([...before,...items,...after]);
+                    setError("");
+                  }
+                }}
+                placeholder="Cole 1 URL ou várias" style={{...iS,flex:1}}/>
               <input value={v.titulo||""} onChange={e=>{const nv=[...videos];nv[i]={...v,titulo:e.target.value};setVideos(nv)}} placeholder="Título" style={{...iS,width:120}}/>
               <button onClick={async()=>{const vId=extractYouTubeId(v.youtubeUrl);if(!vId){setError("URL YouTube inválida");return}const meta=await fetchYouTubeMetadata(vId);if(meta){const nv=[...videos];nv[i]={...nv[i],youtubeUrl:v.youtubeUrl,titulo:meta.title};setVideos(nv);setCH(Math.floor(meta.duration/3600));setCM(Math.floor((meta.duration%3600)/60));setSinopse(meta.description);setError("")}else setError("Erro ao buscar vídeo")}} style={{background:"rgba(26,115,232,0.15)",border:"1px solid rgba(26,115,232,0.3)",color:"#4fc3f7",padding:"6px 10px",borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:600,whiteSpace:"nowrap"}}>🔍 Buscar</button>
               {videos.length>1&&<button onClick={()=>setVideos(videos.filter((_,j)=>j!==i))} style={{background:"none",border:"none",color:"#f44336",cursor:"pointer",fontSize:14}}>✕</button>}
@@ -341,6 +408,43 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
           </div>
           <button onClick={()=>setVideos([...videos,{youtubeUrl:"",titulo:""}])} style={{marginTop:8,padding:"8px 14px",borderRadius:4,cursor:"pointer",background:"rgba(76,175,80,0.1)",border:"1px solid rgba(76,175,80,0.3)",color:"#4caf50",fontSize:12,fontWeight:600,width:"100%"}}>+ Adicionar vídeo</button>
         </div>
+
+        {/* Bulk paste modal */}
+        {showBulkPaste&&<div onClick={()=>setShowBulkPaste(false)} style={{position:"fixed",inset:0,zIndex:200,background:"rgba(0,0,0,0.75)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"#14161e",borderRadius:12,maxWidth:640,width:"100%",border:"1px solid rgba(255,202,40,0.35)",padding:20}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+              <span style={{fontSize:16,fontWeight:700,color:"#ffca28"}}>📋 Colar Playlist</span>
+              <button onClick={()=>setShowBulkPaste(false)} style={{background:"none",border:"none",color:"#888",cursor:"pointer",fontSize:18}}>✕</button>
+            </div>
+            <div style={{fontSize:12,color:"#aaa",marginBottom:12,lineHeight:1.5}}>
+              Cole aqui várias URLs do YouTube (uma por linha, ou separadas por espaço/vírgula).<br/>
+              Também aceita uma URL de <b>playlist</b> tipo <code style={{background:"rgba(255,255,255,0.06)",padding:"1px 5px",borderRadius:3,fontSize:11}}>youtube.com/playlist?list=PL...</code> — os vídeos são baixados automaticamente.
+            </div>
+            <textarea value={bulkText} onChange={e=>setBulkText(e.target.value)}
+              placeholder={"https://youtu.be/dQw4w9WgXcQ\nhttps://youtu.be/9bZkp7q19f0\nhttps://youtube.com/watch?v=..."}
+              style={{...iS,width:"100%",minHeight:180,fontFamily:"monospace",fontSize:12,resize:"vertical"}}/>
+            {bulkStatus&&<div style={{marginTop:10,padding:"8px 12px",background:"rgba(76,175,80,0.1)",border:"1px solid rgba(76,175,80,0.3)",borderRadius:4,fontSize:12,color:"#69f0ae"}}>{bulkStatus}</div>}
+            <div style={{display:"flex",gap:8,marginTop:14}}>
+              <button onClick={()=>setShowBulkPaste(false)} style={{flex:1,padding:10,borderRadius:4,cursor:"pointer",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",color:"#aaa",fontSize:12}}>Cancelar</button>
+              <button onClick={async()=>{
+                setBulkStatus("Processando...");
+                const plId=extractPlaylistId(bulkText);
+                let items=[];
+                if(plId){
+                  setBulkStatus("🌐 Baixando playlist do YouTube...");
+                  items=await fetchYouTubePlaylistItems(plId);
+                }
+                if(items.length===0)items=parseYouTubeBulk(bulkText);
+                if(items.length===0){setBulkStatus("❌ Nenhuma URL válida encontrada");return}
+                // Adiciona (mantém vídeos existentes com URL preenchida)
+                const existing=videos.filter(x=>x.youtubeUrl.trim());
+                setVideos([...existing,...items]);
+                setBulkStatus(`✅ ${items.length} vídeo(s) adicionado(s)`);
+                setTimeout(()=>{setShowBulkPaste(false);setBulkText("");setBulkStatus("")},800);
+              }} style={{flex:2,padding:10,borderRadius:4,cursor:"pointer",background:"linear-gradient(135deg,#ffca28,#ffa000)",border:"none",color:"#000",fontSize:12,fontWeight:700}}>📥 Importar</button>
+            </div>
+          </div>
+        </div>}
 
         {/* Start time */}
         <div><label style={lS}>HORÁRIO DE INÍCIO</label>
