@@ -348,7 +348,7 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
             <label style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:gcAlways?"rgba(156,39,176,0.12)":"rgba(255,255,255,0.02)",border:gcAlways?"1px solid rgba(156,39,176,0.4)":"1px solid rgba(255,255,255,0.06)",borderRadius:6,cursor:"pointer"}}>
               <input type="checkbox" checked={gcAlways} onChange={e=>setGcAlways(e.target.checked)} style={{width:16,height:16,accentColor:"#9c27b0",cursor:"pointer"}}/>
               <div><div style={{fontSize:13,fontWeight:600,color:gcAlways?"#ce93d8":"#ccc"}}>♪ GC durante todo o programa</div>
-              <div style={{fontSize:11,color:"#777"}}>O GC fica fixo na tela enquanto este programa estiver no ar (sem ele, aparece no 5º segundo e fica 25s)</div></div>
+              <div style={{fontSize:11,color:"#777"}}>Escolha manual: o GC fica fixo na tela enquanto este programa estiver no ar (em canais comuns o GC não entra sozinho; em canais 🎵 ele já entra no início/fim dos clipes)</div></div>
             </label>
             <label style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:maratona?"rgba(255,202,40,0.10)":"rgba(255,255,255,0.02)",border:maratona?"1px solid rgba(255,202,40,0.4)":"1px solid rgba(255,255,255,0.06)",borderRadius:6,cursor:"pointer"}}>
               <input type="checkbox" checked={maratona} onChange={e=>setMaratona(e.target.checked)} style={{width:16,height:16,accentColor:"#ffca28",cursor:"pointer"}}/>
@@ -478,15 +478,16 @@ function ChannelEditor({channels,onUpdate,onAdd,onDelete}){
   const [logoUrl,setLU]=useState(null);
   const [cor,setCor]=useState("");
   const [gcAlways,setGcAlways]=useState(false);
+  const [isMusic,setIsMusic]=useState(false);
   const [eternity,setEternity]=useState(false);
   const [eternityDays,setEternityDays]=useState(1);
   const [saving,setSaving]=useState(false);
 
-  const startEdit=(ch)=>{setEditing(ch.id);setNome(ch.nome);setLogo(ch.logo);setLT(ch.logoType||"emoji");setLU(ch.logoUrl||null);setCor(ch.cor);setNumber(ch.numero||0);setGcAlways(ch.gcAlways||false);setEternity(ch.eternity||false);setEternityDays(ch.eternityDays||1)};
+  const startEdit=(ch)=>{setEditing(ch.id);setNome(ch.nome);setLogo(ch.logo);setLT(ch.logoType||"emoji");setLU(ch.logoUrl||null);setCor(ch.cor);setNumber(ch.numero||0);setGcAlways(ch.gcAlways||false);setIsMusic(ch.isMusic||false);setEternity(ch.eternity||false);setEternityDays(ch.eternityDays||1)};
   const save=async()=>{
     setSaving(true);
     try {
-      const updated = {nome,numero,logo,logoType,logoUrl,cor,gcAlways,eternity,eternityDays:Number(eternityDays)||1};
+      const updated = {nome,numero,logo,logoType,logoUrl,cor,gcAlways,isMusic,eternity,eternityDays:Number(eternityDays)||1};
       await updateDoc(doc(db,"channels",editing), updated);
       setEditing(null);
     } catch(err) {
@@ -517,10 +518,15 @@ function ChannelEditor({channels,onUpdate,onAdd,onDelete}){
         {/* GC + Eternity */}
         <div><label style={lS}>MODOS DO CANAL</label>
           <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            <label style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:isMusic?"rgba(0,255,127,0.08)":"rgba(255,255,255,0.02)",border:isMusic?"1px solid rgba(0,255,127,0.35)":"1px solid rgba(255,255,255,0.06)",borderRadius:6,cursor:"pointer"}}>
+              <input type="checkbox" checked={isMusic} onChange={e=>setIsMusic(e.target.checked)} style={{width:16,height:16,accentColor:"#00e676",cursor:"pointer"}}/>
+              <div><div style={{fontSize:13,fontWeight:600,color:isMusic?"#69f0ae":"#ccc"}}>🎵 Canal de Música (GC automático de clipes)</div>
+              <div style={{fontSize:11,color:"#777"}}>O GC entra sozinho no início e no fim de cada clipe, mostrando a música que está tocando + a próxima (estilo canal de clipes)</div></div>
+            </label>
             <label style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:gcAlways?"rgba(156,39,176,0.12)":"rgba(255,255,255,0.02)",border:gcAlways?"1px solid rgba(156,39,176,0.4)":"1px solid rgba(255,255,255,0.06)",borderRadius:6,cursor:"pointer"}}>
               <input type="checkbox" checked={gcAlways} onChange={e=>setGcAlways(e.target.checked)} style={{width:16,height:16,accentColor:"#9c27b0",cursor:"pointer"}}/>
               <div><div style={{fontSize:13,fontWeight:600,color:gcAlways?"#ce93d8":"#ccc"}}>♪ GC sempre ativo neste canal</div>
-              <div style={{fontSize:11,color:"#777"}}>O GC fica fixo na tela em todos os programas deste canal</div></div>
+              <div style={{fontSize:11,color:"#777"}}>Escolha manual: o GC fica fixo na tela em todos os programas (canais comuns não têm GC automático)</div></div>
             </label>
             <label style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:eternity?"rgba(0,188,212,0.10)":"rgba(255,255,255,0.02)",border:eternity?"1px solid rgba(0,188,212,0.4)":"1px solid rgba(255,255,255,0.06)",borderRadius:6,cursor:"pointer"}}>
               <input type="checkbox" checked={eternity} onChange={e=>setEternity(e.target.checked)} style={{width:16,height:16,accentColor:"#00bcd4",cursor:"pointer"}}/>
@@ -880,7 +886,7 @@ export default function AdminPanel(){
 
         {/* Channel selector */}
         <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:16}}>
-          {channels.filter(c=>!c.isInfo).map(c=><button key={c.id} onClick={()=>setSelCh(c.id)} style={{padding:"8px 14px",borderRadius:6,cursor:"pointer",background:selCh===c.id?`${c.cor}33`:"rgba(255,255,255,0.04)",border:selCh===c.id?`1px solid ${c.cor}`:"1px solid rgba(255,255,255,0.08)",color:selCh===c.id?"#fff":"#aaa",fontSize:12,fontWeight:600,display:"flex",alignItems:"center",gap:6}}><ChLogo ch={c} size={20}/> {c.nome}{c.eternity&&<span title="Eternity ativo" style={{color:"#4dd0e1",fontWeight:800}}>∞</span>}</button>)}
+          {channels.filter(c=>!c.isInfo).map(c=><button key={c.id} onClick={()=>setSelCh(c.id)} style={{padding:"8px 14px",borderRadius:6,cursor:"pointer",background:selCh===c.id?`${c.cor}33`:"rgba(255,255,255,0.04)",border:selCh===c.id?`1px solid ${c.cor}`:"1px solid rgba(255,255,255,0.08)",color:selCh===c.id?"#fff":"#aaa",fontSize:12,fontWeight:600,display:"flex",alignItems:"center",gap:6}}><ChLogo ch={c} size={20}/> {c.nome}{c.isMusic&&<span title="Canal de Música — GC automático" style={{fontSize:11}}>🎵</span>}{c.eternity&&<span title="Eternity ativo" style={{color:"#4dd0e1",fontWeight:800}}>∞</span>}</button>)}
         </div>
 
         {/* ETERNITY quick toggle for selected channel */}
