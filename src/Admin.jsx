@@ -535,11 +535,15 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
                 onChange={e=>{const nv=[...videos];nv[i]={...v,youtubeUrl:e.target.value};setVideos(nv)}}
                 placeholder="Cole a URL do YouTube" style={{...iS,flex:1}}/>
               <input value={v.titulo||""} onChange={e=>{const nv=[...videos];nv[i]={...v,titulo:e.target.value};setVideos(nv)}} placeholder="Título" style={{...iS,width:120}}/>
-              {extractPlaylistId(v.youtubeUrl)&&<button title="Detectada URL de playlist — importar todos os vídeos" onClick={async()=>{
+              {extractPlaylistId(v.youtubeUrl)&&<button title="Detectada URL de playlist — buscar títulos dos vídeos" onClick={async()=>{
                 const plId=extractPlaylistId(v.youtubeUrl);
-                setError("🌐 Baixando playlist...");
+                setError("🌐 Consultando o YouTube...");
                 const items=await fetchYouTubePlaylistItems(plId);
-                if(items.length===0){setError("❌ Playlist não retornou vídeos. Verifique se é pública e se a YouTube Data API está habilitada na chave (firebase.js).");return}
+                if(items.length===0){
+                  const detail=window.__ytLastError||"resposta vazia";
+                  setError(`❌ ${detail}. ${detail.includes("forbidden")||detail.includes("blocked")?"HABILITE a YouTube Data API v3 no Google Cloud (Biblioteca → YouTube Data API v3 → ATIVAR) — os vídeos continuam sendo servidos pelo YouTube normalmente, a API só busca os títulos.":"Verifique se a playlist é pública."}`);
+                  return;
+                }
                 const before=videos.slice(0,i).filter(x=>x.youtubeUrl.trim()&&!extractPlaylistId(x.youtubeUrl));
                 const after=videos.slice(i+1).filter(x=>x.youtubeUrl.trim());
                 setVideos([...before,...items,...after]);
@@ -561,7 +565,7 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
             </div>
             <div style={{fontSize:12,color:"#aaa",marginBottom:12,lineHeight:1.5}}>
               Cole aqui várias URLs do YouTube (uma por linha, ou separadas por espaço/vírgula).<br/>
-              Também aceita uma URL de <b>playlist</b> tipo <code style={{background:"rgba(255,255,255,0.06)",padding:"1px 5px",borderRadius:3,fontSize:11}}>youtube.com/playlist?list=PL...</code> — os vídeos são baixados automaticamente.
+              Também aceita uma URL de <b>playlist</b> tipo <code style={{background:"rgba(255,255,255,0.06)",padding:"1px 5px",borderRadius:3,fontSize:11}}>youtube.com/playlist?list=PL...</code> — os títulos são consultados via YouTube Data API. <span style={{color:"#777"}}>(Os vídeos continuam sendo servidos direto pelo YouTube em iframe, não são copiados.)</span>
             </div>
             <textarea value={bulkText} onChange={e=>setBulkText(e.target.value)}
               placeholder={"https://youtu.be/dQw4w9WgXcQ\nhttps://youtu.be/9bZkp7q19f0\nhttps://youtube.com/watch?v=..."}
