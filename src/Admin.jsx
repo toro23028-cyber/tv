@@ -318,6 +318,30 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
         <div><label style={lS}>NOME DO PROGRAMA</label>
           <input value={nome} onChange={e=>setNome(e.target.value)} placeholder="Ex: Documentário" style={{...iS,width:"100%"}}/></div>
 
+        {/* Videos */}
+        <div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+            <label style={{...lS,marginBottom:0}}>VÍDEOS</label>
+            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+              <span style={{fontSize:10,color:"#555"}}>{videos.length} vídeo(s)</span>
+              <input type="checkbox" checked={videos.length>0&&selectedVideos.size===videos.length} onChange={e=>{if(e.target.checked){const newSel=new Set();for(let i=0;i<videos.length;i++)newSel.add(i);setSelectedVideos(newSel)}else{setSelectedVideos(new Set())}}} title="Marcar/desmarcar todos" style={{width:14,height:14,cursor:"pointer",accentColor:"#4caf50"}}/>
+              <button onClick={async()=>{const videoCopy=[...videos];for(let i=0;i<videoCopy.length;i++){const vId=extractYouTubeId(videoCopy[i].youtubeUrl);if(vId){const meta=await fetchYouTubeMetadata(vId);if(meta){const nv=[...videoCopy];nv[i]={...nv[i],youtubeUrl:videoCopy[i].youtubeUrl,titulo:meta.title};setVideos(nv);videoCopy[i]=nv[i];if(i===0){setCH(Math.floor(meta.duration/3600));setCM(Math.floor((meta.duration%3600)/60));setSinopse(meta.description)}}}}}} style={{fontSize:10,color:"#4caf50",background:"rgba(76,175,80,0.1)",border:"1px solid rgba(76,175,80,0.3)",padding:"2px 8px",borderRadius:3,cursor:"pointer",fontWeight:600}}>🔍 Buscar Todos</button>
+            </div>
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            {videos.map((v,i)=><div key={i} style={{display:"flex",gap:8,alignItems:"center",padding:"8px 10px",background:"rgba(255,255,255,0.02)",borderRadius:4,border:"1px solid rgba(255,255,255,0.06)"}}>
+              <input type="checkbox" checked={selectedVideos.has(i)} onChange={()=>{const newSel=new Set(selectedVideos);if(newSel.has(i))newSel.delete(i);else newSel.add(i);setSelectedVideos(newSel)}} style={{width:16,height:16,cursor:"pointer",accentColor:"#4caf50",flexShrink:0}}/>
+              <span style={{fontSize:11,color:"#555",fontWeight:700,minWidth:20}}>#{i+1}</span>
+              {(()=>{const t=ytThumb(v.youtubeUrl);return t?<img src={t} alt="" style={{width:40,height:26,borderRadius:3,objectFit:"cover"}}/>:null})()}
+              <input value={v.youtubeUrl} onChange={e=>{const nv=[...videos];nv[i]={...v,youtubeUrl:e.target.value};setVideos(nv)}} placeholder="YouTube URL ou ID" style={{...iS,flex:1}}/>
+              <input value={v.titulo||""} onChange={e=>{const nv=[...videos];nv[i]={...v,titulo:e.target.value};setVideos(nv)}} placeholder="Título" style={{...iS,width:120}}/>
+              <button onClick={async()=>{const vId=extractYouTubeId(v.youtubeUrl);if(!vId){setError("URL YouTube inválida");return}const meta=await fetchYouTubeMetadata(vId);if(meta){const nv=[...videos];nv[i]={...nv[i],youtubeUrl:v.youtubeUrl,titulo:meta.title};setVideos(nv);setCH(Math.floor(meta.duration/3600));setCM(Math.floor((meta.duration%3600)/60));setSinopse(meta.description);setError("")}else setError("Erro ao buscar vídeo")}} style={{background:"rgba(26,115,232,0.15)",border:"1px solid rgba(26,115,232,0.3)",color:"#4fc3f7",padding:"6px 10px",borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:600,whiteSpace:"nowrap"}}>🔍 Buscar</button>
+              {videos.length>1&&<button onClick={()=>setVideos(videos.filter((_,j)=>j!==i))} style={{background:"none",border:"none",color:"#f44336",cursor:"pointer",fontSize:14}}>✕</button>}
+            </div>)}
+          </div>
+          <button onClick={()=>setVideos([...videos,{youtubeUrl:"",titulo:""}])} style={{marginTop:8,padding:"8px 14px",borderRadius:4,cursor:"pointer",background:"rgba(76,175,80,0.1)",border:"1px solid rgba(76,175,80,0.3)",color:"#4caf50",fontSize:12,fontWeight:600,width:"100%"}}>+ Adicionar vídeo</button>
+        </div>
+
         {/* Start time */}
         <div><label style={lS}>HORÁRIO DE INÍCIO</label>
           <div style={{display:"flex",gap:6,marginBottom:8}}>
@@ -368,29 +392,6 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
           </div>
         </div>
 
-        {/* Videos */}
-        <div>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-            <label style={{...lS,marginBottom:0}}>VÍDEOS</label>
-            <div style={{display:"flex",gap:8,alignItems:"center"}}>
-              <span style={{fontSize:10,color:"#555"}}>{videos.length} vídeo(s)</span>
-              <input type="checkbox" checked={videos.length>0&&selectedVideos.size===videos.length} onChange={e=>{if(e.target.checked){const newSel=new Set();for(let i=0;i<videos.length;i++)newSel.add(i);setSelectedVideos(newSel)}else{setSelectedVideos(new Set())}}} title="Marcar/desmarcar todos" style={{width:14,height:14,cursor:"pointer",accentColor:"#4caf50"}}/>
-              <button onClick={async()=>{const videoCopy=[...videos];for(let i=0;i<videoCopy.length;i++){const vId=extractYouTubeId(videoCopy[i].youtubeUrl);if(vId){const meta=await fetchYouTubeMetadata(vId);if(meta){const nv=[...videoCopy];nv[i]={...nv[i],youtubeUrl:videoCopy[i].youtubeUrl,titulo:meta.title};setVideos(nv);videoCopy[i]=nv[i];if(i===0){setCH(Math.floor(meta.duration/3600));setCM(Math.floor((meta.duration%3600)/60));setSinopse(meta.description)}}}}}} style={{fontSize:10,color:"#4caf50",background:"rgba(76,175,80,0.1)",border:"1px solid rgba(76,175,80,0.3)",padding:"2px 8px",borderRadius:3,cursor:"pointer",fontWeight:600}}>🔍 Buscar Todos</button>
-            </div>
-          </div>
-          <div style={{display:"flex",flexDirection:"column",gap:6}}>
-            {videos.map((v,i)=><div key={i} style={{display:"flex",gap:8,alignItems:"center",padding:"8px 10px",background:"rgba(255,255,255,0.02)",borderRadius:4,border:"1px solid rgba(255,255,255,0.06)"}}>
-              <input type="checkbox" checked={selectedVideos.has(i)} onChange={()=>{const newSel=new Set(selectedVideos);if(newSel.has(i))newSel.delete(i);else newSel.add(i);setSelectedVideos(newSel)}} style={{width:16,height:16,cursor:"pointer",accentColor:"#4caf50",flexShrink:0}}/>
-              <span style={{fontSize:11,color:"#555",fontWeight:700,minWidth:20}}>#{i+1}</span>
-              {(()=>{const t=ytThumb(v.youtubeUrl);return t?<img src={t} alt="" style={{width:40,height:26,borderRadius:3,objectFit:"cover"}}/>:null})()}
-              <input value={v.youtubeUrl} onChange={e=>{const nv=[...videos];nv[i]={...v,youtubeUrl:e.target.value};setVideos(nv)}} placeholder="YouTube URL ou ID" style={{...iS,flex:1}}/>
-              <input value={v.titulo||""} onChange={e=>{const nv=[...videos];nv[i]={...v,titulo:e.target.value};setVideos(nv)}} placeholder="Título" style={{...iS,width:120}}/>
-              <button onClick={async()=>{const vId=extractYouTubeId(v.youtubeUrl);if(!vId){setError("URL YouTube inválida");return}const meta=await fetchYouTubeMetadata(vId);if(meta){const nv=[...videos];nv[i]={...nv[i],youtubeUrl:v.youtubeUrl,titulo:meta.title};setVideos(nv);setCH(Math.floor(meta.duration/3600));setCM(Math.floor((meta.duration%3600)/60));setSinopse(meta.description);setError("")}else setError("Erro ao buscar vídeo")}} style={{background:"rgba(26,115,232,0.15)",border:"1px solid rgba(26,115,232,0.3)",color:"#4fc3f7",padding:"6px 10px",borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:600,whiteSpace:"nowrap"}}>🔍 Buscar</button>
-              {videos.length>1&&<button onClick={()=>setVideos(videos.filter((_,j)=>j!==i))} style={{background:"none",border:"none",color:"#f44336",cursor:"pointer",fontSize:14}}>✕</button>}
-            </div>)}
-          </div>
-          <button onClick={()=>setVideos([...videos,{youtubeUrl:"",titulo:""}])} style={{marginTop:8,padding:"8px 14px",borderRadius:4,cursor:"pointer",background:"rgba(76,175,80,0.1)",border:"1px solid rgba(76,175,80,0.3)",color:"#4caf50",fontSize:12,fontWeight:600,width:"100%"}}>+ Adicionar vídeo</button>
-        </div>
 
         {/* Thumbnail */}
         <div><label style={lS}>THUMBNAIL</label>
