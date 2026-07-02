@@ -204,13 +204,17 @@ function shareProgram(prog,ch){ const text=`📺 ${prog.nome}\n🕐 ${prog.horar
 function scheduleNotif(prog,ch,min=5){ const ns=getNow();const ts=prog.horarioInicio-min*60;const delay=(ts-ns)*1000;if(delay<=0){alert("Já começou!");return}if(!("Notification"in window)){alert("Sem suporte.");return}Notification.requestPermission().then(p=>{if(p!=="granted")return;setTimeout(()=>{new Notification(`📺 ${prog.nome} em ${min}min!`,{body:`${ch?.nome} · ${prog.horarioTexto}`})},delay);alert(`✅ Lembrete definido!`)}) }
 
 // ============================================
-// GC (Gerador de Caracteres) - lower-third de música/programa
-// Aparece 5s após o início do clipe (ou troca de canal), fica 25s.
-// gcAlways (no programa OU no canal) = fica na tela o tempo todo.
-// Maior e afastado das bordas (clipes pré-HDTV têm faixas pretas).
+// GC (Gerador de Caracteres) - lower-third estilo canal de clipes
+// AUTOMÁTICO somente em canais de MÚSICA (channel.isMusic):
+//   • entra no INÍCIO do clipe (5s após sintonizar/trocar, fica 25s)
+//   • volta no FIM do clipe (faltando 30s, sai faltando 5s) — como MTV/canais de clipe
+//   • mostra a música que está tocando + a próxima
+// Nos DEMAIS canais o GC NÃO entra sozinho: só aparece se você escolher
+// (gcAlways no programa ou no canal) = fica fixo na tela.
 // ============================================
-const GC_DELAY=5, GC_DURATION=25;
-function GCBar({channel,program}){
+const GC_DELAY=5, GC_DURATION=25, GC_END_LEAD=30;
+function GCBar({channel,program,nextProgram}){
+  const isMusic=!!channel?.isMusic;
   const gcAlways=!!(program?.gcAlways||channel?.gcAlways);
   const [visible,setVisible]=useState(false);
   const sessionStartRef=useRef(Date.now());
@@ -222,23 +226,36 @@ function GCBar({channel,program}){
   useEffect(()=>{
     if(!program||program.isPlaceholder){setVisible(false);return}
     if(gcAlways){setVisible(true);return}
+    if(!isMusic){setVisible(false);return} // canal comum: GC só se escolhido manualmente
     const upd=()=>{
-      const el=(Date.now()-sessionStartRef.current)/1000;
-      setVisible(el>=GC_DELAY&&el<GC_DELAY+GC_DURATION);
+      const el=(Date.now()-sessionStartRef.current)/1000;              // desde sintonizar/trocar de clipe
+      const remaining=(program.fimReal??program.horarioFim)-getNow();  // até o fim REAL do clipe
+      const inicio=el>=GC_DELAY&&el<GC_DELAY+GC_DURATION;
+      const fim=remaining<=GC_END_LEAD&&remaining>GC_END_LEAD-GC_DURATION;
+      setVisible(inicio||fim);
     };
     upd();
     const i=setInterval(upd,500);
     return()=>clearInterval(i);
-  },[contKey,channel?.id,gcAlways,program]);
+  },[contKey,channel?.id,gcAlways,isMusic,program]);
 
-  if(!program||program.isPlaceholder)return null;
-  const videoTitle=program.videos?.[0]?.titulo||"";
-  const sub=videoTitle&&videoTitle!==program.nome?videoTitle:(channel?.nome||"");
+  if(!program||program.isPlaceholder||!visible)return null;
+
+  // Canais de música: título = faixa tocando; sub = próxima faixa
+  const nowTitle=isMusic?(program.videos?.[0]?.titulo||program.nome):program.nome;
+  let nextTitle=null;
+  if(isMusic){
+    if(program.videos?.[1]?.titulo)nextTitle=program.videos[1].titulo;
+    else if(nextProgram&&!nextProgram.isPlaceholder&&(nextProgram.contKey||nextProgram.id)!==contKey)
+      nextTitle=nextProgram.videos?.[0]?.titulo||nextProgram.nome;
+  }
+  const sub=isMusic
+    ?(nextTitle?`A seguir: ${nextTitle}`:null)
+    :((program.videos?.[0]?.titulo&&program.videos[0].titulo!==program.nome)?program.videos[0].titulo:(channel?.nome||null));
+
   return <div style={{
     position:"absolute",left:"7%",bottom:"16%",zIndex:9,maxWidth:"62%",
-    transform:visible?"translateX(0)":"translateX(-120%)",
-    opacity:visible?1:0,
-    transition:"transform 0.5s cubic-bezier(0.22,1,0.36,1), opacity 0.4s",
+    animation:"gcIn 0.5s cubic-bezier(0.22,1,0.36,1)",
     pointerEvents:"none",
   }}>
     <div style={{
@@ -250,9 +267,10 @@ function GCBar({channel,program}){
       <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
         <span style={{fontSize:18}}>♪</span>
         <span style={{fontSize:14,fontWeight:800,color:channel?.cor||"#4fc3f7",letterSpacing:2,textTransform:"uppercase"}}>{channel?.nome||"TVWEB"}</span>
+        {isMusic&&<span style={{fontSize:11,fontWeight:800,color:"#0f0",background:"rgba(0,255,0,0.1)",border:"1px solid rgba(0,255,0,0.25)",padding:"2px 8px",borderRadius:3,letterSpacing:1}}>TOCANDO AGORA</span>}
         {program.blocoInfo&&<span style={{fontSize:12,fontWeight:700,color:"#bbb",background:"rgba(255,255,255,0.12)",padding:"2px 8px",borderRadius:3}}>BLOCO {program.blocoInfo.i}/{program.blocoInfo.total}</span>}
       </div>
-      <div style={{fontSize:30,fontWeight:800,color:"#fff",lineHeight:1.15,textShadow:"0 2px 8px rgba(0,0,0,0.8)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{program.nome}</div>
+      <div style={{fontSize:30,fontWeight:800,color:"#fff",lineHeight:1.15,textShadow:"0 2px 8px rgba(0,0,0,0.8)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{nowTitle}</div>
       {sub&&<div style={{fontSize:17,fontWeight:500,color:"#ccc",marginTop:5,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{sub}</div>}
     </div>
   </div>;
@@ -737,7 +755,7 @@ export default function TVWeb(){
     }}>🔇 Clique para ativar o som</button>}
 
     {/* ===== GC (lower-third de música/programa) ===== */}
-    {!showEPG&&!showFull&&<GCBar channel={ch} program={cp}/>}
+    {!showEPG&&!showFull&&<GCBar channel={ch} program={cp} nextProgram={np}/>}
 
     {/* ===== OSD HEADER (TV-style, 20s) ===== */}
     <OSDHeader channel={ch} program={cp} visible={showOSD&&!showEPG&&!showFull}/>
@@ -761,6 +779,7 @@ export default function TVWeb(){
       @keyframes slideUp{from{transform:translateY(100%);opacity:0}to{transform:translateY(0);opacity:1}}
       @keyframes slideDown{from{transform:translateY(-20px);opacity:0}to{transform:translateY(0);opacity:1}}
       @keyframes pulseFull{0%,100%{opacity:.6;transform:translate(-50%,50%) scale(1)}50%{opacity:1;transform:translate(-50%,50%) scale(1.05)}}
+      @keyframes gcIn{from{transform:translateX(-40px);opacity:0}to{transform:translateX(0);opacity:1}}
       ::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:rgba(255,255,255,.02)}::-webkit-scrollbar-thumb{background:rgba(255,255,255,.1);border-radius:3px}
       *{box-sizing:border-box;margin:0;padding:0}
     `}</style>
