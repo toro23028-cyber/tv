@@ -393,13 +393,31 @@ function EPGCompact({channels,allPrograms,currentChannelId,onSelectChannel,onSel
   const nowPx=(now/86400)*totalW;
   const secToPx=(sec)=>(Number(sec)/86400)*totalW;
   const[clock,setClock]=useState(new Date());
+  const[canScrollL,setCanScrollL]=useState(false);
+  const[canScrollR,setCanScrollR]=useState(true);
   useEffect(()=>{const i=setInterval(()=>setClock(new Date()),1000);return()=>clearInterval(i)},[]);
 
+  const updScrollState=()=>{
+    const el=scrollRef.current; if(!el)return;
+    setCanScrollL(el.scrollLeft>10);
+    setCanScrollR(el.scrollLeft+el.clientWidth<el.scrollWidth-10);
+  };
   useEffect(()=>{
-    if(scrollRef.current) scrollRef.current.scrollLeft=Math.max(0,nowPx-260);
+    const el=scrollRef.current; if(!el)return;
+    // Posiciona no "agora" (com margem à esquerda para mostrar o que já passou)
+    el.scrollLeft=Math.max(0,nowPx-260);
+    updScrollState();
+    const on=()=>updScrollState();
+    el.addEventListener("scroll",on);
+    return()=>el.removeEventListener("scroll",on);
   },[]);
 
-  const scroll=(dir)=>{if(scrollRef.current)scrollRef.current.scrollLeft+=dir*400};
+  // Rola por passos de "meia tela" — comportamento igual ao Globoplay
+  const scroll=(dir)=>{
+    const el=scrollRef.current; if(!el)return;
+    const step=Math.max(300,el.clientWidth*0.6);
+    el.scrollTo({left:el.scrollLeft+dir*step,behavior:"smooth"});
+  };
 
   return <div onClick={e=>e.stopPropagation()} style={{position:"absolute",bottom:0,left:0,right:0,zIndex:20,animation:"slideUp 0.3s ease"}}>
     <div style={{background:"rgba(10,12,18,0.98)",borderTop:"1px solid rgba(255,255,255,0.1)",padding:"10px 20px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
@@ -415,9 +433,11 @@ function EPGCompact({channels,allPrograms,currentChannelId,onSelectChannel,onSel
     </div>
     {/* GRADE: UM único container de scroll (X e Y) — coluna de canais e grade
         se movem SEMPRE juntas. Canais = sticky à esquerda; horas = sticky no topo.
-        Rolar para baixo revela a programação de TODOS os canais. */}
-    <div ref={scrollRef} style={{background:"rgba(10,12,18,0.98)",overflow:"auto",maxHeight:"60vh",minHeight:320}}>
-      <div style={{width:140+totalW,position:"relative"}}>
+        Rolar para baixo revela a programação de TODOS os canais.
+        Botões laterais (‹ ›) fazem navegação horizontal — sem scrollbar visível. */}
+    <div style={{position:"relative"}}>
+      <div ref={scrollRef} className="epg-scroll" style={{background:"rgba(10,12,18,0.98)",overflow:"auto",maxHeight:"60vh",minHeight:320,scrollbarWidth:"none"}}>
+        <div style={{width:140+totalW,position:"relative"}}>
         {/* Linha vermelha do AGORA (atravessa todas as linhas) */}
         <div style={{position:"absolute",left:140+nowPx,top:35,bottom:0,width:3,background:"#ff3b3b",zIndex:6,boxShadow:"0 0 12px #ff3b3b",pointerEvents:"none"}}/>
         {/* HEADER de horas — sticky no topo */}
@@ -443,18 +463,19 @@ function EPGCompact({channels,allPrograms,currentChannelId,onSelectChannel,onSel
               <div style={{textAlign:"center"}}><ChLogo ch={ch} size={36}/><div style={{fontSize:12,fontWeight:600,color:isCurrent?"#fff":"#888",marginTop:4}}>{ch.nome}</div></div>
             </div>
             <div style={{position:"relative",height:ROW_H,width:totalW,flexShrink:0,borderBottom:"1px solid rgba(255,255,255,0.05)",background:isCurrent?"rgba(26,115,232,0.08)":"transparent",boxSizing:"border-box"}}>
-              {sched.filter(p=>Number(p.horarioFim)<=86400&&!p.isPlaceholder&&Number(p.horarioFim)>getNow()).map(prog=>{
+              {sched.filter(p=>Number(p.horarioFim)<=86400&&!p.isPlaceholder).map(prog=>{
                 const startSec=Number(prog.horarioInicio), dur=Number(prog.duracao);
                 const left=secToPx(startSec), w=Math.max(secToPx(dur),80);
                 const isNow=cur?.id===prog.id;
+                const isPast=Number(prog.horarioFim)<=now;
                 const needsRepeat=w>500;
                 const needsTriple=w>900;
                 return <div key={prog.id} onClick={()=>{onSelectChannel(ch.id);onSelectProgram(prog)}}
-                  style={{position:"absolute",left,width:w,top:0,bottom:2,cursor:"pointer",overflow:"hidden",background:isNow?isCurrent?"rgba(60,70,90,0.95)":"rgba(40,44,60,0.95)":isCurrent?"rgba(35,40,55,0.7)":"rgba(30,32,44,0.6)",borderRight:"1px solid rgba(255,255,255,0.06)",borderLeft:"1px solid rgba(255,255,255,0.03)",boxSizing:"border-box",transition:"background 0.2s"}}
-                  onMouseEnter={e=>e.currentTarget.style.background=isNow?isCurrent?"rgba(70,85,110,1)":"rgba(60,70,90,1)":isCurrent?"rgba(50,60,75,0.9)":"rgba(45,50,65,0.9)"}
-                  onMouseLeave={e=>e.currentTarget.style.background=isNow?isCurrent?"rgba(60,70,90,0.95)":"rgba(40,44,60,0.95)":isCurrent?"rgba(35,40,55,0.7)":"rgba(30,32,44,0.6)"}>
+                  style={{position:"absolute",left,width:w,top:0,bottom:2,cursor:"pointer",overflow:"hidden",background:isNow?isCurrent?"rgba(60,70,90,0.95)":"rgba(40,44,60,0.95)":isCurrent?"rgba(35,40,55,0.7)":"rgba(30,32,44,0.6)",borderRight:"1px solid rgba(255,255,255,0.06)",borderLeft:"1px solid rgba(255,255,255,0.03)",boxSizing:"border-box",transition:"background 0.2s",opacity:isPast?0.42:1}}
+                  onMouseEnter={e=>{e.currentTarget.style.background=isNow?isCurrent?"rgba(70,85,110,1)":"rgba(60,70,90,1)":isCurrent?"rgba(50,60,75,0.9)":"rgba(45,50,65,0.9)";if(isPast)e.currentTarget.style.opacity=0.7}}
+                  onMouseLeave={e=>{e.currentTarget.style.background=isNow?isCurrent?"rgba(60,70,90,0.95)":"rgba(40,44,60,0.95)":isCurrent?"rgba(35,40,55,0.7)":"rgba(30,32,44,0.6)";if(isPast)e.currentTarget.style.opacity=0.42}}>
                   <div style={{position:"absolute",left:12,top:10,right:12}}>
-                    <div style={{fontSize:11,color:"#aaa",marginBottom:4,fontWeight:500}}>{prog.horarioTexto}{isNow&&<span style={{marginLeft:6,fontSize:9,fontWeight:700,padding:"2px 6px",borderRadius:3,background:"#f44336",color:"#fff"}}>AO VIVO</span>}</div>
+                    <div style={{fontSize:11,color:"#aaa",marginBottom:4,fontWeight:500}}>{prog.horarioTexto}{isNow&&<span style={{marginLeft:6,fontSize:9,fontWeight:700,padding:"2px 6px",borderRadius:3,background:"#f44336",color:"#fff"}}>AO VIVO</span>}{isPast&&<span style={{marginLeft:6,fontSize:9,fontWeight:700,padding:"2px 6px",borderRadius:3,background:"rgba(255,255,255,0.12)",color:"#aaa"}}>JÁ EXIBIDO</span>}</div>
                     <div style={{fontSize:15,fontWeight:700,color:isNow?"#fff":"#ddd",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{prog.nome}</div>
                   </div>
                   {needsRepeat&&<div style={{position:"absolute",left:"50%",top:"50%",transform:"translate(-50%,-50%)",textAlign:"center"}}>
@@ -469,11 +490,15 @@ function EPGCompact({channels,allPrograms,currentChannelId,onSelectChannel,onSel
             </div>
           </div>;
         })}
+        </div>
       </div>
+      {/* Botões laterais estilo Globoplay — só aparecem quando dá pra rolar */}
+      <button onClick={()=>scroll(-1)} disabled={!canScrollL} title="Ver mais cedo (Shift+←)" style={{position:"absolute",left:6,top:"50%",transform:"translateY(-50%)",zIndex:20,width:44,height:70,borderRadius:6,background:"rgba(0,0,0,0.72)",border:"1px solid rgba(255,255,255,0.18)",color:canScrollL?"#fff":"#555",cursor:canScrollL?"pointer":"default",fontSize:26,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",transition:"opacity 0.2s",opacity:canScrollL?1:0.35,pointerEvents:canScrollL?"auto":"none",backdropFilter:"blur(6px)"}}>‹</button>
+      <button onClick={()=>scroll(1)} disabled={!canScrollR} title="Ver mais tarde (Shift+→)" style={{position:"absolute",right:6,top:"50%",transform:"translateY(-50%)",zIndex:20,width:44,height:70,borderRadius:6,background:"rgba(0,0,0,0.72)",border:"1px solid rgba(255,255,255,0.18)",color:canScrollR?"#fff":"#555",cursor:canScrollR?"pointer":"default",fontSize:26,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",transition:"opacity 0.2s",opacity:canScrollR?1:0.35,pointerEvents:canScrollR?"auto":"none",backdropFilter:"blur(6px)"}}>›</button>
     </div>
     <div style={{background:"rgba(10,12,18,0.98)",padding:"10px 16px",borderTop:"1px solid rgba(255,255,255,0.06)",display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,color:"#666"}}>
       <button onClick={()=>scroll(-1)} style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",color:"#aaa",padding:"8px 16px",borderRadius:4,cursor:"pointer",fontSize:13}}>← Anterior</button>
-      <div style={{display:"flex",gap:24}}><span>↕ Rolar = Ver todos os canais</span><span>↑↓ = Canal</span><span>ESC = Fechar</span><span>G = Guia</span></div>
+      <div style={{display:"flex",gap:24,flexWrap:"wrap"}}><span>‹ › = Navegar no tempo</span><span>↕ Rolar = Todos os canais</span><span>↑↓ = Canal</span><span>Shift+←→ = Tempo</span><span>ESC = Fechar</span></div>
       <button onClick={()=>scroll(1)} style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",color:"#aaa",padding:"8px 16px",borderRadius:4,cursor:"pointer",fontSize:13}}>Próximo →</button>
     </div>
   </div>;
@@ -679,6 +704,12 @@ export default function TVWeb(){
 
   // ========== KEYBOARD ==========
   useEffect(()=>{const h=e=>{
+    // Shift+←/→ dentro do guia = navegar no tempo (não trocar canal)
+    if(showEPG&&e.shiftKey&&(e.key==="ArrowLeft"||e.key==="ArrowRight")){
+      const el=document.querySelector(".epg-scroll");
+      if(el){const step=Math.max(300,el.clientWidth*0.6);el.scrollTo({left:el.scrollLeft+(e.key==="ArrowRight"?1:-1)*step,behavior:"smooth"})}
+      e.preventDefault(); return;
+    }
     if(e.key==="ArrowUp")swDir(-1);
     else if(e.key==="ArrowDown")swDir(1);
     else if(e.key==="Escape"){setEPG(false);setFull(false);setSP(null)}
@@ -782,6 +813,9 @@ export default function TVWeb(){
       @keyframes slideDown{from{transform:translateY(-20px);opacity:0}to{transform:translateY(0);opacity:1}}
       @keyframes pulseFull{0%,100%{opacity:.6;transform:translate(-50%,50%) scale(1)}50%{opacity:1;transform:translate(-50%,50%) scale(1.05)}}
       @keyframes gcIn{from{transform:translateX(-40px);opacity:0}to{transform:translateX(0);opacity:1}}
+      .epg-scroll::-webkit-scrollbar{height:0;width:8px}
+      .epg-scroll::-webkit-scrollbar-track{background:transparent}
+      .epg-scroll::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.15);border-radius:4px}
       ::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:rgba(255,255,255,.02)}::-webkit-scrollbar-thumb{background:rgba(255,255,255,.1);border-radius:3px}
       *{box-sizing:border-box;margin:0;padding:0}
     `}</style>
