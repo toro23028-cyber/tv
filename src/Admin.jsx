@@ -45,6 +45,38 @@ function computeBlocos(horarioInicio,duracao,blocoDuracao){
   }
   return out;
 }
+// ===== GRADE VISUAL (arrastar para corrigir) — matemática =====
+const SNAP=300; // encaixe de 5 minutos
+function snap5(s){return Math.round(s/SNAP)*SNAP}
+// Espaços livres do dia, dados os demais programas (último gap é aberto)
+function buildGaps(others){
+  const sorted=[...others].map(p=>({s:Number(p.horarioInicio),e:Number(p.horarioFim)})).sort((a,b)=>a.s-b.s);
+  const gaps=[];let cur=0;
+  for(const p of sorted){ if(p.s>cur)gaps.push([cur,p.s]); cur=Math.max(cur,p.e); }
+  gaps.push([cur,Infinity]);
+  return gaps;
+}
+// MOVE: retorna o início válido mais próximo do desejado (snap + sem sobrepor), ou null se nada comporta
+function resolvePosition(desiredStart,dur,others){
+  desiredStart=Math.max(0,Math.min(86400-SNAP,snap5(desiredStart)));
+  const gaps=buildGaps(others);
+  let best=null,bestDist=Infinity;
+  for(const [gs,ge] of gaps){
+    const maxStart=(ge===Infinity?86400-SNAP:ge-dur);
+    if(maxStart<gs)continue; // gap menor que o programa
+    const s=Math.max(gs,Math.min(desiredStart,maxStart));
+    const d=Math.abs(s-desiredStart);
+    if(d<bestDist){bestDist=d;best=s}
+  }
+  return best;
+}
+// RESIZE: limita a nova duração ao início do próximo programa (mín 5min; pode passar de 24h se livre)
+function resolveResize(start,desiredDur,others){
+  desiredDur=Math.max(SNAP,snap5(desiredDur));
+  const next=others.map(p=>Number(p.horarioInicio)).filter(s=>s>start).sort((a,b)=>a-b)[0];
+  if(next!==undefined&&start+desiredDur>next)desiredDur=next-start;
+  return Math.max(SNAP,desiredDur);
+}
 function dateSecondsToAbsolute(dateStr,secondsInDay){
   const targetDate=new Date(dateStr+"T00:00:00Z");
   const daysDiff=Math.floor((targetDate-BASE_DATE)/(1000*60*60*24));
@@ -86,15 +118,24 @@ function parseYouTubeBulk(text){
   return out;
 }
 // Busca os vídeos de uma playlist do YouTube (até 200) via Data API v3
+// Retorna array vazio E define window.__ytLastError com detalhe do erro (para debug do usuário)
 async function fetchYouTubePlaylistItems(playlistId){
-  if(!playlistId)return [];
+  window.__ytLastError=null;
+  if(!playlistId){window.__ytLastError="ID de playlist vazio";return []}
   const API_KEY="AIzaSyCt0t7IvYYPMXTfXB1zZ6AB4Na9JpL50EQ";
   const items=[];let pageToken="";
   try{
     for(let i=0;i<4;i++){ // até 4 páginas (200 vídeos)
       const url=`https://www.googleapis.com/youtube/v3/playlistItems?playlistId=${playlistId}&key=${API_KEY}&part=snippet&maxResults=50${pageToken?`&pageToken=${pageToken}`:""}`;
       const res=await fetch(url);
-      if(!res.ok)break;
+      if(!res.ok){
+        const errData=await res.json().catch(()=>({}));
+        const reason=errData?.error?.errors?.[0]?.reason||`HTTP ${res.status}`;
+        const msg=errData?.error?.message||"";
+        window.__ytLastError=`API: ${reason}${msg?" — "+msg:""}`;
+        console.error("YouTube API error:",errData);
+        break;
+      }
       const data=await res.json();
       for(const it of (data.items||[])){
         const vid=it.snippet?.resourceId?.videoId;
@@ -103,7 +144,10 @@ async function fetchYouTubePlaylistItems(playlistId){
       if(!data.nextPageToken)break;
       pageToken=data.nextPageToken;
     }
-  }catch(err){console.error("Playlist fetch err:",err)}
+  }catch(err){
+    window.__ytLastError=`Rede: ${err.message}`;
+    console.error("Playlist fetch err:",err);
+  }
   return items;
 }
 async function fetchYouTubeMetadata(videoId){
@@ -184,6 +228,110 @@ function ImgUploader({currentImage,imageType,onImageChange,label,shape="square"}
 // ============================================
 // TIMELINE WITH DRAG
 // ============================================
+// ============================================
+// GRADE VISUAL — edição por arrastar (estilo guia de TV)
+// • Arrastar o bloco = mudar horário de início (encaixe de 5min)
+// • Puxar a borda direita = mudar duração
+// • Solta em cima de outro programa → encaixa no espaço livre mais próximo
+// • Duplo clique = abrir edição completa
+// ============================================
+function GradeVisual({programs,channels,selectedChannel,selDate,onEdit,notify}){
+  const filtered=programs.filter(p=>p.canalId===selectedChannel).sort((a,b)=>Number(a.horarioInicio)-Number(b.horarioInicio));
+  const ch=channels.find(c=>c.id===selectedChannel);
+  const PXH=80, pxPerSec=PXH/3600, totalW=PXH*24, ROWH=92;
+  const [drag,setDrag]=useState(null); // {id,mode,start,dur,origStart,origDur,x0}
+  const scrollRef=useRef(null);
+  const isToday=selDate===getToday();
+  const nowSec=(()=>{const n=new Date();return n.getHours()*3600+n.getMinutes()*60+n.getSeconds()})();
+
+  useEffect(()=>{
+    const el=scrollRef.current;if(!el)return;
+    const first=filtered[0]?Number(filtered[0].horarioInicio):8*3600;
+    el.scrollLeft=Math.max(0,(isToday?nowSec:first)*pxPerSec-180);
+  },[selectedChannel,selDate]);
+
+  const startDrag=(e,p,mode)=>{
+    e.preventDefault();e.stopPropagation();
+    try{e.currentTarget.setPointerCapture?.(e.pointerId)}catch{}
+    setDrag({id:p.id,mode,start:Number(p.horarioInicio),dur:Number(p.duracao),origStart:Number(p.horarioInicio),origDur:Number(p.duracao),x0:e.clientX});
+  };
+  const moveDrag=(e)=>{
+    if(!drag)return;
+    const dSec=(e.clientX-drag.x0)/pxPerSec;
+    if(drag.mode==="move"){
+      const ns=Math.max(0,Math.min(86400-SNAP,snap5(drag.origStart+dSec)));
+      if(ns!==drag.start)setDrag(d=>({...d,start:ns}));
+    }else{
+      const nd=Math.max(SNAP,snap5(drag.origDur+dSec));
+      if(nd!==drag.dur)setDrag(d=>({...d,dur:nd}));
+    }
+  };
+  const endDrag=async()=>{
+    if(!drag)return;
+    const d={...drag};setDrag(null);
+    const p=filtered.find(x=>x.id===d.id);if(!p)return;
+    const others=filtered.filter(x=>x.id!==d.id);
+    try{
+      if(d.mode==="move"){
+        if(d.start===d.origStart)return;
+        const pos=resolvePosition(d.start,d.origDur,others);
+        if(pos===null){notify("❌ Não cabe: dia lotado neste canal");return}
+        await updateDoc(doc(db,"programs",String(p.id)),{horarioInicio:pos,horarioFim:pos+d.origDur});
+        notify(`✅ ${p.nome} → ${fmtSec(pos)}${pos!==d.start?" (encaixado)":""}`);
+      }else{
+        if(d.dur===d.origDur)return;
+        const nd=resolveResize(d.origStart,d.dur,others);
+        await updateDoc(doc(db,"programs",String(p.id)),{duracao:nd,horarioFim:d.origStart+nd});
+        notify(`✅ ${p.nome}: ${fDur(nd)}${nd!==d.dur?" (limitado ao próximo)":""}`);
+      }
+    }catch(err){console.error("Grade drag err:",err);notify("❌ Erro ao salvar no Firebase")}
+  };
+
+  return <div>
+    <div ref={scrollRef} className="grade-scroll" style={{overflowX:"auto",overflowY:"hidden",background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:8}}>
+      <div style={{width:totalW,position:"relative",height:ROWH+30,userSelect:"none"}}>
+        {/* Régua de horas */}
+        <div style={{position:"relative",height:26,borderBottom:"1px solid rgba(255,255,255,0.1)"}}>
+          {Array.from({length:25}).map((_,h)=><div key={h} style={{position:"absolute",left:h*PXH,top:0,bottom:0,borderLeft:"1px solid rgba(255,255,255,0.08)"}}>
+            <span style={{fontSize:10,color:"#888",fontWeight:600,paddingLeft:6,lineHeight:"26px"}}>{String(h).padStart(2,"0")}:00</span>
+          </div>)}
+        </div>
+        {/* Linhas de hora na área dos blocos */}
+        {Array.from({length:25}).map((_,h)=><div key={`l${h}`} style={{position:"absolute",left:h*PXH,top:26,bottom:0,borderLeft:"1px solid rgba(255,255,255,0.04)",pointerEvents:"none"}}/>)}
+        {/* Linha do agora */}
+        {isToday&&<div style={{position:"absolute",left:nowSec*pxPerSec,top:0,bottom:0,width:2,background:"#ff3b3b",boxShadow:"0 0 8px #ff3b3b",zIndex:6,pointerEvents:"none"}}/>}
+        {/* Blocos */}
+        {filtered.map(p=>{
+          const isD=drag?.id===p.id;
+          const s=isD?drag.start:Number(p.horarioInicio);
+          const du=isD&&drag.mode==="resize"?drag.dur:Number(p.duracao);
+          const left=s*pxPerSec, w=Math.max(du*pxPerSec,40);
+          const isMar=p.maratona===true||Number(p.duracao)>AUTO_MARATONA_MIN;
+          return <div key={p.id}
+            onPointerDown={e=>{if(e.target.dataset&&e.target.dataset.handle)startDrag(e,p,"resize");else startDrag(e,p,"move")}}
+            onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}
+            onDoubleClick={()=>onEdit(p)}
+            title="Arraste para mover · borda direita = duração · duplo clique = editar"
+            style={{position:"absolute",left,width:w,top:32,height:ROWH-40,
+              cursor:isD?(drag.mode==="move"?"grabbing":"ew-resize"):"grab",
+              background:isD?`${ch?.cor||"#1a73e8"}55`:`${ch?.cor||"#1a73e8"}28`,
+              border:`1px solid ${ch?.cor||"#1a73e8"}88`,borderLeft:`4px solid ${ch?.cor||"#1a73e8"}`,
+              borderRadius:6,boxSizing:"border-box",touchAction:"none",zIndex:isD?5:1,
+              boxShadow:isD?"0 6px 18px rgba(0,0,0,0.55)":"none",transition:isD?"none":"box-shadow 0.15s"}}>
+            <div style={{padding:"7px 12px 0 10px",overflow:"hidden",height:"100%",boxSizing:"border-box",pointerEvents:"none"}}>
+              <div style={{fontSize:12,fontWeight:700,color:"#fff",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{isMar?"🏃 ":""}{p.nome}</div>
+              <div style={{fontSize:10,color:s+du>86400?"#ffca28":"#aaa",marginTop:3,whiteSpace:"nowrap"}}>{fmtSec(s)} – {fmtSecX(s+du)} · {fDur(du)}{p.gcAlways?" · ♪":""}</div>
+            </div>
+            <div data-handle="1" style={{position:"absolute",right:0,top:0,bottom:0,width:12,cursor:"ew-resize",borderRadius:"0 6px 6px 0",background:isD&&drag.mode==="resize"?`${ch?.cor||"#1a73e8"}aa`:"rgba(255,255,255,0.06)"}}/>
+            {isD&&<div style={{position:"absolute",top:-26,left:0,background:"#000",border:`1px solid ${ch?.cor||"#1a73e8"}`,color:"#fff",fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:4,whiteSpace:"nowrap",zIndex:10,pointerEvents:"none"}}>{fmtSec(s)} – {fmtSecX(s+du)} · {fDur(du)}</div>}
+          </div>;
+        })}
+        {filtered.length===0&&<div style={{position:"absolute",inset:"26px 0 0 0",display:"flex",alignItems:"center",justifyContent:"center",color:"#555",fontSize:13}}>Nenhum programa neste dia — adicione pelo botão abaixo</div>}
+      </div>
+    </div>
+  </div>;
+}
+
 function TimelineView({programs,channels,selectedChannel,onEdit,onDelete,onReorder,onToggleSelect,selectedProgs}){
   const filtered=programs.filter(p=>p.canalId===selectedChannel).sort((a,b)=>Number(a.horarioInicio)-Number(b.horarioInicio));
   const [dragIdx,setDragIdx]=useState(null);
@@ -377,7 +525,7 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
               <button onClick={async()=>{const videoCopy=[...videos];for(let i=0;i<videoCopy.length;i++){const vId=extractYouTubeId(videoCopy[i].youtubeUrl);if(vId){const meta=await fetchYouTubeMetadata(vId);if(meta){const nv=[...videoCopy];nv[i]={...nv[i],youtubeUrl:videoCopy[i].youtubeUrl,titulo:meta.title};setVideos(nv);videoCopy[i]=nv[i];if(i===0){setCH(Math.floor(meta.duration/3600));setCM(Math.floor((meta.duration%3600)/60));setSinopse(meta.description)}}}}}} style={{fontSize:10,color:"#4caf50",background:"rgba(76,175,80,0.1)",border:"1px solid rgba(76,175,80,0.3)",padding:"2px 8px",borderRadius:3,cursor:"pointer",fontWeight:600}}>🔍 Buscar Todos</button>
             </div>
           </div>
-          <div style={{fontSize:10,color:"#666",marginBottom:8,fontStyle:"italic"}}>💡 Dica: cole várias URLs de uma vez em qualquer campo abaixo — cada uma vira uma linha automaticamente. Ou use "📋 Colar Playlist" para uma lista grande.</div>
+          <div style={{fontSize:10,color:"#666",marginBottom:8,fontStyle:"italic"}}>💡 Cole a URL do YouTube num campo (uma por linha). Se colar um link de playlist (com <code>list=</code>), aparece o botão <b>🎵 Importar Playlist</b>. Para colar várias URLs de uma vez, use <b>📋 Colar Playlist</b>.</div>
           <div style={{display:"flex",flexDirection:"column",gap:6}}>
             {videos.map((v,i)=><div key={i} style={{display:"flex",gap:8,alignItems:"center",padding:"8px 10px",background:"rgba(255,255,255,0.02)",borderRadius:4,border:"1px solid rgba(255,255,255,0.06)"}}>
               <input type="checkbox" checked={selectedVideos.has(i)} onChange={()=>{const newSel=new Set(selectedVideos);if(newSel.has(i))newSel.delete(i);else newSel.add(i);setSelectedVideos(newSel)}} style={{width:16,height:16,cursor:"pointer",accentColor:"#4caf50",flexShrink:0}}/>
@@ -385,23 +533,18 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
               {(()=>{const t=ytThumb(v.youtubeUrl);return t?<img src={t} alt="" style={{width:40,height:26,borderRadius:3,objectFit:"cover"}}/>:null})()}
               <input value={v.youtubeUrl}
                 onChange={e=>{const nv=[...videos];nv[i]={...v,youtubeUrl:e.target.value};setVideos(nv)}}
-                onPaste={async e=>{
-                  const pasted=e.clipboardData.getData("text");
-                  // Smart paste: se tem várias URLs OU é uma URL de playlist, expande em várias linhas
-                  const plId=extractPlaylistId(pasted);
-                  const bulk=parseYouTubeBulk(pasted);
-                  if(plId||bulk.length>1){
-                    e.preventDefault();
-                    const items=plId?await fetchYouTubePlaylistItems(plId):bulk;
-                    if(items.length===0){setError("Nenhuma URL válida encontrada");return}
-                    const before=videos.slice(0,i).filter(x=>x.youtubeUrl.trim());
-                    const after=videos.slice(i+1).filter(x=>x.youtubeUrl.trim());
-                    setVideos([...before,...items,...after]);
-                    setError("");
-                  }
-                }}
-                placeholder="Cole 1 URL ou várias" style={{...iS,flex:1}}/>
+                placeholder="Cole a URL do YouTube" style={{...iS,flex:1}}/>
               <input value={v.titulo||""} onChange={e=>{const nv=[...videos];nv[i]={...v,titulo:e.target.value};setVideos(nv)}} placeholder="Título" style={{...iS,width:120}}/>
+              {extractPlaylistId(v.youtubeUrl)&&<button title="Detectada URL de playlist — importar todos os vídeos" onClick={async()=>{
+                const plId=extractPlaylistId(v.youtubeUrl);
+                setError("🌐 Baixando playlist...");
+                const items=await fetchYouTubePlaylistItems(plId);
+                if(items.length===0){setError("❌ Playlist não retornou vídeos. Verifique se é pública e se a YouTube Data API está habilitada na chave (firebase.js).");return}
+                const before=videos.slice(0,i).filter(x=>x.youtubeUrl.trim()&&!extractPlaylistId(x.youtubeUrl));
+                const after=videos.slice(i+1).filter(x=>x.youtubeUrl.trim());
+                setVideos([...before,...items,...after]);
+                setError("");
+              }} style={{background:"rgba(255,202,40,0.15)",border:"1px solid rgba(255,202,40,0.4)",color:"#ffca28",padding:"6px 10px",borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:700,whiteSpace:"nowrap"}}>🎵 Importar Playlist</button>}
               <button onClick={async()=>{const vId=extractYouTubeId(v.youtubeUrl);if(!vId){setError("URL YouTube inválida");return}const meta=await fetchYouTubeMetadata(vId);if(meta){const nv=[...videos];nv[i]={...nv[i],youtubeUrl:v.youtubeUrl,titulo:meta.title};setVideos(nv);setCH(Math.floor(meta.duration/3600));setCM(Math.floor((meta.duration%3600)/60));setSinopse(meta.description);setError("")}else setError("Erro ao buscar vídeo")}} style={{background:"rgba(26,115,232,0.15)",border:"1px solid rgba(26,115,232,0.3)",color:"#4fc3f7",padding:"6px 10px",borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:600,whiteSpace:"nowrap"}}>🔍 Buscar</button>
               {videos.length>1&&<button onClick={()=>setVideos(videos.filter((_,j)=>j!==i))} style={{background:"none",border:"none",color:"#f44336",cursor:"pointer",fontSize:14}}>✕</button>}
             </div>)}
@@ -433,14 +576,18 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
                 if(plId){
                   setBulkStatus("🌐 Baixando playlist do YouTube...");
                   items=await fetchYouTubePlaylistItems(plId);
+                  if(items.length===0){
+                    const detail=window.__ytLastError||"resposta vazia";
+                    setBulkStatus(`❌ YouTube API não retornou vídeos (${detail}). Verifique se a playlist é PÚBLICA e se a YouTube Data API v3 está habilitada na chave (arquivo firebase.js). Você pode colar as URLs manualmente abaixo.`);
+                    return;
+                  }
                 }
                 if(items.length===0)items=parseYouTubeBulk(bulkText);
-                if(items.length===0){setBulkStatus("❌ Nenhuma URL válida encontrada");return}
-                // Adiciona (mantém vídeos existentes com URL preenchida)
-                const existing=videos.filter(x=>x.youtubeUrl.trim());
+                if(items.length===0){setBulkStatus("❌ Nenhuma URL válida encontrada no texto colado");return}
+                const existing=videos.filter(x=>x.youtubeUrl.trim()&&!extractPlaylistId(x.youtubeUrl));
                 setVideos([...existing,...items]);
                 setBulkStatus(`✅ ${items.length} vídeo(s) adicionado(s)`);
-                setTimeout(()=>{setShowBulkPaste(false);setBulkText("");setBulkStatus("")},800);
+                setTimeout(()=>{setShowBulkPaste(false);setBulkText("");setBulkStatus("")},900);
               }} style={{flex:2,padding:10,borderRadius:4,cursor:"pointer",background:"linear-gradient(135deg,#ffca28,#ffa000)",border:"none",color:"#000",fontSize:12,fontWeight:700}}>📥 Importar</button>
             </div>
           </div>
@@ -703,6 +850,7 @@ export default function AdminPanel(){
   const [tab,setTab]=useState("schedule");
   const [selDate,setSelDate]=useState(dates[0]);
   const [selCh,setSelCh]=useState(null);
+  const [viewMode,setViewMode]=useState("lista"); // "lista" | "grade"
   const [channels,setCh]=useState(DEFAULT_CHANNELS);
   const [programs,setProgs]=useState([]);
   const [showModal,setSM]=useState(false);
@@ -1018,10 +1166,19 @@ export default function AdminPanel(){
           <span>📭 <strong style={{color:totalSch>=86400?"#4caf50":"#ff9800"}}>{secTo(Math.max(0,86400-totalSch)).h}h{secTo(Math.max(0,86400-totalSch)).m>0?`${secTo(Math.max(0,86400-totalSch)).m}min`:""}</strong> livre</span>
         </div>
 
-        <div style={{marginBottom:8,fontSize:11,color:"#555",display:"flex",alignItems:"center",gap:6}}>⠿ Arraste para reordenar programas</div>
+        <div style={{marginBottom:8,display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
+          <div style={{fontSize:11,color:"#555"}}>{viewMode==="lista"?"⠿ Arraste para reordenar programas":"🖱️ Arraste os blocos para corrigir o horário (encaixe de 5min) · puxe a borda direita para mudar a duração · duplo clique para editar"}</div>
+          <div style={{display:"flex",gap:4}}>
+            <button onClick={()=>setViewMode("lista")} style={{padding:"6px 14px",borderRadius:"6px 0 0 6px",cursor:"pointer",fontSize:12,fontWeight:700,background:viewMode==="lista"?"rgba(26,115,232,0.25)":"rgba(255,255,255,0.04)",border:viewMode==="lista"?"1px solid #1a73e8":"1px solid rgba(255,255,255,0.1)",color:viewMode==="lista"?"#4fc3f7":"#888"}}>📋 Lista</button>
+            <button onClick={()=>setViewMode("grade")} style={{padding:"6px 14px",borderRadius:"0 6px 6px 0",cursor:"pointer",fontSize:12,fontWeight:700,background:viewMode==="grade"?"rgba(26,115,232,0.25)":"rgba(255,255,255,0.04)",border:viewMode==="grade"?"1px solid #1a73e8":"1px solid rgba(255,255,255,0.1)",color:viewMode==="grade"?"#4fc3f7":"#888"}}>📺 Grade Visual</button>
+          </div>
+        </div>
 
-        <TimelineView programs={dayProgs} channels={channels} selectedChannel={selCh}
-          onEdit={p=>{setEP(p);setSM(true)}} onDelete={handleDel} onReorder={handleReorder} onToggleSelect={toggleProgSelect} selectedProgs={selectedProgs}/>
+        {viewMode==="lista"
+          ? <TimelineView programs={dayProgs} channels={channels} selectedChannel={selCh}
+              onEdit={p=>{setEP(p);setSM(true)}} onDelete={handleDel} onReorder={handleReorder} onToggleSelect={toggleProgSelect} selectedProgs={selectedProgs}/>
+          : <GradeVisual programs={dayProgs} channels={channels} selectedChannel={selCh} selDate={selDate}
+              onEdit={p=>{setEP(p);setSM(true)}} notify={notify}/>}
 
         <button onClick={()=>{setEP(null);setSM(true)}} style={{marginTop:16,width:"100%",padding:14,borderRadius:8,cursor:"pointer",background:"linear-gradient(135deg,#1a73e8,#4fc3f7)",border:"none",color:"#fff",fontSize:14,fontWeight:700}}>+ Adicionar Programa</button>
       </>}
