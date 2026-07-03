@@ -12,14 +12,22 @@ import { db, collection, onSnapshot, setDoc, doc } from "./firebase";
 //    - O iframe do YouTube recebe ?start=N com esse valor exato
 //    - Isso vale para programas normais, maratona (blocos virtuais) e eternity
 //
-// 2. GC DE MÚSICA (canais com isMusic=true):
-//    - INÍCIO do clipe: aparece 5s após sintonizar, fica 25s (GC_DELAY, GC_DURATION)
-//    - FIM do clipe: volta 30s antes do fim, some 5s antes (GC_END_LEAD)
-//    - Mostra: música tocando (título do vídeo) + próxima faixa ("A seguir: ...")
+// 2. GC DE MÚSICA (canais com isMusic=true) — LÓGICA CORRIGIDA:
+//    - O GC agora é 100% SINCRONIZADO com o tempo REAL do clipe de música.
+//    - INÍCIO do clipe: aparece quando o clipe atinge 5s até 30s (5s delay + 25s duração)
+//    - FIM do clipe: aparece nos últimos 30s do clipe, some nos últimos 5s (deixa "limpo")
+//    - NÃO depende mais de "quando o usuário sintonizou". É baseado na posição absoluta do vídeo.
+//    - Isso garante que o GC entre no momento certo da música, independentemente de quando
+//      o espectador mudou de canal.
 //    - Canais comuns: GC NUNCA entra sozinho, só com gcAlways=true no programa ou canal
 //
-// 3. DURAÇÃO DO PROGRAMA = soma de TODOS os vídeos da playlist
-//    O painel Admin calcula automaticamente via "🔍 Buscar Todos"
+// 3. PLAYLISTS DE MÚSICA (padrão recomendado):
+//    - Todo programa de música DEVE ter o array `videos` com { youtubeUrl, titulo, duration }
+//    - `duration` (em segundos) é OBRIGATÓRIO e deve ser o tempo EXATO do vídeo.
+//    - A `duracao` do programa deve ser a soma das durações de UM ciclo da playlist.
+//    - O player faz loop automático da playlist quando o tempo excede.
+//    - Durações incorretas = dessincronia do GC e troca errada de clipe.
+//    - Use o botão "🔍 Buscar Todos" no Admin para calcular durações automaticamente.
 // ============================================
 
 // ============================================
@@ -50,6 +58,85 @@ function fD(s){ s=Number(s); const h=Math.floor(s/3600),m=Math.floor((s%3600)/60
 const CC={L:"#0f0","10":"#00bfff","12":"#ff0","14":"#f80","16":"#f00","18":"#000"};
 function getToday(){ return new Date().toISOString().split("T")[0] }
 function extractYTId(s){ if(!s)return null; const p=[/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/,/^([a-zA-Z0-9_-]{11})$/]; for(const r of p){const m=s.match(r);if(m)return m[1]} return null }
+
+// ============================================
+// NOVA FUNÇÃO CENTRAL: Informações de playback do vídeo atual
+// Usada tanto pelo player (para calcular start do iframe) quanto pelo GC (para sincronia perfeita)
+// ============================================
+function getVideoPlaybackInfo(prog) {
+  if (!prog) return null;
+  const elapsed = Math.max(0, getElapsed(prog) + (prog.mediaOffset || 0));
+  const videos = prog.videos || [];
+
+  // Caso 1: Sem array de vídeos (programa simples ou fallback)
+  if (videos.length === 0) {
+    const dur = Number(prog.duracao) || 3600;
+    const pos = dur > 0 ? elapsed % dur : 0;
+    return {
+      videoIndex: 0,
+      position: pos,
+      duration: dur,
+      remaining: dur - pos,
+      videoId: extractYTId(prog.youtubeId),
+      title: prog.nome || "",
+      isSingle: true
+    };
+  }
+
+  // Caso 2: Playlist com múltiplos vídeos
+  let acc = 0;
+  for (let i = 0; i < videos.length; i++) {
+    const v = videos[i];
+    const dur = Number(v.duration) || 180; // fallback defensivo (recomenda-se preencher duration corretamente)
+    if (elapsed < acc + dur) {
+      return {
+        videoIndex: i,
+        position: elapsed - acc,
+        duration: dur,
+        remaining: dur - (elapsed - acc),
+        videoId: extractYTId(v.youtubeUrl),
+        title: v.titulo || prog.nome || "",
+        isSingle: false
+      };
+    }
+    acc += dur;
+  }
+
+  // Caso 3: Passou do fim da playlist → faz loop (comum em canais de música)
+  const totalDur = acc;
+  if (totalDur > 0) {
+    const loopedElapsed = elapsed % totalDur;
+    let acc2 = 0;
+    for (let i = 0; i < videos.length; i++) {
+      const v = videos[i];
+      const dur = Number(v.duration) || 180;
+      if (loopedElapsed < acc2 + dur) {
+        return {
+          videoIndex: i,
+          position: loopedElapsed - acc2,
+          duration: dur,
+          remaining: dur - (loopedElapsed - acc2),
+          videoId: extractYTId(v.youtubeUrl),
+          title: v.titulo || prog.nome || "",
+          isSingle: false
+        };
+      }
+      acc2 += dur;
+    }
+  }
+
+  // Fallback final
+  const firstDur = Number(videos[0]?.duration) || 180;
+  return {
+    videoIndex: 0,
+    position: 0,
+    duration: firstDur,
+    remaining: firstDur,
+    videoId: extractYTId(videos[0]?.youtubeUrl || prog.youtubeId),
+    title: videos[0]?.titulo || prog.nome || "",
+    isSingle: videos.length <= 1
+  };
+}
 
 // ============ TIMELINE ABSOLUTA (7 dias contínuos) ============
 const QUEUE_DAYS=7; // Mudar para 15, 30, etc conforme necessário - escalável!
@@ -226,35 +313,34 @@ function scheduleNotif(prog,ch,min=5){ const ns=getNow();const ts=prog.horarioIn
 
 // ============================================
 // GC (Gerador de Caracteres) - lower-third estilo canal de clipes
-// AUTOMÁTICO somente em canais de MÚSICA (channel.isMusic):
-//   • entra no INÍCIO do clipe (5s após sintonizar/trocar, fica 25s)
-//   • volta no FIM do clipe (faltando 30s, sai faltando 5s) — como MTV/canais de clipe
-//   • mostra a música que está tocando + a próxima
-// Nos DEMAIS canais o GC NÃO entra sozinho: só aparece se você escolher
-// (gcAlways no programa ou no canal) = fica fixo na tela.
+// LÓGICA NOVA E CORRIGIDA: 100% baseada na posição REAL do vídeo atual
 // ============================================
 const GC_DELAY=5, GC_DURATION=25, GC_END_LEAD=30;
+
 function GCBar({channel,program,nextProgram}){
   const isMusic=!!channel?.isMusic;
   const gcAlways=!!(program?.gcAlways||channel?.gcAlways);
   const [visible,setVisible]=useState(false);
-  const sessionStartRef=useRef(Date.now());
   const contKey=program?.contKey||program?.id;
-
-  // Reinicia o relógio do GC quando muda o clipe/canal
-  useEffect(()=>{sessionStartRef.current=Date.now()},[contKey,channel?.id]);
 
   useEffect(()=>{
     if(!program||program.isPlaceholder){setVisible(false);return}
     if(gcAlways){setVisible(true);return}
-    if(!isMusic){setVisible(false);return} // canal comum: GC só se escolhido manualmente
+    if(!isMusic){setVisible(false);return}
+
     const upd=()=>{
-      const el=(Date.now()-sessionStartRef.current)/1000;              // desde sintonizar/trocar de clipe
-      const remaining=(program.fimReal??program.horarioFim)-getNow();  // até o fim REAL do clipe
-      const inicio=el>=GC_DELAY&&el<GC_DELAY+GC_DURATION;
-      const fim=remaining<=GC_END_LEAD&&remaining>GC_END_LEAD-GC_DURATION;
-      setVisible(inicio||fim);
+      const vInfo = getVideoPlaybackInfo(program);
+      if(!vInfo){ setVisible(false); return; }
+
+      // Lógica correta e sincronizada com a música:
+      // - Mostra GC entre 5s e 30s do clipe (intro)
+      // - Mostra GC nos últimos 30s do clipe, exceto os últimos 5s (outro limpo)
+      const showIntro = vInfo.position >= GC_DELAY && vInfo.position < (GC_DELAY + GC_DURATION);
+      const showOutro = vInfo.remaining <= GC_END_LEAD && vInfo.remaining > (GC_END_LEAD - GC_DURATION);
+
+      setVisible(showIntro || showOutro);
     };
+
     upd();
     const i=setInterval(upd,500);
     return()=>clearInterval(i);
@@ -262,17 +348,25 @@ function GCBar({channel,program,nextProgram}){
 
   if(!program||program.isPlaceholder||!visible)return null;
 
-  // Canais de música: título = faixa tocando; sub = próxima faixa
-  const nowTitle=isMusic?(program.videos?.[0]?.titulo||program.nome):program.nome;
-  let nextTitle=null;
+  // Título atual: usa o vídeo correto da playlist quando disponível
+  const vInfo = getVideoPlaybackInfo(program);
+  const nowTitle = vInfo?.title || (isMusic ? (program.videos?.[0]?.titulo || program.nome) : program.nome);
+
+  let nextTitle = null;
   if(isMusic){
-    if(program.videos?.[1]?.titulo)nextTitle=program.videos[1].titulo;
-    else if(nextProgram&&!nextProgram.isPlaceholder&&(nextProgram.contKey||nextProgram.id)!==contKey)
-      nextTitle=nextProgram.videos?.[0]?.titulo||nextProgram.nome;
+    const videos = program.videos || [];
+    if(videos.length > 1 && vInfo){
+      const nextIdx = (vInfo.videoIndex + 1) % videos.length;
+      nextTitle = videos[nextIdx]?.titulo || null;
+    }
+    if(!nextTitle && nextProgram && !nextProgram.isPlaceholder && (nextProgram.contKey||nextProgram.id)!==contKey){
+      nextTitle = nextProgram.videos?.[0]?.titulo || nextProgram.nome;
+    }
   }
-  const sub=isMusic
-    ?(nextTitle?`A seguir: ${nextTitle}`:null)
-    :((program.videos?.[0]?.titulo&&program.videos[0].titulo!==program.nome)?program.videos[0].titulo:(channel?.nome||null));
+
+  const sub = isMusic
+    ? (nextTitle ? `A seguir: ${nextTitle}` : null)
+    : ((program.videos?.[0]?.titulo && program.videos[0].titulo !== program.nome) ? program.videos[0].titulo : (channel?.nome || null));
 
   return <div style={{
     position:"absolute",left:"7%",bottom:"16%",zIndex:9,maxWidth:"62%",
@@ -684,44 +778,16 @@ export default function TVWeb(){
 
   // ========== AUTO VIDEO SWITCH ==========
   // Resolve QUAL vídeo da playlist está tocando agora e EM QUAL SEGUNDO.
-  // Se a playlist tem 50 clipes de 3min e são 15h, calcula qual clipe é o 300º segundo, etc.
+  // Usa a função central getVideoPlaybackInfo para garantir consistência com o GC.
   const resolveCurrentVideo=useCallback(()=>{
-    if(!cp)return {videoId:null,start:0,videoIndex:0,videoTitle:""};
-    const elapsed=Math.max(0,getElapsed(cp)+(cp.mediaOffset||0));
-    const videos=cp.videos||[];
-    // Se só tem 1 vídeo ou nenhum com duration, usa o comportamento original
-    if(videos.length<=1||!videos[0]?.duration){
-      const vid=extractYTId(cp.youtubeId||videos[0]?.youtubeUrl);
-      // Para vídeo único: se elapsed > duração do vídeo, faz loop
-      const singleDur=videos[0]?.duration||Number(cp.duracao)||3600;
-      const startInVideo=singleDur>0?Math.floor(elapsed%singleDur):Math.floor(elapsed);
-      return {videoId:vid,start:startInVideo,videoIndex:0,videoTitle:videos[0]?.titulo||""};
-    }
-    // PLAYLIST com durações: encontra qual vídeo está tocando
-    let acc=0;
-    for(let i=0;i<videos.length;i++){
-      const dur=Number(videos[i].duration)||180; // fallback 3min se sem duração
-      if(elapsed<acc+dur){
-        const vid=extractYTId(videos[i].youtubeUrl);
-        return {videoId:vid,start:Math.floor(elapsed-acc),videoIndex:i,videoTitle:videos[i].titulo||""};
-      }
-      acc+=dur;
-    }
-    // Passou do fim da playlist → loop: recalcula posição dentro do ciclo
-    if(acc>0){
-      const looped=elapsed%acc;
-      let acc2=0;
-      for(let i=0;i<videos.length;i++){
-        const dur=Number(videos[i].duration)||180;
-        if(looped<acc2+dur){
-          const vid=extractYTId(videos[i].youtubeUrl);
-          return {videoId:vid,start:Math.floor(looped-acc2),videoIndex:i,videoTitle:videos[i].titulo||""};
-        }
-        acc2+=dur;
-      }
-    }
-    // Fallback
-    return {videoId:extractYTId(cp.youtubeId||videos[0]?.youtubeUrl),start:0,videoIndex:0,videoTitle:videos[0]?.titulo||""};
+    const info = getVideoPlaybackInfo(cp);
+    if (!info) return {videoId:null,start:0,videoIndex:0,videoTitle:""};
+    return {
+      videoId: info.videoId,
+      start: Math.floor(info.position),
+      videoIndex: info.videoIndex,
+      videoTitle: info.title
+    };
   },[cp]);
 
   const currentVideo=resolveCurrentVideo();
@@ -895,7 +961,7 @@ export default function TVWeb(){
       animation:"pulseFull 2s ease infinite",
     }}>🔇 Clique para ativar o som</button>}
 
-    {/* ===== GC (lower-third de música/programa) ===== */}
+    {/* ===== GC (lower-third de música/programa) — AGORA SINCRONIZADO COM O VÍDEO ===== */}
     {!showEPG&&!showFull&&<GCBar channel={ch} program={cp} nextProgram={np}/>}
 
     {/* ===== OSD HEADER (TV-style, 20s) ===== */}
