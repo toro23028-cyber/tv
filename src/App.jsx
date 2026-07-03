@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
 import { useState, useEffect } from "react";
 import TV    from "./TV";
 import Admin from "./Admin";
@@ -87,7 +87,6 @@ function ProtectedAdmin(){
     return()=>clearInterval(i);
   },[]);
   if(!auth) return <AdminLogin onSuccess={()=>setAuth(true)}/>;
-  // Passa onLogout para o Admin renderizar o botão dentro do próprio header
   return <Admin onLogout={()=>{clearSession();setAuth(false);}}/>;
 }
 
@@ -148,16 +147,23 @@ function PWAInstallBanner(){
 }
 
 // ============================================
+// ROTA /canal/:id → redireciona para /tv?canal=N
+// Cada canal tem URL compartilhável (ex: /canal/2)
+// ============================================
+function CanalRedirect(){ const {id}=useParams(); return <Navigate to={`/tv?canal=${id}`} replace/> }
+
+// ============================================
 // APP
 // ============================================
 export default function App(){
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/"      element={<Home />} />
-        <Route path="/tv"    element={<TV />} />
-        <Route path="/admin" element={<ProtectedAdmin />} />
-        <Route path="*"      element={<Navigate to="/" replace />} />
+        <Route path="/"          element={<Home />} />
+        <Route path="/tv"        element={<TV />} />
+        <Route path="/canal/:id" element={<CanalRedirect />} />
+        <Route path="/admin"     element={<ProtectedAdmin />} />
+        <Route path="*"          element={<Navigate to="/" replace />} />
       </Routes>
       <PWAInstallBanner />
     </BrowserRouter>
