@@ -117,8 +117,9 @@ function parseYouTubeBulk(text){
   }
   return out;
 }
-// Busca os vídeos de uma playlist do YouTube (até 200) via Data API v3
-// Retorna array vazio E define window.__ytLastError com detalhe do erro (para debug do usuário)
+// Consulta os vídeos de uma playlist do YouTube (até 200) via Data API v3
+// Retorna lista de {youtubeUrl, titulo}. NÃO baixa vídeo nenhum — só busca metadados.
+// Retorna [] e define window.__ytLastError com detalhe do erro em caso de falha.
 async function fetchYouTubePlaylistItems(playlistId){
   window.__ytLastError=null;
   if(!playlistId){window.__ytLastError="ID de playlist vazio";return []}
@@ -526,6 +527,14 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
             </div>
           </div>
           <div style={{fontSize:10,color:"#666",marginBottom:8,fontStyle:"italic"}}>💡 Cole a URL do YouTube num campo (uma por linha). Se colar um link de playlist (com <code>list=</code>), aparece o botão <b>🎵 Importar Playlist</b>. Para colar várias URLs de uma vez, use <b>📋 Colar Playlist</b>.</div>
+          {/* Prévia da thumb que representa o programa no guia */}
+          {videos[0]?.youtubeUrl&&ytThumb(videos[0].youtubeUrl)&&<div style={{marginBottom:10,display:"flex",alignItems:"center",gap:14,padding:"10px 14px",background:"rgba(255,255,255,0.03)",borderRadius:6,border:"1px solid rgba(255,255,255,0.06)"}}>
+            <img src={thumbnailType==="custom"&&thumbnailUrl?thumbnailUrl:ytThumb(videos[0].youtubeUrl)} alt="Thumb do programa" style={{width:160,height:90,borderRadius:6,objectFit:"cover",border:"2px solid rgba(255,255,255,0.12)"}}/>
+            <div>
+              <div style={{fontSize:12,fontWeight:700,color:"#fff",marginBottom:4}}>📸 Imagem do programa no guia</div>
+              <div style={{fontSize:11,color:"#888",lineHeight:1.4}}>Vem automaticamente do 1º vídeo da lista.<br/>Para usar outra, mude na seção THUMBNAIL abaixo<br/>ou reordene os vídeos (o 1º define a thumb).</div>
+            </div>
+          </div>}
           <div style={{display:"flex",flexDirection:"column",gap:6}}>
             {videos.map((v,i)=><div key={i} style={{display:"flex",gap:8,alignItems:"center",padding:"8px 10px",background:"rgba(255,255,255,0.02)",borderRadius:4,border:"1px solid rgba(255,255,255,0.06)"}}>
               <input type="checkbox" checked={selectedVideos.has(i)} onChange={()=>{const newSel=new Set(selectedVideos);if(newSel.has(i))newSel.delete(i);else newSel.add(i);setSelectedVideos(newSel)}} style={{width:16,height:16,cursor:"pointer",accentColor:"#4caf50",flexShrink:0}}/>
@@ -578,11 +587,11 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
                 const plId=extractPlaylistId(bulkText);
                 let items=[];
                 if(plId){
-                  setBulkStatus("🌐 Baixando playlist do YouTube...");
+                  setBulkStatus("🌐 Consultando playlist do YouTube...");
                   items=await fetchYouTubePlaylistItems(plId);
                   if(items.length===0){
                     const detail=window.__ytLastError||"resposta vazia";
-                    setBulkStatus(`❌ YouTube API não retornou vídeos (${detail}). Verifique se a playlist é PÚBLICA e se a YouTube Data API v3 está habilitada na chave (arquivo firebase.js). Você pode colar as URLs manualmente abaixo.`);
+                    setBulkStatus(`❌ ${detail}. ${detail.includes("forbidden")||detail.includes("blocked")?"HABILITE a YouTube Data API v3 no Google Cloud Console (Biblioteca → YouTube Data API v3 → ATIVAR).":"Verifique se a playlist é pública."} Você pode colar as URLs manualmente abaixo (uma por linha).`);
                     return;
                   }
                 }
