@@ -603,7 +603,13 @@ export default function TVWeb(){
   const [channels, setChannels] = useState([]);
   const [allPrograms, setAllPrograms] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [curCh, setCurCh] = useState(null);
+  // Canal inicial: lê da URL (?canal=NUMERO ou ?canal=ID)
+  const [curCh, setCurCh] = useState(()=>{
+    try{
+      const params=new URLSearchParams(window.location.search);
+      return params.get("canal")||null;
+    }catch{return null}
+  });
   const [showEPG, setEPG] = useState(false);
   const [showFull, setFull] = useState(false);
   const [showOSD, setOSD] = useState(true);
@@ -629,7 +635,32 @@ export default function TVWeb(){
     const unsubCh = onSnapshot(collection(db,"channels"),(snap)=>{
       const list=snap.docs.map(d=>({...d.data(),id:d.id}));
       const sorted=list.sort((a,b)=>(a.numero||0)-(b.numero||0));
-      if(sorted.length>0){setChannels(sorted);setCurCh(prev=>prev||sorted[0].id)}
+      if(sorted.length>0){
+        setChannels(sorted);
+        setCurCh(prev=>{
+          let resolved=null;
+          if(prev){
+            // prev pode ser um NUMERO (da URL ?canal=2) ou um ID do Firebase
+            const byId=sorted.find(c=>c.id===prev);
+            if(byId)resolved=prev; // já é um ID válido
+            else{
+              const byNum=sorted.find(c=>String(c.numero)===String(prev));
+              if(byNum)resolved=byNum.id; // era um número, resolve pro ID
+            }
+          }
+          if(!resolved)resolved=sorted[0].id; // fallback: primeiro canal
+          // Seta URL se ainda não tem ?canal
+          try{
+            const url=new URL(window.location);
+            if(!url.searchParams.get("canal")){
+              const ch=sorted.find(c=>c.id===resolved);
+              url.searchParams.set("canal",ch?.numero||resolved);
+              window.history.replaceState({},"",url);
+            }
+          }catch{}
+          return resolved;
+        });
+      }
       else{setChannels(FALLBACK_CHANNELS);setCurCh("_info")}
       loaded.channels=true;
       if(loaded.channels&&loaded.programs){setLoading(false);clearTimeout(fallbackTimer)}
@@ -654,13 +685,18 @@ export default function TVWeb(){
   // ========== AUTO VIDEO SWITCH ==========
   // Troca o iframe quando a MÍDIA muda (contKey). Blocos da mesma Maratona
   // compartilham contKey → vídeo continua sem recarregar entre blocos/dias.
-  // Sincronização feita DURANTE o render (refs não re-renderizam sozinhos):
-  // assim o iframe já nasce no ponto certo, sem tocar 0-3s do início antes de pular.
+  // REGRA: O vídeo SEMPRE começa no trecho correspondente ao horário atual.
+  // Na primeira carga (prevProgIdRef===null) E em cada troca de mídia.
   const contKey=cp?(cp.contKey||cp.id):null;
   if(cp&&contKey&&contKey!==prevProgIdRef.current){
     prevProgIdRef.current=contKey;
     ytStartRef.current=Math.max(0,Math.floor(getElapsed(cp)+(cp.mediaOffset||0)));
     ytKeyRef.current=`${curCh}_${contKey}_${Date.now()}`;
+  }
+  // Safety: se o iframe vai montar mas ytStartRef ainda é 0 e cp existe, recalcula
+  // (cobre o caso de hot-reload ou race condition na carga inicial do Firebase)
+  if(cp&&ytStartRef.current===0&&getElapsed(cp)>5){
+    ytStartRef.current=Math.max(0,Math.floor(getElapsed(cp)+(cp.mediaOffset||0)));
   }
 
   // AUTO-SAVE: Salva progresso quando muda de mídia (efeito colateral fica no useEffect)
@@ -713,9 +749,19 @@ export default function TVWeb(){
   const swCh=useCallback(id=>{
     if(id===curCh)return;
     setFade(true);
-    setTimeout(()=>{setCurCh(id);setFade(false)},300);
+    setTimeout(()=>{
+      setCurCh(id);setFade(false);
+      // Atualiza a URL sem recarregar (cada canal tem sua URL para compartilhar)
+      try{
+        const ch=channels.find(c=>c.id===id);
+        const num=ch?.numero||id;
+        const url=new URL(window.location);
+        url.searchParams.set("canal",num);
+        window.history.replaceState({},"",url);
+      }catch{}
+    },300);
     showOSDNow();
-  },[curCh,showOSDNow]);
+  },[curCh,showOSDNow,channels]);
 
   const swDir=useCallback(dir=>{
     const i=CHANNELS.findIndex(c=>c.id===curCh);if(i<0)return;
