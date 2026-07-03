@@ -683,15 +683,58 @@ export default function TVWeb(){
   const np=ci>=0?schedule[ci+1]:null;
 
   // ========== AUTO VIDEO SWITCH ==========
-  // PADRÃO ORIGINAL: useEffect roda APÓS o render quando cp.id muda.
-  // getElapsed + mediaOffset = ponto exato do vídeo na timeline.
-  useEffect(()=>{
-    if(cp&&cp.id!==prevProgIdRef.current){
-      prevProgIdRef.current=cp.id;
-      ytStartRef.current=Math.max(0,Math.floor(getElapsed(cp)+(cp.mediaOffset||0)));
-      ytKeyRef.current=`${curCh}_${cp.id}_${Date.now()}`;
+  // Resolve QUAL vídeo da playlist está tocando agora e EM QUAL SEGUNDO.
+  // Se a playlist tem 50 clipes de 3min e são 15h, calcula qual clipe é o 300º segundo, etc.
+  const resolveCurrentVideo=useCallback(()=>{
+    if(!cp)return {videoId:null,start:0,videoIndex:0,videoTitle:""};
+    const elapsed=Math.max(0,getElapsed(cp)+(cp.mediaOffset||0));
+    const videos=cp.videos||[];
+    // Se só tem 1 vídeo ou nenhum com duration, usa o comportamento original
+    if(videos.length<=1||!videos[0]?.duration){
+      const vid=extractYTId(cp.youtubeId||videos[0]?.youtubeUrl);
+      // Para vídeo único: se elapsed > duração do vídeo, faz loop
+      const singleDur=videos[0]?.duration||Number(cp.duracao)||3600;
+      const startInVideo=singleDur>0?Math.floor(elapsed%singleDur):Math.floor(elapsed);
+      return {videoId:vid,start:startInVideo,videoIndex:0,videoTitle:videos[0]?.titulo||""};
     }
-  },[cp?.id,curCh]);
+    // PLAYLIST com durações: encontra qual vídeo está tocando
+    let acc=0;
+    for(let i=0;i<videos.length;i++){
+      const dur=Number(videos[i].duration)||180; // fallback 3min se sem duração
+      if(elapsed<acc+dur){
+        const vid=extractYTId(videos[i].youtubeUrl);
+        return {videoId:vid,start:Math.floor(elapsed-acc),videoIndex:i,videoTitle:videos[i].titulo||""};
+      }
+      acc+=dur;
+    }
+    // Passou do fim da playlist → loop: recalcula posição dentro do ciclo
+    if(acc>0){
+      const looped=elapsed%acc;
+      let acc2=0;
+      for(let i=0;i<videos.length;i++){
+        const dur=Number(videos[i].duration)||180;
+        if(looped<acc2+dur){
+          const vid=extractYTId(videos[i].youtubeUrl);
+          return {videoId:vid,start:Math.floor(looped-acc2),videoIndex:i,videoTitle:videos[i].titulo||""};
+        }
+        acc2+=dur;
+      }
+    }
+    // Fallback
+    return {videoId:extractYTId(cp.youtubeId||videos[0]?.youtubeUrl),start:0,videoIndex:0,videoTitle:videos[0]?.titulo||""};
+  },[cp]);
+
+  const currentVideo=resolveCurrentVideo();
+
+  // Força novo iframe quando o VÍDEO muda (não só o programa)
+  const videoKey=`${curCh}_${cp?.id}_v${currentVideo.videoIndex}_${currentVideo.videoId}`;
+  useEffect(()=>{
+    if(cp&&videoKey!==prevProgIdRef.current){
+      prevProgIdRef.current=videoKey;
+      ytStartRef.current=currentVideo.start;
+      ytKeyRef.current=`${videoKey}_${Date.now()}`;
+    }
+  },[videoKey,currentVideo.start]);
 
   // AUTO-SAVE: Salva progresso quando muda de programa
   const savedKeyRef=useRef(null);
@@ -715,7 +758,7 @@ export default function TVWeb(){
     })();
   },[cp?.id,curCh,allPrograms]);
 
-  const ytVideoId=cp?extractYTId(cp.youtubeId||cp.videos?.[0]?.youtubeUrl):null;
+  const ytVideoId=currentVideo.videoId;
   const ytSrc=ytVideoId
     ?`https://www.youtube.com/embed/${ytVideoId}?autoplay=1&mute=${muted?1:0}&start=${ytStartRef.current}&controls=0&disablekb=1&modestbranding=1&rel=0&showinfo=0&iv_load_policy=3&fs=0&playsinline=1&enablejsapi=0`
     :null;
