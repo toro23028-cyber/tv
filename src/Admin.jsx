@@ -1205,10 +1205,79 @@ export default function AdminPanel(){
           </div>})()}
 
         {/* Stats */}
-        <div style={{display:"flex",gap:16,padding:"12px 16px",marginBottom:16,background:"rgba(255,255,255,0.03)",borderRadius:8,fontSize:12,color:"#888",flexWrap:"wrap"}}>
+        <div style={{display:"flex",gap:16,padding:"12px 16px",marginBottom:16,background:"rgba(255,255,255,0.03)",borderRadius:8,fontSize:12,color:"#888",flexWrap:"wrap",alignItems:"center"}}>
           <span>📊 <strong style={{color:"#fff"}}>{dayProgs.filter(p=>p.canalId===selCh).length}</strong> programas</span>
           <span>⏱ <strong style={{color:"#fff"}}>{secTo(totalSch).h}h{secTo(totalSch).m>0?`${secTo(totalSch).m}min`:""}</strong> agendado</span>
           <span>📭 <strong style={{color:totalSch>=86400?"#4caf50":"#ff9800"}}>{secTo(Math.max(0,86400-totalSch)).h}h{secTo(Math.max(0,86400-totalSch)).m>0?`${secTo(Math.max(0,86400-totalSch)).m}min`:""}</strong> livre</span>
+          <div style={{flex:1}}/>
+          <button onClick={async()=>{
+            if(!selCh){notify("Selecione um canal");return}
+            const confirmed=confirm("🔧 CORRIGIR PROGRAMAÇÃO\n\nIsso vai:\n✓ Apagar programas de dias passados (que já foram exibidos)\n✓ Resolver sobreposições (encurta o anterior)\n✓ Fechar buracos (programas se encostam)\n✓ Se o dia não cobrir 24h, estica o último programa\n\nCanal: "+channels.find(c=>c.id===selCh)?.nome+"\nDeseja continuar?");
+            if(!confirmed)return;
+            notify("🔧 Corrigindo...");
+            const today=getToday();
+            let cleaned=0,fixed=0,filled=0;
+
+            // === ETAPA 1: Limpar programas de dias que já passaram ===
+            const pastProgs=programs.filter(p=>{
+              if(!p.data||!p.canalId)return false;
+              // Só do canal selecionado, dias ANTERIORES a hoje
+              if(p.canalId!==selCh)return false;
+              const progEnd=new Date(p.data+"T00:00:00");
+              progEnd.setSeconds(Number(p.horarioFim)||86400);
+              return progEnd<new Date(today+"T00:00:00");
+            });
+            for(const p of pastProgs){
+              try{await deleteDoc(doc(db,"programs",String(p.id)));cleaned++}catch(err){console.error("Limpar err:",err)}
+            }
+
+            // === ETAPA 2: Corrigir grade do dia selecionado neste canal ===
+            const todayProgs=programs
+              .filter(p=>p.canalId===selCh&&p.data===selDate)
+              .map(p=>({...p,horarioInicio:Number(p.horarioInicio),horarioFim:Number(p.horarioFim),duracao:Number(p.duracao)}))
+              .sort((a,b)=>a.horarioInicio-b.horarioInicio);
+
+            if(todayProgs.length>0){
+              let prev=null;
+              for(const p of todayProgs){
+                let newStart=p.horarioInicio, newDur=p.duracao, changed=false;
+                // Resolver sobreposição: se começa antes do fim do anterior, ajusta o anterior
+                if(prev&&newStart<prev.horarioFim){
+                  const prevNewDur=Math.max(SNAP,newStart-prev.horarioInicio);
+                  if(prevNewDur!==prev.duracao){
+                    try{await updateDoc(doc(db,"programs",String(prev.id)),{duracao:prevNewDur,horarioFim:prev.horarioInicio+prevNewDur});fixed++}catch{}
+                    prev.duracao=prevNewDur;prev.horarioFim=prev.horarioInicio+prevNewDur;
+                  }
+                }
+                // Fechar buraco: se há espaço entre o anterior e este, puxa para encostar
+                if(prev&&newStart>prev.horarioFim){
+                  newStart=prev.horarioFim;
+                  changed=true;
+                }
+                if(changed){
+                  try{await updateDoc(doc(db,"programs",String(p.id)),{horarioInicio:newStart,horarioFim:newStart+newDur});fixed++}catch{}
+                  p.horarioInicio=newStart;p.horarioFim=newStart+newDur;p.duracao=newDur;
+                }
+                prev=p;
+              }
+              // Se o 1º não começa em 0, puxa para 0
+              if(todayProgs[0].horarioInicio>0){
+                const shift=todayProgs[0].horarioInicio;
+                for(const p of todayProgs){
+                  const ns=p.horarioInicio-shift;
+                  try{await updateDoc(doc(db,"programs",String(p.id)),{horarioInicio:ns,horarioFim:ns+p.duracao});fixed++}catch{}
+                  p.horarioInicio=ns;p.horarioFim=ns+p.duracao;
+                }
+              }
+              // Se o último não cobre 24h, estica
+              const last=todayProgs[todayProgs.length-1];
+              if(last.horarioFim<86400){
+                const newDur=86400-last.horarioInicio;
+                try{await updateDoc(doc(db,"programs",String(last.id)),{duracao:newDur,horarioFim:86400});filled++}catch{}
+              }
+            }
+            notify(`✅ Corrigido! ${cleaned} antigo(s) removido(s), ${fixed} ajuste(s) na grade${filled>0?", último esticado até 24h":""}`);
+          }} style={{padding:"8px 16px",borderRadius:6,cursor:"pointer",fontSize:11,fontWeight:700,background:"rgba(255,152,0,0.12)",border:"1px solid rgba(255,152,0,0.35)",color:"#ff9800",whiteSpace:"nowrap"}}>🔧 Corrigir Programação</button>
         </div>
 
         <div style={{marginBottom:8,display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
