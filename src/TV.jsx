@@ -682,35 +682,22 @@ export default function TVWeb(){
   const ci=schedule.findIndex(p=>p.id===cp?.id);
   const np=ci>=0?schedule[ci+1]:null;
 
-  // Calcula o ponto EXATO de reprodução no vídeo (segundos desde o início da mídia)
-  // Usado em: sync block, iframe URL, unmute, seekTo
-  const calcStart=()=>{
-    if(!cp)return 0;
-    return Math.max(0,Math.floor(getElapsed(cp)+(cp.mediaOffset||0)));
-  };
-
   // ========== AUTO VIDEO SWITCH ==========
-  // Troca o iframe quando a MÍDIA muda (contKey). Blocos da mesma Maratona
-  // compartilham contKey → vídeo continua sem recarregar entre blocos/dias.
-  // REGRA: O vídeo SEMPRE começa no trecho correspondente ao horário atual.
-  // Na primeira carga (prevProgIdRef===null) E em cada troca de mídia.
-  const contKey=cp?(cp.contKey||cp.id):null;
-  if(cp&&contKey&&contKey!==prevProgIdRef.current){
-    prevProgIdRef.current=contKey;
-    ytStartRef.current=calcStart();
-    ytKeyRef.current=`${curCh}_${contKey}_${Date.now()}`;
-  }
-  // Safety: recalcula se cp existe mas start ficou em 0 (race condition na carga)
-  if(cp&&ytStartRef.current===0&&getElapsed(cp)>5){
-    ytStartRef.current=calcStart();
-    ytKeyRef.current=`${curCh}_${contKey}_fix_${Date.now()}`;
-  }
+  // PADRÃO ORIGINAL: useEffect roda APÓS o render quando cp.id muda.
+  // getElapsed + mediaOffset = ponto exato do vídeo na timeline.
+  useEffect(()=>{
+    if(cp&&cp.id!==prevProgIdRef.current){
+      prevProgIdRef.current=cp.id;
+      ytStartRef.current=Math.max(0,Math.floor(getElapsed(cp)+(cp.mediaOffset||0)));
+      ytKeyRef.current=`${curCh}_${cp.id}_${Date.now()}`;
+    }
+  },[cp?.id,curCh]);
 
-  // AUTO-SAVE: Salva progresso quando muda de mídia (efeito colateral fica no useEffect)
+  // AUTO-SAVE: Salva progresso quando muda de programa
   const savedKeyRef=useRef(null);
   useEffect(()=>{
-    if(!cp||!contKey||contKey===savedKeyRef.current)return;
-    savedKeyRef.current=contKey;
+    if(!cp||cp.id===savedKeyRef.current)return;
+    savedKeyRef.current=cp.id;
     (async()=>{
       try {
         const srcId=cp.srcProgId||cp.id;
@@ -726,41 +713,12 @@ export default function TVWeb(){
         }
       } catch(err){ console.error("Auto-save progress err:",err); }
     })();
-  },[contKey,cp,curCh,allPrograms]);
+  },[cp?.id,curCh,allPrograms]);
 
   const ytVideoId=cp?extractYTId(cp.youtubeId||cp.videos?.[0]?.youtubeUrl):null;
-  const iframeRef=useRef(null);
-
   const ytSrc=ytVideoId
-    ?`https://www.youtube.com/embed/${ytVideoId}?autoplay=1&mute=${muted?1:0}&start=${calcStart()}&controls=0&disablekb=1&modestbranding=1&rel=0&showinfo=0&iv_load_policy=3&fs=0&playsinline=1&enablejsapi=1&origin=${encodeURIComponent(typeof window!=="undefined"?window.location.origin:"")}`
+    ?`https://www.youtube.com/embed/${ytVideoId}?autoplay=1&mute=${muted?1:0}&start=${ytStartRef.current}&controls=0&disablekb=1&modestbranding=1&rel=0&showinfo=0&iv_load_policy=3&fs=0&playsinline=1&enablejsapi=0`
     :null;
-
-  // SEEK FORÇADO: após o iframe carregar, envia seekTo via postMessage
-  // Isso é MUITO mais confiável que o parâmetro ?start= do YouTube
-  const handleIframeLoad=useCallback(()=>{
-    const iframe=iframeRef.current;
-    if(!iframe||!cp)return;
-    const s=Math.max(0,Math.floor(getElapsed(cp)+(cp.mediaOffset||0)));
-    if(s>2){
-      // Espera o player inicializar (800ms) e envia o seek
-      setTimeout(()=>{
-        try{
-          iframe.contentWindow.postMessage(JSON.stringify({
-            event:"command",func:"seekTo",args:[s,true]
-          }),"*");
-        }catch{}
-      },800);
-      // Segundo seek como garantia (alguns players demoram mais)
-      setTimeout(()=>{
-        try{
-          const s2=Math.max(0,Math.floor(getElapsed(cp)+(cp.mediaOffset||0)));
-          iframe.contentWindow.postMessage(JSON.stringify({
-            event:"command",func:"seekTo",args:[s2,true]
-          }),"*");
-        }catch{}
-      },2500);
-    }
-  },[cp]);
 
   // ========== OSD VISIBILITY (20 seconds) ==========
   const showOSDNow=useCallback(()=>{
@@ -780,7 +738,6 @@ export default function TVWeb(){
     ytKeyRef.current=ytKeyRef.current+"_unmuted";
     setMuted(false);
   },[cp]);
-
   // ========== CHANNEL SWITCHING ==========
   const swCh=useCallback(id=>{
     if(id===curCh)return;
@@ -858,10 +815,8 @@ export default function TVWeb(){
     <div style={{position:"absolute",inset:0,zIndex:1,opacity:fade?0:1,transition:"opacity 0.5s"}}>
       {ytSrc && !cp?.isPlaceholder ? (
         <iframe
-          ref={iframeRef}
           key={ytKeyRef.current}
           src={ytSrc}
-          onLoad={handleIframeLoad}
           allow="autoplay; encrypted-media"
           allowFullScreen={false}
           style={{width:"100%",height:"100%",border:"none",pointerEvents:"none"}}
