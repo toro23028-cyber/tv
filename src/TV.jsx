@@ -2,6 +2,27 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { db, collection, onSnapshot, setDoc, doc } from "./firebase";
 
 // ============================================
+// REGRAS FUNDAMENTAIS DO PLAYER — NÃO REMOVER
+// ============================================
+// 1. SINCRONIZAÇÃO DE VÍDEO: O YouTube SEMPRE respeita o horário da programação.
+//    Se o espectador sintoniza às 17h55, o vídeo começa no trecho que corresponde
+//    a 17h55 na timeline. Isso é garantido por:
+//    - buildSchedule calcula mediaOffset (segundos desde o início real do programa)
+//    - ytStartRef = getElapsed(programa) + mediaOffset
+//    - O iframe do YouTube recebe ?start=N com esse valor exato
+//    - Isso vale para programas normais, maratona (blocos virtuais) e eternity
+//
+// 2. GC DE MÚSICA (canais com isMusic=true):
+//    - INÍCIO do clipe: aparece 5s após sintonizar, fica 25s (GC_DELAY, GC_DURATION)
+//    - FIM do clipe: volta 30s antes do fim, some 5s antes (GC_END_LEAD)
+//    - Mostra: música tocando (título do vídeo) + próxima faixa ("A seguir: ...")
+//    - Canais comuns: GC NUNCA entra sozinho, só com gcAlways=true no programa ou canal
+//
+// 3. DURAÇÃO DO PROGRAMA = soma de TODOS os vídeos da playlist
+//    O painel Admin calcula automaticamente via "🔍 Buscar Todos"
+// ============================================
+
+// ============================================
 // FALLBACK DATA
 // ============================================
 const FALLBACK_CHANNELS = [
