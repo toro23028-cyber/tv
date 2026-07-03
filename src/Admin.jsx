@@ -389,7 +389,8 @@ function TimelineView({programs,channels,selectedChannel,onEdit,onDelete,onReord
         {/* Time */}
         <div style={{minWidth:85,textAlign:"center"}}>
           <div style={{fontSize:14,fontWeight:700,color:"#fff"}}>{fmtSec(Number(prog.horarioInicio))}</div>
-          <div style={{fontSize:10,color:Number(prog.horarioFim)>86400?"#ffca28":"#555",fontWeight:Number(prog.horarioFim)>86400?700:400}}>até {fmtSecX(Number(prog.horarioFim))}</div>
+          {isMaratona?<div style={{fontSize:10,color:"#ffca28",fontWeight:700}}>até {fmtSecX(Number(prog.horarioFim))}</div>
+           :<div style={{fontSize:10,color:Number(prog.horarioFim)>86400?"#ffca28":"#555",fontWeight:Number(prog.horarioFim)>86400?700:400}}>até {fmtSecX(Number(prog.horarioFim))}</div>}
         </div>
         <div style={{width:3,height:40,borderRadius:2,background:ch?.cor||"#555"}}/>
         <div style={{flex:1,minWidth:0}}>
@@ -398,7 +399,6 @@ function TimelineView({programs,channels,selectedChannel,onEdit,onDelete,onReord
             <span style={{fontSize:9,padding:"2px 6px",borderRadius:3,background:CC[prog.classificacao]||"#555",color:prog.classificacao==="L"?"#fff":"#000",fontWeight:700}}>{prog.classificacao}</span>
             {isMaratona&&<span style={{fontSize:9,padding:"2px 6px",borderRadius:3,background:"rgba(255,202,40,0.2)",border:"1px solid rgba(255,202,40,0.4)",color:"#ffca28",fontWeight:800}}>🏃 MARATONA</span>}
             {prog.gcAlways&&<span style={{fontSize:9,padding:"2px 6px",borderRadius:3,background:"rgba(156,39,176,0.25)",color:"#ce93d8",fontWeight:700}}>♪ GC</span>}
-            {isMulti&&<span style={{fontSize:9,padding:"2px 6px",borderRadius:3,background:"#9c27b0",color:"#fff",fontWeight:700}}>{prog.videos.length}v</span>}
             {prog.tags?.map(t=><span key={t} style={{fontSize:9,padding:"2px 6px",borderRadius:3,background:"rgba(255,255,255,0.08)",color:"#aaa",fontWeight:600}}>{t}</span>)}
           </div>
           <div style={{fontSize:11,color:"#888"}}>{fDur(dur)}</div>
@@ -523,7 +523,25 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
               <span style={{fontSize:10,color:"#555"}}>{videos.length} vídeo(s)</span>
               <input type="checkbox" checked={videos.length>0&&selectedVideos.size===videos.length} onChange={e=>{if(e.target.checked){const newSel=new Set();for(let i=0;i<videos.length;i++)newSel.add(i);setSelectedVideos(newSel)}else{setSelectedVideos(new Set())}}} title="Marcar/desmarcar todos" style={{width:14,height:14,cursor:"pointer",accentColor:"#4caf50"}}/>
               <button onClick={()=>{setBulkText("");setBulkStatus("");setShowBulkPaste(true)}} style={{fontSize:11,color:"#ffca28",background:"rgba(255,202,40,0.1)",border:"1px solid rgba(255,202,40,0.35)",padding:"4px 10px",borderRadius:3,cursor:"pointer",fontWeight:700}}>📋 Colar Playlist</button>
-              <button onClick={async()=>{const videoCopy=[...videos];for(let i=0;i<videoCopy.length;i++){const vId=extractYouTubeId(videoCopy[i].youtubeUrl);if(vId){const meta=await fetchYouTubeMetadata(vId);if(meta){const nv=[...videoCopy];nv[i]={...nv[i],youtubeUrl:videoCopy[i].youtubeUrl,titulo:meta.title};setVideos(nv);videoCopy[i]=nv[i];if(i===0){setCH(Math.floor(meta.duration/3600));setCM(Math.floor((meta.duration%3600)/60));setSinopse(meta.description)}}}}}} style={{fontSize:10,color:"#4caf50",background:"rgba(76,175,80,0.1)",border:"1px solid rgba(76,175,80,0.3)",padding:"2px 8px",borderRadius:3,cursor:"pointer",fontWeight:600}}>🔍 Buscar Todos</button>
+              <button onClick={async()=>{
+                setError("🔍 Buscando metadados de todos os vídeos...");
+                const videoCopy=[...videos];let totalDur=0,count=0;
+                for(let i=0;i<videoCopy.length;i++){
+                  const vId=extractYouTubeId(videoCopy[i].youtubeUrl);
+                  if(vId){
+                    const meta=await fetchYouTubeMetadata(vId);
+                    if(meta){
+                      const nv=[...videoCopy];
+                      nv[i]={...nv[i],youtubeUrl:videoCopy[i].youtubeUrl,titulo:meta.title,duration:meta.duration};
+                      setVideos(nv);videoCopy[i]=nv[i];
+                      totalDur+=meta.duration;count++;
+                      if(i===0)setSinopse(meta.description);
+                    }
+                  }
+                }
+                if(totalDur>0){setCH(Math.floor(totalDur/3600));setCM(Math.floor((totalDur%3600)/60));setDP(0)}
+                setError(count>0?`✅ ${count} vídeo(s) consultados — duração total: ${fDur(totalDur)}`:"");
+              }} style={{fontSize:10,color:"#4caf50",background:"rgba(76,175,80,0.1)",border:"1px solid rgba(76,175,80,0.3)",padding:"2px 8px",borderRadius:3,cursor:"pointer",fontWeight:600}}>🔍 Buscar Todos</button>
             </div>
           </div>
           <div style={{fontSize:10,color:"#666",marginBottom:8,fontStyle:"italic"}}>💡 Cole a URL do YouTube num campo (uma por linha). Se colar um link de playlist (com <code>list=</code>), aparece o botão <b>🎵 Importar Playlist</b>. Para colar várias URLs de uma vez, use <b>📋 Colar Playlist</b>.</div>
@@ -563,6 +581,20 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
             </div>)}
           </div>
           <button onClick={()=>setVideos([...videos,{youtubeUrl:"",titulo:""}])} style={{marginTop:8,padding:"8px 14px",borderRadius:4,cursor:"pointer",background:"rgba(76,175,80,0.1)",border:"1px solid rgba(76,175,80,0.3)",color:"#4caf50",fontSize:12,fontWeight:600,width:"100%"}}>+ Adicionar vídeo</button>
+          {/* Ferramentas da playlist */}
+          {videos.length>1&&<div style={{marginTop:8,display:"flex",gap:6,flexWrap:"wrap"}}>
+            <button onClick={()=>{
+              const clean=videos.map(v=>({...v,titulo:(v.titulo||"").replace(/\s*[\(\[](Official\s*(Music\s*)?Video|Lyric\s*Video|Audio|Clipe Oficial|Videoclipe|Vídeo Oficial|Official Audio|HD|HQ|4K|Remastered|ft\.?[^)\]]*|feat\.?[^)\]]*|prod\.?[^)\]]*)[\)\]]/gi,"").replace(/\s*(Official\s*(Music\s*)?Video|Lyric\s*Video|Official Audio|Clipe Oficial|Videoclipe|Vídeo Oficial)/gi,"").replace(/\s{2,}/g," ").trim()}));
+              setVideos(clean);
+            }} title="Remove 'Official Video', 'Clipe Oficial', etc. dos títulos" style={{padding:"6px 12px",borderRadius:4,cursor:"pointer",fontSize:11,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.1)",color:"#aaa"}}>🧹 Limpar nomes</button>
+            <button onClick={()=>{
+              const valid=videos.filter(v=>{const t=(v.titulo||"").toLowerCase();return v.youtubeUrl.trim()&&!t.includes("deleted video")&&!t.includes("private video")&&!t.includes("vídeo removido")&&!t.includes("video privado")});
+              if(valid.length<videos.length){setVideos(valid);setError(`🗑️ ${videos.length-valid.length} vídeo(s) deletado(s)/privado(s) removido(s)`)}else setError("✅ Nenhum vídeo deletado ou privado encontrado");
+            }} title="Remove vídeos com título 'Deleted video' ou 'Private video'" style={{padding:"6px 12px",borderRadius:4,cursor:"pointer",fontSize:11,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.1)",color:"#aaa"}}>🗑️ Remover deletados</button>
+            <button onClick={()=>{
+              const shuffled=[...videos];for(let i=shuffled.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[shuffled[i],shuffled[j]]=[shuffled[j],shuffled[i]]}setVideos(shuffled);
+            }} title="Embaralha a ordem dos vídeos" style={{padding:"6px 12px",borderRadius:4,cursor:"pointer",fontSize:11,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.1)",color:"#aaa"}}>🔀 Aleatorizar</button>
+          </div>}
         </div>
 
         {/* Bulk paste modal */}
