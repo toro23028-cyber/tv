@@ -2,7 +2,7 @@ import { initializeApp } from "firebase/app";
 import { getFirestore, collection, doc, getDocs, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy } from "firebase/firestore";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyDVPcI9Gfxmox_3k0H68_MnPO_TgLMVc2A",
+  apiKey: "AIzaSyCt0t7IvYYPMXTfXB1zZ6AB4Na9JpL50EQ",
   authDomain: "tvweb-71058.firebaseapp.com",
   projectId: "tvweb-71058",
   storageBucket: "tvweb-71058.appspot.com",
