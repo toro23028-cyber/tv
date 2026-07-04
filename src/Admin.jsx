@@ -120,13 +120,17 @@ function parseYouTubeBulk(text){
 // Consulta os vídeos de uma playlist do YouTube (até 200) via Data API v3
 // Retorna lista de {youtubeUrl, titulo}. NÃO baixa vídeo nenhum — só busca metadados.
 // Retorna [] e define window.__ytLastError com detalhe do erro em caso de falha.
+// Converte duration ISO 8601 (PT4M33S) → segundos
+function parseDurationISO(d){if(!d)return 0;const m=d.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);return(parseInt(m?.[1]||0))*3600+(parseInt(m?.[2]||0))*60+(parseInt(m?.[3]||0))}
+
 async function fetchYouTubePlaylistItems(playlistId){
   window.__ytLastError=null;
   if(!playlistId){window.__ytLastError="ID de playlist vazio";return []}
   const API_KEY="AIzaSyCt0t7IvYYPMXTfXB1zZ6AB4Na9JpL50EQ";
-  const items=[];let pageToken="";
+  const rawItems=[];let pageToken="";
   try{
-    for(let i=0;i<4;i++){ // até 4 páginas (200 vídeos)
+    // ETAPA 1: Busca todos os vídeos da playlist (IDs + títulos)
+    for(let i=0;i<4;i++){
       const url=`https://www.googleapis.com/youtube/v3/playlistItems?playlistId=${playlistId}&key=${API_KEY}&part=snippet&maxResults=50${pageToken?`&pageToken=${pageToken}`:""}`;
       const res=await fetch(url);
       if(!res.ok){
@@ -140,16 +144,32 @@ async function fetchYouTubePlaylistItems(playlistId){
       const data=await res.json();
       for(const it of (data.items||[])){
         const vid=it.snippet?.resourceId?.videoId;
-        if(vid)items.push({youtubeUrl:`https://youtu.be/${vid}`,titulo:it.snippet.title||""});
+        if(vid)rawItems.push({videoId:vid,youtubeUrl:`https://youtu.be/${vid}`,titulo:it.snippet.title||"",duration:0});
       }
       if(!data.nextPageToken)break;
       pageToken=data.nextPageToken;
+    }
+    // ETAPA 2: Busca durações em batch (até 50 IDs por chamada)
+    for(let b=0;b<rawItems.length;b+=50){
+      const batch=rawItems.slice(b,b+50);
+      const ids=batch.map(v=>v.videoId).join(",");
+      try{
+        const url=`https://www.googleapis.com/youtube/v3/videos?id=${ids}&key=${API_KEY}&part=contentDetails&maxResults=50`;
+        const res=await fetch(url);
+        if(res.ok){
+          const data=await res.json();
+          const durMap={};
+          for(const it of (data.items||[]))durMap[it.id]=parseDurationISO(it.contentDetails?.duration);
+          for(const v of batch)v.duration=durMap[v.videoId]||0;
+        }
+      }catch(err){console.error("Duration batch err:",err)}
     }
   }catch(err){
     window.__ytLastError=`Rede: ${err.message}`;
     console.error("Playlist fetch err:",err);
   }
-  return items;
+  // Remove o videoId auxiliar do objeto final
+  return rawItems.map(({videoId,...rest})=>rest);
 }
 async function fetchYouTubeMetadata(videoId){
   if(!videoId)return null;
