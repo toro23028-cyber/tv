@@ -90,12 +90,12 @@ function dateSecondsToAbsolute(dateStr,secondsInDay){
 function buildScheduleAdmin(programs, channelId, channel, selDate) {
   const dayAbs = dateSecondsToAbsolute(selDate, 0);
   const real = programs
-    .filter(p => p.canalId === channelId && p.data && !p.isJingle)
+    .filter(p => p.canalId === channelId && p.data)
     .map(p => ({...p, _absStart: dateSecondsToAbsolute(p.data, Number(p.horarioInicio))}))
     .sort((a, b) => a._absStart - b._absStart);
   if (!channel?.eternity || real.length === 0) {
     return programs
-      .filter(p => p.canalId === channelId && p.data === selDate && !p.isJingle)
+      .filter(p => p.canalId === channelId && p.data === effectiveSelDate)
       .sort((a, b) => Number(a.horarioInicio) - Number(b.horarioInicio));
   }
   const days = Math.max(1, Number(channel.eternityDays) || 1);
@@ -198,13 +198,26 @@ async function fetchYouTubePlaylistItems(playlistId){
       const batch=rawItems.slice(b,b+50);
       const ids=batch.map(v=>v.videoId).join(",");
       try{
-        const url=`https://www.googleapis.com/youtube/v3/videos?id=${ids}&key=${API_KEY}&part=contentDetails&maxResults=50`;
+        const url=`https://www.googleapis.com/youtube/v3/videos?id=${ids}&key=${API_KEY}&part=contentDetails,status&maxResults=50`;
         const res=await fetch(url);
         if(res.ok){
           const data=await res.json();
-          const durMap={};
-          for(const it of (data.items||[]))durMap[it.id]=parseDurationISO(it.contentDetails?.duration);
-          for(const v of batch)v.duration=durMap[v.videoId]||0;
+          const infoMap={};
+          for(const it of (data.items||[])){
+            infoMap[it.id]={
+              duration:parseDurationISO(it.contentDetails?.duration),
+              embeddable:it.status?.embeddable!==false,
+              uploadStatus:it.status?.uploadStatus||"processed",
+            };
+          }
+          for(const v of batch){
+            const info=infoMap[v.videoId];
+            if(info){
+              v.duration=info.duration||0;
+              // blocked=true → avisa no painel, mas não remove automaticamente
+              v.blocked=!info.embeddable||info.uploadStatus==="deleted"||info.uploadStatus==="rejected";
+            }
+          }
         }
       }catch(err){console.error("Duration batch err:",err)}
     }
@@ -219,7 +232,8 @@ async function fetchYouTubeMetadata(videoId){
   if(!videoId)return null;
   try{
     const API_KEY="AIzaSyCt0t7IvYYPMXTfXB1zZ6AB4Na9JpL50EQ";
-    const url=`https://www.googleapis.com/youtube/v3/videos?id=${videoId}&key=${API_KEY}&part=snippet,contentDetails`;
+    // part=status traz embeddable e uploadStatus — essencial para detectar bloqueio ANTES de ir ao ar
+    const url=`https://www.googleapis.com/youtube/v3/videos?id=${videoId}&key=${API_KEY}&part=snippet,contentDetails,status`;
     const res=await fetch(url);
     if(!res.ok)return null;
     const data=await res.json();
@@ -232,7 +246,18 @@ async function fetchYouTubeMetadata(videoId){
     const minutes=parseInt(match?.[2]||0);
     const seconds=parseInt(match?.[3]||0);
     const totalSeconds=hours*3600+minutes*60+seconds;
-    return{duration:totalSeconds,description:snippet.description,title:snippet.title,thumbnail:snippet.thumbnails.default.url};
+    // status.embeddable=false → não pode ser embarcado (bloqueio por direitos, configuração do canal, etc.)
+    const embeddable=item.status?.embeddable!==false; // default true se campo ausente
+    const uploadStatus=item.status?.uploadStatus||"processed";
+    return{
+      duration:totalSeconds,
+      description:snippet.description,
+      title:snippet.title,
+      thumbnail:snippet.thumbnails?.default?.url||null,
+      embeddable,          // false = vai dar tela em branco/erro no player
+      uploadStatus,        // "deleted"|"failed"|"processed"|"rejected"|"uploading"
+      blocked:!embeddable||uploadStatus==="deleted"||uploadStatus==="rejected",
+    };
   }catch(err){
     console.error("Erro ao buscar metadados YouTube:",err);
     return null;
@@ -635,23 +660,28 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
               <input type="checkbox" checked={videos.length>0&&selectedVideos.size===videos.length} onChange={e=>{if(e.target.checked){const newSel=new Set();for(let i=0;i<videos.length;i++)newSel.add(i);setSelectedVideos(newSel)}else{setSelectedVideos(new Set())}}} title="Marcar/desmarcar todos" style={{width:14,height:14,cursor:"pointer",accentColor:"#4caf50"}}/>
               <button onClick={()=>{setBulkText("");setBulkStatus("");setShowBulkPaste(true)}} style={{fontSize:11,color:"#ffca28",background:"rgba(255,202,40,0.1)",border:"1px solid rgba(255,202,40,0.35)",padding:"4px 10px",borderRadius:3,cursor:"pointer",fontWeight:700}}>📋 Colar Playlist</button>
               <button onClick={async()=>{
-                setError("🔍 Buscando metadados de todos os vídeos...");
-                const videoCopy=[...videos];let totalDur=0,count=0;
+                setError("🔍 Verificando vídeos (duração + disponibilidade)...");
+                const videoCopy=[...videos];let totalDur=0,count=0,blocked=[];
                 for(let i=0;i<videoCopy.length;i++){
                   const vId=extractYouTubeId(videoCopy[i].youtubeUrl);
                   if(vId){
                     const meta=await fetchYouTubeMetadata(vId);
                     if(meta){
                       const nv=[...videoCopy];
-                      nv[i]={...nv[i],youtubeUrl:videoCopy[i].youtubeUrl,titulo:meta.title,duration:meta.duration};
+                      nv[i]={...nv[i],youtubeUrl:videoCopy[i].youtubeUrl,titulo:meta.title,duration:meta.duration,blocked:meta.blocked||false};
                       setVideos(nv);videoCopy[i]=nv[i];
                       totalDur+=meta.duration;count++;
+                      if(meta.blocked)blocked.push(meta.title||vId);
                       if(i===0)setSinopse(meta.description);
                     }
                   }
                 }
                 if(totalDur>0){setCH(Math.floor(totalDur/3600));setCM(Math.floor((totalDur%3600)/60));setDP(0)}
-                setError(count>0?`✅ ${count} vídeo(s) consultados — duração total: ${fDur(totalDur)}`:"");
+                if(blocked.length>0){
+                  setError(`⚠️ ${count} vídeo(s) verificados — ${blocked.length} BLOQUEADO(S) para embed: ${blocked.join(", ")}. Esses vídeos NÃO podem ser exibidos no iframe — remova-os ou substitua.`);
+                } else {
+                  setError(count>0?`✅ ${count} vídeo(s) verificados — todos disponíveis para exibição — duração total: ${fDur(totalDur)}`:"");
+                }
               }} style={{fontSize:10,color:"#4caf50",background:"rgba(76,175,80,0.1)",border:"1px solid rgba(76,175,80,0.3)",padding:"2px 8px",borderRadius:3,cursor:"pointer",fontWeight:600}}>🔍 Buscar Todos</button>
             </div>
           </div>
@@ -668,7 +698,7 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
             {videos.map((v,i)=><div key={i} style={{display:"flex",gap:8,alignItems:"center",padding:"8px 10px",background:"rgba(255,255,255,0.02)",borderRadius:4,border:"1px solid rgba(255,255,255,0.06)"}}>
               <input type="checkbox" checked={selectedVideos.has(i)} onChange={()=>{const newSel=new Set(selectedVideos);if(newSel.has(i))newSel.delete(i);else newSel.add(i);setSelectedVideos(newSel)}} style={{width:16,height:16,cursor:"pointer",accentColor:"#4caf50",flexShrink:0}}/>
               <span style={{fontSize:11,color:"#555",fontWeight:700,minWidth:20}}>#{i+1}</span>
-              {(()=>{const t=ytThumb(v.youtubeUrl);return t?<img src={t} alt="" style={{width:40,height:26,borderRadius:3,objectFit:"cover"}}/>:null})()}
+              {(()=>{const t=ytThumb(v.youtubeUrl);return t?<div style={{position:"relative",flexShrink:0}}><img src={t} alt="" style={{width:40,height:26,borderRadius:3,objectFit:"cover",opacity:v.blocked?0.4:1}}/>{v.blocked&&<span title="Bloqueado para embed — não pode ser exibido" style={{position:"absolute",top:-4,right:-4,background:"#f44336",color:"#fff",borderRadius:"50%",width:14,height:14,fontSize:9,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800}}>!</span>}</div>:null})()}
               <input value={v.youtubeUrl}
                 onChange={e=>{const nv=[...videos];nv[i]={...v,youtubeUrl:e.target.value};setVideos(nv)}}
                 placeholder="Cole a URL do YouTube" style={{...iS,flex:1}}/>
@@ -699,9 +729,13 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
               setVideos(clean);
             }} title="Remove 'Official Video', 'Clipe Oficial', etc. dos títulos" style={{padding:"6px 12px",borderRadius:4,cursor:"pointer",fontSize:11,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.1)",color:"#aaa"}}>🧹 Limpar nomes</button>
             <button onClick={()=>{
-              const valid=videos.filter(v=>{const t=(v.titulo||"").toLowerCase();return v.youtubeUrl.trim()&&!t.includes("deleted video")&&!t.includes("private video")&&!t.includes("vídeo removido")&&!t.includes("video privado")});
+              const valid=videos.filter(v=>{
+                const t=(v.titulo||"").toLowerCase();
+                const titleBad=t.includes("deleted video")||t.includes("private video")||t.includes("vídeo removido")||t.includes("video privado");
+                return v.youtubeUrl.trim()&&!titleBad&&!v.blocked;
+              });
               if(valid.length<videos.length){setVideos(valid);setError(`🗑️ ${videos.length-valid.length} vídeo(s) deletado(s)/privado(s) removido(s)`)}else setError("✅ Nenhum vídeo deletado ou privado encontrado");
-            }} title="Remove vídeos com título 'Deleted video' ou 'Private video'" style={{padding:"6px 12px",borderRadius:4,cursor:"pointer",fontSize:11,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.1)",color:"#aaa"}}>🗑️ Remover deletados</button>
+            }} title="Remove vídeos com título 'Deleted video', 'Private video' ou marcados como bloqueados pelo 🔍 Buscar Todos" style={{padding:"6px 12px",borderRadius:4,cursor:"pointer",fontSize:11,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.1)",color:"#aaa"}}>🗑️ Remover deletados/bloqueados</button>
             <button onClick={()=>{
               const shuffled=[...videos];for(let i=shuffled.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[shuffled[i],shuffled[j]]=[shuffled[j],shuffled[i]]}setVideos(shuffled);
             }} title="Embaralha a ordem dos vídeos" style={{padding:"6px 12px",borderRadius:4,cursor:"pointer",fontSize:11,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.1)",color:"#aaa"}}>🔀 Aleatorizar</button>
@@ -776,6 +810,17 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
         {/* Exibição: GC + Maratona */}
         <div><label style={lS}>EXIBIÇÃO</label>
           <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {/* Tipo: Vinheta/Intervalo */}
+            <label style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:isJingle?"rgba(156,39,176,0.12)":"rgba(255,255,255,0.02)",border:isJingle?"1px solid rgba(156,39,176,0.35)":"1px solid rgba(255,255,255,0.06)",borderRadius:6,cursor:"pointer"}}>
+              <input type="checkbox" checked={isJingle} onChange={e=>{setIsJingle(e.target.checked);if(e.target.checked&&!jingleType)setJingleType("break")}} style={{width:16,height:16,accentColor:"#9c27b0",cursor:"pointer"}}/>
+              <div style={{flex:1}}><div style={{fontSize:13,fontWeight:600,color:isJingle?"#ce93d8":"#ccc"}}>🎬 Vinheta / Intervalo</div>
+              <div style={{fontSize:11,color:"#777"}}>Toca sem mostrar informações de programa na tela. Ideal para vinhetas de abertura, encerramento e intervalos comerciais.</div></div>
+              {isJingle&&<select value={jingleType} onChange={e=>setJingleType(e.target.value)} onClick={e=>e.preventDefault()} style={{...iS,width:130,cursor:"pointer",flexShrink:0}}>
+                <option value="open">🎬 Abertura</option>
+                <option value="break">📢 Intervalo</option>
+                <option value="close">🏁 Encerramento</option>
+              </select>}
+            </label>
             <label style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:gcAlways?"rgba(156,39,176,0.12)":"rgba(255,255,255,0.02)",border:gcAlways?"1px solid rgba(156,39,176,0.4)":"1px solid rgba(255,255,255,0.06)",borderRadius:6,cursor:"pointer"}}>
               <input type="checkbox" checked={gcAlways} onChange={e=>setGcAlways(e.target.checked)} style={{width:16,height:16,accentColor:"#9c27b0",cursor:"pointer"}}/>
               <div><div style={{fontSize:13,fontWeight:600,color:gcAlways?"#ce93d8":"#ccc"}}>♪ GC durante todo o programa</div>
