@@ -82,6 +82,48 @@ function dateSecondsToAbsolute(dateStr,secondsInDay){
   const daysDiff=Math.floor((targetDate-BASE_DATE)/(1000*60*60*24));
   return daysDiff*86400+secondsInDay;
 }
+
+// buildScheduleAdmin: projeta a grade para a data selecionada no painel.
+// Com eternity: projeta os programas do ciclo na data selecionada.
+// Sem eternity: retorna os programas reais daquele dia normalmente.
+// _isProjected=true indica projeção virtual (editar abre o dia original no banco).
+function buildScheduleAdmin(programs, channelId, channel, selDate) {
+  const dayAbs = dateSecondsToAbsolute(selDate, 0);
+  const real = programs
+    .filter(p => p.canalId === channelId && p.data && !p.isJingle)
+    .map(p => ({...p, _absStart: dateSecondsToAbsolute(p.data, Number(p.horarioInicio))}))
+    .sort((a, b) => a._absStart - b._absStart);
+  if (!channel?.eternity || real.length === 0) {
+    return programs
+      .filter(p => p.canalId === channelId && p.data === selDate && !p.isJingle)
+      .sort((a, b) => Number(a.horarioInicio) - Number(b.horarioInicio));
+  }
+  const days = Math.max(1, Number(channel.eternityDays) || 1);
+  const cycle = days * 86400;
+  const anchor = Math.floor(real[0]._absStart / 86400) * 86400;
+  const baseN = Math.floor((dayAbs - anchor) / cycle);
+  const projected = [];
+  for (const p of real) {
+    for (const n of [baseN - 1, baseN, baseN + 1]) {
+      const shiftedStart = p._absStart + n * cycle;
+      const shiftedEnd = shiftedStart + Number(p.duracao);
+      if (shiftedEnd > dayAbs && shiftedStart < dayAbs + 86400) {
+        const startInDay = Math.max(0, shiftedStart - dayAbs);
+        const endInDay = Math.min(86400, shiftedEnd - dayAbs);
+        projected.push({
+          ...p,
+          _isProjected: true,
+          _srcDate: p.data,
+          _srcHorarioInicio: p.horarioInicio,
+          horarioInicio: startInDay,
+          horarioFim: endInDay,
+          duracao: endInDay - startInDay,
+        });
+      }
+    }
+  }
+  return projected.sort((a, b) => a.horarioInicio - b.horarioInicio);
+}
 function getAbsoluteNow(){
   const now=new Date();
   const local=now.getHours()*3600+now.getMinutes()*60+now.getSeconds();
@@ -259,6 +301,7 @@ function ImgUploader({currentImage,imageType,onImageChange,label,shape="square"}
 // • Duplo clique = abrir edição completa
 // ============================================
 function GradeVisual({programs,channels,selectedChannel,selDate,onEdit,notify}){
+  // programs já vem filtrado por data+canal via dayProgs (inclui projeções do eternity)
   const filtered=programs.filter(p=>p.canalId===selectedChannel).sort((a,b)=>Number(a.horarioInicio)-Number(b.horarioInicio));
   const ch=channels.find(c=>c.id===selectedChannel);
   const PXH=80, pxPerSec=PXH/3600, totalW=PXH*24, ROWH=92;
@@ -330,22 +373,24 @@ function GradeVisual({programs,channels,selectedChannel,selDate,onEdit,notify}){
           const du=isD&&drag.mode==="resize"?drag.dur:Number(p.duracao);
           const left=s*pxPerSec, w=Math.max(du*pxPerSec,40);
           const isMar=p.maratona===true||Number(p.duracao)>AUTO_MARATONA_MIN;
-          return <div key={p.id}
-            onPointerDown={e=>{if(e.target.dataset&&e.target.dataset.handle)startDrag(e,p,"resize");else startDrag(e,p,"move")}}
-            onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}
-            onDoubleClick={()=>onEdit(p)}
-            title="Arraste para mover · borda direita = duração · duplo clique = editar"
+          const isProj=!!p._isProjected;
+          const editProg=isProj?{...p,horarioInicio:p._srcHorarioInicio,horarioFim:Number(p._srcHorarioInicio)+Number(p.duracao),data:p._srcDate,_isProjected:false}:p;
+          return <div key={p.id+"-"+s}
+            onPointerDown={isProj?undefined:e=>{if(e.target.dataset&&e.target.dataset.handle)startDrag(e,p,"resize");else startDrag(e,p,"move")}}
+            onPointerMove={isProj?undefined:moveDrag} onPointerUp={isProj?undefined:endDrag} onPointerCancel={isProj?undefined:endDrag}
+            onDoubleClick={()=>onEdit(editProg)}
+            title={isProj?`Projeção do ciclo ∞ — original em ${p._srcDate} · duplo clique para editar`:"Arraste para mover · borda direita = duração · duplo clique = editar"}
             style={{position:"absolute",left,width:w,top:32,height:ROWH-40,
-              cursor:isD?(drag.mode==="move"?"grabbing":"ew-resize"):"grab",
-              background:isD?`${ch?.cor||"#1a73e8"}55`:`${ch?.cor||"#1a73e8"}28`,
-              border:`1px solid ${ch?.cor||"#1a73e8"}88`,borderLeft:`4px solid ${ch?.cor||"#1a73e8"}`,
+              cursor:isProj?"pointer":isD?(drag.mode==="move"?"grabbing":"ew-resize"):"grab",
+              background:isProj?`${ch?.cor||"#1a73e8"}18`:isD?`${ch?.cor||"#1a73e8"}55`:`${ch?.cor||"#1a73e8"}28`,
+              border:`1px solid ${ch?.cor||"#1a73e8"}${isProj?"44":"88"}`,borderLeft:`4px solid ${isProj?"#4dd0e1":ch?.cor||"#1a73e8"}`,
               borderRadius:6,boxSizing:"border-box",touchAction:"none",zIndex:isD?5:1,
               boxShadow:isD?"0 6px 18px rgba(0,0,0,0.55)":"none",transition:isD?"none":"box-shadow 0.15s"}}>
             <div style={{padding:"7px 12px 0 10px",overflow:"hidden",height:"100%",boxSizing:"border-box",pointerEvents:"none"}}>
-              <div style={{fontSize:12,fontWeight:700,color:"#fff",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{isMar?"🏃 ":""}{p.nome}</div>
+              <div style={{fontSize:12,fontWeight:700,color:isProj?"#4dd0e1":"#fff",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{isProj?"∞ ":isMar?"🏃 ":""}{p.nome}</div>
               <div style={{fontSize:10,color:s+du>86400?"#ffca28":"#aaa",marginTop:3,whiteSpace:"nowrap"}}>{fmtSec(s)} – {fmtSecX(s+du)} · {fDur(du)}{p.gcAlways?" · ♪":""}</div>
             </div>
-            <div data-handle="1" style={{position:"absolute",right:0,top:0,bottom:0,width:12,cursor:"ew-resize",borderRadius:"0 6px 6px 0",background:isD&&drag.mode==="resize"?`${ch?.cor||"#1a73e8"}aa`:"rgba(255,255,255,0.06)"}}/>
+            {!isProj&&<div data-handle="1" style={{position:"absolute",right:0,top:0,bottom:0,width:12,cursor:"ew-resize",borderRadius:"0 6px 6px 0",background:isD&&drag.mode==="resize"?`${ch?.cor||"#1a73e8"}aa`:"rgba(255,255,255,0.06)"}}/>}
             {isD&&<div style={{position:"absolute",top:-26,left:0,background:"#000",border:`1px solid ${ch?.cor||"#1a73e8"}`,color:"#fff",fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:4,whiteSpace:"nowrap",zIndex:10,pointerEvents:"none"}}>{fmtSec(s)} – {fmtSecX(s+du)} · {fDur(du)}</div>}
           </div>;
         })}
@@ -356,7 +401,9 @@ function GradeVisual({programs,channels,selectedChannel,selDate,onEdit,notify}){
 }
 
 function TimelineView({programs,channels,selectedChannel,onEdit,onDelete,onReorder,onToggleSelect,selectedProgs}){
+  // programs já vem filtrado por data+canal via dayProgs (inclui projeções do eternity)
   const filtered=programs.filter(p=>p.canalId===selectedChannel).sort((a,b)=>Number(a.horarioInicio)-Number(b.horarioInicio));
+  const hasProjected = filtered.some(p=>p._isProjected);
   const [dragIdx,setDragIdx]=useState(null);
   const [overIdx,setOverIdx]=useState(null);
 
@@ -385,6 +432,10 @@ function TimelineView({programs,channels,selectedChannel,onEdit,onDelete,onReord
   if(Number(filtered[filtered.length-1].horarioFim)<86400) gaps.push({start:Number(filtered[filtered.length-1].horarioFim),end:86400});
 
   return <div style={{display:"flex",flexDirection:"column",gap:4}}>
+    {hasProjected&&<div style={{padding:"10px 14px",marginBottom:8,background:"rgba(0,188,212,0.08)",border:"1px solid rgba(0,188,212,0.25)",borderRadius:8,fontSize:12,color:"#4dd0e1",display:"flex",alignItems:"center",gap:8}}>
+      <span style={{fontSize:16}}>∞</span>
+      <span><b>Modo Eternity ativo:</b> programas exibidos são projetados do ciclo original. Clique em ✏️ para editar o programa na data em que foi cadastrado. Para adicionar programas neste dia, desative o Eternity primeiro.</span>
+    </div>}
     {filtered.map((prog,i)=>{
       const ch=channels.find(c=>c.id===prog.canalId);
       const isMulti=prog.videos&&prog.videos.length>1;
@@ -393,18 +444,21 @@ function TimelineView({programs,channels,selectedChannel,onEdit,onDelete,onReord
       const dur=Number(prog.duracao);
       const isMaratona=prog.maratona===true||dur>AUTO_MARATONA_MIN;
       const blocos=isMaratona&&dur>Math.max(1800,Number(prog.blocoDuracao)||BLOCO_PADRAO)?computeBlocos(prog.horarioInicio,dur,prog.blocoDuracao):null;
-      return <div key={prog.id} style={{display:"flex",flexDirection:"column",gap:0}}>
-      <div draggable onDragStart={e=>handleDragStart(e,i)} onDragOver={e=>handleDragOver(e,i)} onDrop={e=>handleDrop(e,i)} onDragEnd={()=>{setDragIdx(null);setOverIdx(null)}}
+      const isProj=!!prog._isProjected; // projeção do eternity — não permite drag
+      return <div key={prog.id+"-"+i} style={{display:"flex",flexDirection:"column",gap:0}}>
+      <div draggable={!isProj} onDragStart={isProj?undefined:e=>handleDragStart(e,i)} onDragOver={isProj?undefined:e=>handleDragOver(e,i)} onDrop={isProj?undefined:e=>handleDrop(e,i)} onDragEnd={isProj?undefined:()=>{setDragIdx(null);setOverIdx(null)}}
         style={{
           display:"flex",alignItems:"center",gap:12,padding:"12px 14px",
-          background:isDragOver?"rgba(26,115,232,0.15)":"rgba(255,255,255,0.03)",borderRadius:blocos?"6px 6px 0 0":6,
-          border:isDragOver?"2px dashed #1a73e8":"1px solid rgba(255,255,255,0.06)",
-          cursor:"grab",transition:"all 0.15s",opacity:dragIdx===i?0.4:1,
+          background:isProj?"rgba(0,188,212,0.05)":isDragOver?"rgba(26,115,232,0.15)":"rgba(255,255,255,0.03)",borderRadius:blocos?"6px 6px 0 0":6,
+          border:isProj?"1px solid rgba(0,188,212,0.2)":isDragOver?"2px dashed #1a73e8":"1px solid rgba(255,255,255,0.06)",
+          cursor:isProj?"default":"grab",transition:"all 0.15s",opacity:dragIdx===i?0.4:1,
         }}>
-        {/* Checkbox - LEFT */}
-        <input type="checkbox" checked={selectedProgs.has(prog.id)} onChange={()=>onToggleSelect(prog.id)} style={{width:18,height:18,cursor:"pointer",accentColor:"#4caf50",flexShrink:0}}/>
-        {/* Drag handle */}
-        <div style={{fontSize:16,color:"#555",cursor:"grab",padding:"0 4px"}}>⠿</div>
+        {/* Checkbox - desabilitado para projeções */}
+        <input type="checkbox" disabled={isProj} checked={!isProj&&selectedProgs.has(prog.id)} onChange={()=>!isProj&&onToggleSelect(prog.id)} style={{width:18,height:18,cursor:isProj?"not-allowed":"pointer",accentColor:"#4caf50",flexShrink:0,opacity:isProj?0.3:1}}/>
+        {/* Drag handle ou badge eternity */}
+        {isProj
+          ? <span title={`Projeção do ciclo — original em ${prog._srcDate}`} style={{fontSize:12,color:"#4dd0e1",padding:"0 4px",flexShrink:0}}>∞</span>
+          : <div style={{fontSize:16,color:"#555",cursor:"grab",padding:"0 4px"}}>⠿</div>}
         {/* Thumb */}
         {thumb?<img src={thumb} alt="" style={{width:64,height:40,borderRadius:4,objectFit:"cover",flexShrink:0}}/>:
           <div style={{width:64,height:40,borderRadius:4,background:"rgba(255,255,255,0.06)",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><span style={{fontSize:18,opacity:0.3}}>🎬</span></div>}
@@ -419,14 +473,18 @@ function TimelineView({programs,channels,selectedChannel,onEdit,onDelete,onReord
           <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:2,flexWrap:"wrap"}}>
             <span style={{fontSize:14,fontWeight:600,color:"#fff",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{prog.nome}</span>
             <span style={{fontSize:9,padding:"2px 6px",borderRadius:3,background:CC[prog.classificacao]||"#555",color:prog.classificacao==="L"?"#fff":"#000",fontWeight:700}}>{prog.classificacao}</span>
+            {isProj&&<span title={`Projeção do ciclo — cadastrado em ${prog._srcDate}`} style={{fontSize:9,padding:"2px 6px",borderRadius:3,background:"rgba(0,188,212,0.2)",border:"1px solid rgba(0,188,212,0.35)",color:"#4dd0e1",fontWeight:700}}>∞ de {getDayLabel(prog._srcDate)}</span>}
             {isMaratona&&<span style={{fontSize:9,padding:"2px 6px",borderRadius:3,background:"rgba(255,202,40,0.2)",border:"1px solid rgba(255,202,40,0.4)",color:"#ffca28",fontWeight:800}}>🏃 MARATONA</span>}
             {prog.gcAlways&&<span style={{fontSize:9,padding:"2px 6px",borderRadius:3,background:"rgba(156,39,176,0.25)",color:"#ce93d8",fontWeight:700}}>♪ GC</span>}
             {prog.tags?.map(t=><span key={t} style={{fontSize:9,padding:"2px 6px",borderRadius:3,background:"rgba(255,255,255,0.08)",color:"#aaa",fontWeight:600}}>{t}</span>)}
           </div>
           <div style={{fontSize:11,color:"#888"}}>{fDur(dur)}</div>
         </div>
-        <button onClick={()=>onEdit(prog)} style={{background:"rgba(26,115,232,0.15)",border:"1px solid rgba(26,115,232,0.3)",color:"#4fc3f7",padding:"6px 12px",borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:600}}>✏️</button>
-        <button onClick={()=>onDelete(prog.id)} style={{background:"rgba(244,67,54,0.1)",border:"1px solid rgba(244,67,54,0.3)",color:"#f44336",padding:"6px 12px",borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:600}}>🗑️</button>
+        <button
+          title={isProj?`Editar programa original (cadastrado em ${prog._srcDate} às ${fmtSec(Number(prog._srcHorarioInicio))})`:"Editar programa"}
+          onClick={()=>onEdit(isProj?{...prog,horarioInicio:prog._srcHorarioInicio,horarioFim:Number(prog._srcHorarioInicio)+Number(prog.duracao),data:prog._srcDate,_isProjected:false}:prog)}
+          style={{background:"rgba(26,115,232,0.15)",border:"1px solid rgba(26,115,232,0.3)",color:"#4fc3f7",padding:"6px 12px",borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:600}}>✏️{isProj?" orig":""}</button>
+        {!isProj&&<button onClick={()=>onDelete(prog.id)} style={{background:"rgba(244,67,54,0.1)",border:"1px solid rgba(244,67,54,0.3)",color:"#f44336",padding:"6px 12px",borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:600}}>🗑️</button>}
       </div>
       {/* Blocos virtuais da Maratona (gerados automaticamente, aparecem assim no guia) */}
       {blocos&&<div style={{padding:"8px 14px 10px 60px",background:"rgba(255,202,40,0.04)",border:"1px solid rgba(255,255,255,0.06)",borderTop:"none",borderRadius:"0 0 6px 6px"}}>
@@ -1068,9 +1126,20 @@ function JinglesTab({programs,channels,selCh,setSelCh,dates,selDate,setSelDate,n
 }
 
 export default function AdminPanel(){
-  const dates=genDates(30);
+  // Gera 7 dias passados + 30 dias futuros para ver programas base do eternity
+  const dates=useMemo(()=>{
+    const ds=[];
+    const d=new Date(getToday()+"T00:00:00");
+    d.setDate(d.getDate()-7); // começa 7 dias atrás
+    for(let i=0;i<37;i++){
+      const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,"0"),da=String(d.getDate()).padStart(2,"0");
+      ds.push(`${y}-${m}-${da}`);
+      d.setDate(d.getDate()+1);
+    }
+    return ds;
+  },[]);
   const [tab,setTab]=useState("schedule");
-  const [selDate,setSelDate]=useState(dates[0]);
+  const [selDate,setSelDate]=useState(getToday());
   const [selCh,setSelCh]=useState(null);
   const [viewMode,setViewMode]=useState("lista"); // "lista" | "grade"
   const [channels,setCh]=useState(DEFAULT_CHANNELS);
@@ -1326,7 +1395,11 @@ export default function AdminPanel(){
   });
 
   // Para compatibilidade, manter dayProgs (filtra só o dia selecionado)
-  const dayProgs=queuedPrograms.filter(p=>p.data===selDate);
+  // Com eternity: usa buildScheduleAdmin que projeta os programas do ciclo
+  const selChObj = channels.find(c => c.id === selCh);
+  const dayProgs = selCh && selDate
+    ? buildScheduleAdmin(queuedPrograms, selCh, selChObj, selDate)
+    : queuedPrograms.filter(p => p.data === selDate);
   const totalSch=dayProgs.filter(p=>p.canalId===selCh).reduce((s,p)=>s+(Number(p.duracao)||0),0);
 
   return <div style={{width:"100%",minHeight:"100vh",background:"#0a0c12",fontFamily:"'Segoe UI','Roboto',-apple-system,sans-serif",color:"#fff"}}>
@@ -1351,10 +1424,16 @@ export default function AdminPanel(){
         <div style={{marginBottom:20}}>
           <div style={{fontSize:12,color:"#888",marginBottom:8,fontWeight:600}}>📅 DATA</div>
           <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:8}}>
-            {dates.map(d=>{const isT=d===getToday(),isS=d===selDate;
-              return <button key={d} onClick={()=>setSelDate(d)} style={{minWidth:72,padding:"8px 10px",borderRadius:6,cursor:"pointer",textAlign:"center",background:isS?"#1a73e8":"rgba(255,255,255,0.04)",border:isS?"1px solid #1a73e8":isT?"1px solid #4fc3f7":"1px solid rgba(255,255,255,0.08)",color:isS?"#fff":"#ccc",fontSize:11,fontWeight:600,flexShrink:0}}>
-                <div>{getDayLabel(d).split(" ")[0]}</div><div style={{fontSize:14,marginTop:2}}>{new Date(d+"T00:00:00").getDate()}</div>
-                {isT&&<div style={{fontSize:8,color:isS?"#fff":"#4fc3f7",marginTop:2}}>HOJE</div>}
+            {dates.map(d=>{const isT=d===getToday(),isS=d===selDate,isPast=d<getToday();
+              const chObj=channels.find(c=>c.id===selCh);
+              const hasReal=selCh&&programs.some(p=>p.canalId===selCh&&p.data===d&&!p.isJingle);
+              const isEternityProj=chObj?.eternity&&!hasReal&&!isPast;
+              return <button key={d} onClick={()=>setSelDate(d)} style={{minWidth:64,padding:"8px 8px",borderRadius:6,cursor:"pointer",textAlign:"center",background:isS?"#1a73e8":isPast?"rgba(255,255,255,0.02)":"rgba(255,255,255,0.04)",border:isS?"1px solid #1a73e8":isT?"1px solid #4fc3f7":"1px solid rgba(255,255,255,0.08)",color:isS?"#fff":isPast?"#555":"#ccc",fontSize:11,fontWeight:600,flexShrink:0}}>
+                <div style={{fontSize:9}}>{getDayLabel(d).split(" ")[0]}</div>
+                <div style={{fontSize:14,marginTop:1}}>{new Date(d+"T00:00:00").getDate()}</div>
+                {isT&&<div style={{fontSize:8,color:isS?"#fff":"#4fc3f7",marginTop:1}}>HOJE</div>}
+                {hasReal&&<div title="Tem programas cadastrados" style={{width:4,height:4,borderRadius:"50%",background:isS?"#fff":"#4caf50",margin:"2px auto 0"}}/>}
+                {isEternityProj&&<div title="Projeção eternity" style={{width:4,height:4,borderRadius:"50%",background:isS?"#fff":"#4dd0e1",margin:"2px auto 0"}}/>}
               </button>})}
           </div>
         </div>
