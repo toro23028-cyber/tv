@@ -531,12 +531,33 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
   const [gcAlways,setGcAlways]=useState(program?.gcAlways||false);
   const [maratona,setMaratona]=useState(program?.maratona||false);
   const [blocoDuracao,setBlocoDuracao]=useState(program?.blocoDuracao||BLOCO_PADRAO);
+  const [isTemplate,setIsTemplate]=useState(program?.isTemplate||false);
+  const [jingleType,setJingleType]=useState(program?.jingleType||"");  // ""=programa normal, "open"|"close"|"break"=vinheta
+  const [isJingle,setIsJingle]=useState(program?.isJingle||false);
   const [error,setError]=useState("");
   const [saving,setSaving]=useState(false);
   // Start time
   const [startMode,setSM]=useState(isEdit?"custom":"auto");
   const [startH,setSH]=useState(isEdit?Math.floor(program.horarioInicio/3600):0);
   const [startM,setStartM]=useState(isEdit?Math.floor((program.horarioInicio%3600)/60):0);
+
+  // Templates disponíveis (programas com isTemplate=true do mesmo canal ou sem canal)
+  const templates=existingPrograms.filter(p=>p.isTemplate&&!p.isJingle).sort((a,b)=>a.nome.localeCompare(b.nome));
+  const applyTemplate=(t)=>{
+    setNome(t.nome);
+    setClassificacao(t.classificacao||"L");
+    setTags(t.tags||["HD"]);
+    setSinopse(t.sinopse||"");
+    setCH(Math.floor((t.duracao||3600)/3600));
+    setCM(Math.floor(((t.duracao||3600)%3600)/60));
+    setDP(0);
+    setGcAlways(t.gcAlways||false);
+    setMaratona(t.maratona||false);
+    setBlocoDuracao(t.blocoDuracao||BLOCO_PADRAO);
+    setTT(t.thumbnailType||"youtube");
+    setTU(t.thumbnailUrl||null);
+    // Não copia vídeos — só a estrutura do programa
+  };
 
   const dur=durationPreset>0?durationPreset:parseDur(customH,customM);
   const channelProgs=existingPrograms.filter(p=>p.canalId===canalId&&p.data===selectedDate&&(!isEdit||p.id!==program?.id)).sort((a,b)=>a.horarioInicio-b.horarioInicio);
@@ -568,7 +589,7 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
     
     setSaving(true);
     try {
-      onSave({id:isEdit?program.id:`prog_${Date.now()}`,nome,canalId,classificacao,tags,sinopse,data:selectedDate,duracao:dur,horarioInicio:horIn,horarioFim:horFim,youtubeId:videos[0].youtubeUrl,videos:videos.filter(v=>v.youtubeUrl.trim()),thumbnailType,thumbnailUrl,gcAlways,maratona,blocoDuracao:Number(blocoDuracao)||BLOCO_PADRAO});
+      onSave({id:isEdit?program.id:`prog_${Date.now()}`,nome,canalId,classificacao,tags,sinopse,data:selectedDate,duracao:dur,horarioInicio:horIn,horarioFim:horFim,youtubeId:videos[0].youtubeUrl,videos:videos.filter(v=>v.youtubeUrl.trim()),thumbnailType,thumbnailUrl,gcAlways,maratona,blocoDuracao:Number(blocoDuracao)||BLOCO_PADRAO,isTemplate,isJingle,jingleType:isJingle?jingleType:""});
       setSaving(false);
     } catch(err) {
       console.error("Erro ao salvar:",err);
@@ -584,6 +605,16 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
         <button onClick={onClose} style={{background:"none",border:"none",color:"#888",cursor:"pointer",fontSize:18}}>✕</button>
       </div>
       <div style={{padding:20,display:"flex",flexDirection:"column",gap:16}}>
+
+        {/* Usar padrão existente */}
+        {!isEdit&&templates.length>0&&<div style={{padding:"10px 14px",background:"rgba(255,202,40,0.06)",border:"1px solid rgba(255,202,40,0.2)",borderRadius:8}}>
+          <div style={{fontSize:11,fontWeight:700,color:"#ffca28",marginBottom:8}}>📋 USAR PADRÃO DE PROGRAMA</div>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+            {templates.map(t=><button key={t.id} onClick={()=>applyTemplate(t)} style={{padding:"5px 12px",borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:600,background:"rgba(255,202,40,0.1)",border:"1px solid rgba(255,202,40,0.3)",color:"#ffca28"}}>{t.nome}</button>)}
+          </div>
+          <div style={{fontSize:10,color:"#888",marginTop:6}}>Preenche o formulário com o padrão. Você ainda altera o horário e os vídeos.</div>
+        </div>}
+
         {/* Canal */}
         <div><label style={lS}>CANAL</label>
           <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
@@ -833,6 +864,13 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
 
         {hasOverlap&&<div style={{padding:10,background:"rgba(244,67,54,0.1)",borderRadius:6,border:"1px solid rgba(244,67,54,0.3)",fontSize:12,color:"#f44336"}}>❌ Conflito de horário!</div>}
         {error&&<div style={{padding:10,background:"rgba(244,67,54,0.1)",borderRadius:6,border:"1px solid rgba(244,67,54,0.3)",fontSize:12,color:"#f44336"}}>⚠️ {error}</div>}
+
+        {/* Salvar como padrão */}
+        <label style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:isTemplate?"rgba(255,202,40,0.08)":"rgba(255,255,255,0.02)",border:isTemplate?"1px solid rgba(255,202,40,0.35)":"1px solid rgba(255,255,255,0.06)",borderRadius:6,cursor:"pointer"}}>
+          <input type="checkbox" checked={isTemplate} onChange={e=>setIsTemplate(e.target.checked)} style={{width:15,height:15,accentColor:"#ffca28",cursor:"pointer"}}/>
+          <div><div style={{fontSize:12,fontWeight:600,color:isTemplate?"#ffca28":"#aaa"}}>📋 Salvar como padrão reutilizável</div>
+          <div style={{fontSize:10,color:"#666"}}>O padrão aparece para uso rápido ao criar novos programas (só a estrutura — você altera os vídeos a cada vez)</div></div>
+        </label>
 
         <div style={{display:"flex",gap:8}}>
           <button onClick={onClose} style={{flex:1,padding:12,borderRadius:6,cursor:"pointer",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",color:"#aaa",fontSize:13,fontWeight:600}}>Cancelar</button>
@@ -1127,19 +1165,21 @@ function JinglesTab({programs,channels,selCh,setSelCh,dates,selDate,setSelDate,n
 
 export default function AdminPanel(){
   // Gera 7 dias passados + 30 dias futuros para ver programas base do eternity
-  const dates=useMemo(()=>{
-    const ds=[];
-    const d=new Date(getToday()+"T00:00:00");
-    d.setDate(d.getDate()-7); // começa 7 dias atrás
-    for(let i=0;i<37;i++){
+  // Recalcula a janela de datas sempre que o componente re-renderiza
+  // (não pode usar useMemo com [] pois congela as datas no momento do mount)
+  const dates = (()=>{
+    const ds=[], d=new Date(getToday()+"T00:00:00");
+    for(let i=0;i<30;i++){
       const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,"0"),da=String(d.getDate()).padStart(2,"0");
       ds.push(`${y}-${m}-${da}`);
       d.setDate(d.getDate()+1);
     }
     return ds;
-  },[]);
+  })();
   const [tab,setTab]=useState("schedule");
   const [selDate,setSelDate]=useState(getToday());
+  // Garante que selDate nunca fica em um dia que não existe mais nas datas disponíveis
+  const effectiveSelDate = dates.includes(selDate) ? selDate : getToday();
   const [selCh,setSelCh]=useState(null);
   const [viewMode,setViewMode]=useState("lista"); // "lista" | "grade"
   const [channels,setCh]=useState(DEFAULT_CHANNELS);
@@ -1398,8 +1438,8 @@ export default function AdminPanel(){
   // Com eternity: usa buildScheduleAdmin que projeta os programas do ciclo
   const selChObj = channels.find(c => c.id === selCh);
   const dayProgs = selCh && selDate
-    ? buildScheduleAdmin(queuedPrograms, selCh, selChObj, selDate)
-    : queuedPrograms.filter(p => p.data === selDate);
+    ? buildScheduleAdmin(queuedPrograms, selCh, selChObj, effectiveSelDate)
+    : queuedPrograms.filter(p => p.data === effectiveSelDate);
   const totalSch=dayProgs.filter(p=>p.canalId===selCh).reduce((s,p)=>s+(Number(p.duracao)||0),0);
 
   return <div style={{width:"100%",minHeight:"100vh",background:"#0a0c12",fontFamily:"'Segoe UI','Roboto',-apple-system,sans-serif",color:"#fff"}}>
@@ -1415,7 +1455,7 @@ export default function AdminPanel(){
     <div style={{maxWidth:900,margin:"0 auto",padding:20}}>
       {/* Tabs */}
       <div style={{display:"flex",gap:2,borderBottom:"2px solid #1e2030",marginBottom:20}}>
-        {[{id:"schedule",label:"📅 Programação"},{id:"channels",label:"📺 Canais"},{id:"jingles",label:"🎬 Vinhetas & Intervalos"}].map(t=>
+        {[{id:"schedule",label:"📅 Programação"},{id:"channels",label:"📺 Canais"}].map(t=>
           <button key={t.id} onClick={()=>setTab(t.id)} style={{padding:"10px 20px",fontSize:13,fontWeight:600,cursor:"pointer",background:tab===t.id?"#1a73e8":"transparent",color:tab===t.id?"#fff":"#888",border:"none",borderRadius:"6px 6px 0 0"}}>{t.label}</button>)}
       </div>
 
@@ -1489,7 +1529,7 @@ export default function AdminPanel(){
 
             // === ETAPA 2: Corrigir grade do dia selecionado neste canal ===
             const todayProgs=programs
-              .filter(p=>p.canalId===selCh&&p.data===selDate)
+              .filter(p=>p.canalId===selCh&&p.data===effectiveSelDate)
               .map(p=>({...p,horarioInicio:Number(p.horarioInicio),horarioFim:Number(p.horarioFim),duracao:Number(p.duracao)}))
               .sort((a,b)=>a.horarioInicio-b.horarioInicio);
 
@@ -1547,7 +1587,7 @@ export default function AdminPanel(){
         {viewMode==="lista"
           ? <TimelineView programs={dayProgs} channels={channels} selectedChannel={selCh}
               onEdit={p=>{setEP(p);setSM(true)}} onDelete={handleDel} onReorder={handleReorder} onToggleSelect={toggleProgSelect} selectedProgs={selectedProgs}/>
-          : <GradeVisual programs={dayProgs} channels={channels} selectedChannel={selCh} selDate={selDate}
+          : <GradeVisual programs={dayProgs} channels={channels} selectedChannel={selCh} selDate={effectiveSelDate}
               onEdit={p=>{setEP(p);setSM(true)}} notify={notify}/>}
 
         <button onClick={()=>{setEP(null);setSM(true)}} style={{marginTop:16,width:"100%",padding:14,borderRadius:8,cursor:"pointer",background:"linear-gradient(135deg,#1a73e8,#4fc3f7)",border:"none",color:"#fff",fontSize:14,fontWeight:700}}>+ Adicionar Programa</button>
@@ -1561,10 +1601,9 @@ export default function AdminPanel(){
         <ChannelEditor channels={channels} onUpdate={setCh} onAdd={addChannel} onDelete={delChannel}/>
       </>}
 
-      {tab==="jingles"&&<JinglesTab programs={programs} channels={channels} selCh={selCh} setSelCh={setSelCh} dates={dates} selDate={selDate} setSelDate={setSelDate} notify={notify} />}
     </div>
 
-    {showModal&&<ProgramModal mode={editProg?"edit":"add"} program={editProg} channels={channels} selectedChannel={selCh} selectedDate={selDate} existingPrograms={programs} onSave={handleSave} onClose={()=>{setSM(false);setEP(null)}}/>}
+    {showModal&&<ProgramModal mode={editProg?"edit":"add"} program={editProg} channels={channels} selectedChannel={selCh} selectedDate={effectiveSelDate} existingPrograms={programs} onSave={handleSave} onClose={()=>{setSM(false);setEP(null)}}/>}
 
     {/* Clone menu - appears near clone button */}
     {cloneMenuProgs.length>0&&<div onClick={()=>setCloneMenuProgs([])} style={{position:"fixed",inset:0,zIndex:100}}>
