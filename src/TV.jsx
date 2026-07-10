@@ -60,9 +60,14 @@ function getToday(){ return new Date().toISOString().split("T")[0] }
 function extractYTId(s){ if(!s)return null; const p=[/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/,/^([a-zA-Z0-9_-]{11})$/]; for(const r of p){const m=s.match(r);if(m)return m[1]} return null }
 
 // ============================================
-// NOVA FUNÇÃO CENTRAL: Informações de playback do vídeo atual
-// Usada tanto pelo player (para calcular start do iframe) quanto pelo GC (para sincronia perfeita)
+// TOLERÂNCIA DE TRANSIÇÃO: evita cortar o final dos clipes.
+// Quando o tick de 3s avança o elapsed para além da duração calculada,
+// o sistema esperaria trocar de vídeo imediatamente.
+// Adicionamos 2s de margem: o vídeo atual continua até pelo menos 2s após
+// o ponto de troca calculado, dando tempo pro YouTube terminar o clipe.
 // ============================================
+const VIDEO_TRANSITION_BUFFER = 2; // segundos de margem no final de cada clipe
+
 function getVideoPlaybackInfo(prog) {
   if (!prog) return null;
   const elapsed = Math.max(0, getElapsed(prog) + (prog.mediaOffset || 0));
@@ -83,19 +88,33 @@ function getVideoPlaybackInfo(prog) {
     };
   }
 
+  // Duração efetiva de cada vídeo — usa o campo duration quando disponível
+  // Fallback inteligente: distribui a duração total do programa igualmente
+  const totalProgDur = Number(prog.duracao) || 0;
+  const getDur = (v, idx) => {
+    const d = Number(v.duration);
+    if (d > 0) return d;
+    // Sem duration individual: divide a duração total igualmente entre os vídeos
+    return totalProgDur > 0 ? Math.floor(totalProgDur / videos.length) : 240;
+  };
+
   // Caso 2: Playlist com múltiplos vídeos
   let acc = 0;
   for (let i = 0; i < videos.length; i++) {
-    const v = videos[i];
-    const dur = Number(v.duration) || 180; // fallback defensivo (recomenda-se preencher duration corretamente)
-    if (elapsed < acc + dur) {
+    const dur = getDur(videos[i], i);
+    const boundary = acc + dur;
+    // Margem de buffer: só troca pro próximo vídeo após VIDEO_TRANSITION_BUFFER segundos
+    // além do ponto de troca. Isso evita cortar o finalzinho do clipe.
+    const effectiveBoundary = (i < videos.length - 1) ? boundary + VIDEO_TRANSITION_BUFFER : boundary;
+    if (elapsed < effectiveBoundary) {
+      const pos = elapsed - acc;
       return {
         videoIndex: i,
-        position: elapsed - acc,
+        position: Math.max(0, pos),
         duration: dur,
-        remaining: dur - (elapsed - acc),
-        videoId: extractYTId(v.youtubeUrl),
-        title: v.titulo || prog.nome || "",
+        remaining: Math.max(0, boundary - elapsed), // remaining usa o boundary real (sem buffer)
+        videoId: extractYTId(videos[i].youtubeUrl),
+        title: videos[i].titulo || prog.nome || "",
         isSingle: false
       };
     }
@@ -108,16 +127,18 @@ function getVideoPlaybackInfo(prog) {
     const loopedElapsed = elapsed % totalDur;
     let acc2 = 0;
     for (let i = 0; i < videos.length; i++) {
-      const v = videos[i];
-      const dur = Number(v.duration) || 180;
-      if (loopedElapsed < acc2 + dur) {
+      const dur = getDur(videos[i], i);
+      const boundary = acc2 + dur;
+      const effectiveBoundary = (i < videos.length - 1) ? boundary + VIDEO_TRANSITION_BUFFER : boundary;
+      if (loopedElapsed < effectiveBoundary) {
+        const pos = loopedElapsed - acc2;
         return {
           videoIndex: i,
-          position: loopedElapsed - acc2,
+          position: Math.max(0, pos),
           duration: dur,
-          remaining: dur - (loopedElapsed - acc2),
-          videoId: extractYTId(v.youtubeUrl),
-          title: v.titulo || prog.nome || "",
+          remaining: Math.max(0, boundary - loopedElapsed),
+          videoId: extractYTId(videos[i].youtubeUrl),
+          title: videos[i].titulo || prog.nome || "",
           isSingle: false
         };
       }
@@ -126,7 +147,7 @@ function getVideoPlaybackInfo(prog) {
   }
 
   // Fallback final
-  const firstDur = Number(videos[0]?.duration) || 180;
+  const firstDur = getDur(videos[0], 0);
   return {
     videoIndex: 0,
     position: 0,
@@ -233,7 +254,7 @@ function fillGaps(items){
 function buildSchedule(programs, channelId, channel) {
   const dayAbs=dateSecondsToAbsolute(getToday(),0);
   const dated=programs
-    .filter(p=>p.canalId===channelId&&p.data)
+    .filter(p=>p.canalId===channelId&&p.data&&!p.isJingle)
     .map(p=>({...p,duracao:Number(p.duracao),absStart:dateSecondsToAbsolute(p.data,Number(p.horarioInicio))}))
     .sort((a,b)=>a.absStart-b.absStart);
 
@@ -346,10 +367,11 @@ function GCBar({channel,program,nextProgram}){
     return()=>clearInterval(i);
   },[contKey,channel?.id,gcAlways,isMusic,program]);
 
-  if(!program||program.isPlaceholder||!visible)return null;
-
   // Título atual: usa o vídeo correto da playlist quando disponível
-  const vInfo = getVideoPlaybackInfo(program);
+  // (calculado aqui, fora do useEffect, para reutilizar sem segunda chamada)
+  const vInfoRender = (!program||program.isPlaceholder) ? null : getVideoPlaybackInfo(program);
+  if(!program||program.isPlaceholder||!visible)return null;
+  const vInfo = vInfoRender;
   const nowTitle = vInfo?.title || (isMusic ? (program.videos?.[0]?.titulo || program.nome) : program.nome);
 
   let nextTitle = null;
@@ -445,7 +467,7 @@ function OSDHeader({channel,program,visible}){
 // ============================================
 // OSD FOOTER (TV-style bottom bar)
 // ============================================
-function OSDFooter({program,nextProgram,onOpenEPG,onOpenFull,onFullscreen,visible}){
+function OSDFooter({program,nextProgram,onOpenEPG,onOpenFull,onOpenSettings,onFullscreen,visible}){
   const[el,setEl]=useState(0);
   const[isFullscreen,setIsFullscreen]=useState(false);
   
@@ -490,7 +512,7 @@ function OSDFooter({program,nextProgram,onOpenEPG,onOpenFull,onFullscreen,visibl
       </div>
       <div style={{display:"flex",gap:10}}>
         <button onClick={e=>{e.stopPropagation();onOpenEPG()}} style={{background:"rgba(255,255,255,0.1)",border:"1px solid rgba(255,255,255,0.15)",color:"#ccc",padding:"10px 22px",borderRadius:6,cursor:"pointer",fontSize:14,fontWeight:600}}>▲ Guia Rápido</button>
-        <button onClick={e=>{e.stopPropagation();onOpenFull()}} style={{background:"rgba(26,115,232,0.2)",border:"1px solid rgba(26,115,232,0.3)",color:"#4fc3f7",padding:"10px 22px",borderRadius:6,cursor:"pointer",fontSize:14,fontWeight:600}}>📺 Programação</button>
+        <button onClick={e=>{e.stopPropagation();onOpenSettings()}} style={{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.12)",color:"#ccc",padding:"10px 16px",borderRadius:6,cursor:"pointer",fontSize:14}}>⚙️</button>
         <button onClick={e=>{e.stopPropagation();onFullscreen()}} style={{background:"rgba(255,255,255,0.1)",border:"1px solid rgba(255,255,255,0.15)",color:"#ccc",padding:"10px 22px",borderRadius:6,cursor:"pointer",fontSize:14,fontWeight:600}}>{isFullscreen?"↙ Sair":"⛶ Tela Cheia"}</button>
       </div>
     </div>
@@ -693,6 +715,128 @@ function ProgModal({program,channel,onClose,onWatch}){
 // ============================================
 // MAIN APP
 // ============================================
+
+// ============================================
+// PERSISTENT CLOCK (aparece sempre ou em intervalos)
+// Configurável via settings: clockMode = "always"|"15min"|"30min"|"off"
+// ============================================
+function PersistentClock({channel, clockMode="off"}){
+  const [t,setT]=useState(new Date());
+  const [visible,setVisible]=useState(false);
+  useEffect(()=>{const i=setInterval(()=>setT(new Date()),1000);return()=>clearInterval(i)},[]);
+  useEffect(()=>{
+    if(clockMode==="always"){setVisible(true);return}
+    if(clockMode==="off"){setVisible(false);return}
+    const mins=clockMode==="15min"?15:30;
+    // Aparece nos primeiros 10s de cada intervalo
+    const check=()=>{
+      const m=new Date().getMinutes(),s=new Date().getSeconds();
+      setVisible(m%mins===0&&s<10);
+    };
+    check();
+    const i=setInterval(check,1000);
+    return()=>clearInterval(i);
+  },[clockMode]);
+  if(!visible)return null;
+  const ds=["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"];
+  return <div style={{
+    position:"absolute",top:20,right:24,zIndex:8,pointerEvents:"none",
+    background:"rgba(0,0,0,0.55)",borderRadius:10,padding:"10px 18px",
+    backdropFilter:"blur(4px)",border:`1px solid ${channel?.cor||"#1a73e8"}44`,
+  }}>
+    <div style={{fontSize:36,fontWeight:800,color:"#fff",letterSpacing:2,lineHeight:1,textAlign:"right"}}>
+      {String(t.getHours()).padStart(2,"0")}:{String(t.getMinutes()).padStart(2,"0")}
+    </div>
+    <div style={{fontSize:12,color:"#aaa",textAlign:"right",marginTop:3}}>
+      {ds[t.getDay()]} {t.getDate()}/{t.getMonth()+1}
+    </div>
+  </div>;
+}
+
+// ============================================
+// NEXT-UP OVERLAY ("Em X minutos: Nome do Programa")
+// Aparece quando faltam ≤ nextUpMinutes para o próximo programa.
+// Configurável: nextUpMode = "off"|"5min"|"10min"|"15min"
+// ============================================
+function NextUpOverlay({nextProgram, clockMode, nextUpMode="off"}){
+  const [now,setNow]=useState(getNow());
+  useEffect(()=>{const i=setInterval(()=>setNow(getNow()),5000);return()=>clearInterval(i)},[]);
+  if(!nextProgram||nextProgram.isPlaceholder)return null;
+  if(nextUpMode==="off")return null;
+  const mins={"5min":5,"10min":10,"15min":15}[nextUpMode]||10;
+  const remaining=nextProgram.horarioInicio-now;
+  const remMins=Math.floor(remaining/60);
+  if(remaining<=0||remMins>mins)return null;
+  const label=remMins<=1?"Em menos de 1 minuto":`Em ${remMins} minuto${remMins>1?"s":""}`;
+  // Posição: embaixo do relógio se visível, caso contrário no topo
+  const topOffset=clockMode!=="off"?110:20;
+  return <div style={{
+    position:"absolute",top:topOffset,right:24,zIndex:8,pointerEvents:"none",
+    background:"rgba(0,0,0,0.72)",borderRadius:10,padding:"10px 18px",maxWidth:320,
+    backdropFilter:"blur(4px)",border:"1px solid rgba(255,255,255,0.12)",
+    animation:"gcIn 0.5s ease",
+  }}>
+    <div style={{fontSize:11,fontWeight:700,color:"#ffca28",letterSpacing:1,marginBottom:4}}>{label}</div>
+    <div style={{fontSize:15,fontWeight:700,color:"#fff",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{nextProgram.nome}</div>
+    <div style={{fontSize:12,color:"#888",marginTop:2}}>{nextProgram.horarioTexto}</div>
+  </div>;
+}
+
+// ============================================
+// SETTINGS MENU (relógio + próximo programa)
+// Abre com tecla S ou clique em ⚙️
+// ============================================
+function SettingsMenu({settings,onSave,onClose}){
+  const [clockMode,setClockMode]=useState(settings.clockMode||"off");
+  const [nextUpMode,setNextUpMode]=useState(settings.nextUpMode||"off");
+  const save=()=>{onSave({clockMode,nextUpMode});onClose()};
+  const BtnGrp=({label,value,setValue,options})=><div style={{marginBottom:16}}>
+    <div style={{fontSize:12,fontWeight:700,color:"#aaa",marginBottom:8,letterSpacing:0.5}}>{label}</div>
+    <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+      {options.map(o=><button key={o.v} onClick={()=>setValue(o.v)} style={{padding:"8px 14px",borderRadius:6,cursor:"pointer",fontSize:12,fontWeight:600,background:value===o.v?"#1a73e8":"rgba(255,255,255,0.06)",border:value===o.v?"1px solid #1a73e8":"1px solid rgba(255,255,255,0.1)",color:value===o.v?"#fff":"#aaa"}}>{o.l}</button>)}
+    </div>
+  </div>;
+  return <div onClick={onClose} style={{position:"fixed",inset:0,zIndex:200,background:"rgba(0,0,0,0.7)",display:"flex",alignItems:"center",justifyContent:"center"}}>
+    <div onClick={e=>e.stopPropagation()} style={{background:"#14161e",borderRadius:12,padding:28,width:380,border:"1px solid rgba(255,255,255,0.1)",boxShadow:"0 20px 60px rgba(0,0,0,0.6)"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+        <span style={{fontSize:16,fontWeight:700,color:"#fff"}}>⚙️ Configurações</span>
+        <button onClick={onClose} style={{background:"none",border:"none",color:"#888",cursor:"pointer",fontSize:18}}>✕</button>
+      </div>
+      <BtnGrp label="🕐 RELÓGIO NA TELA" value={clockMode} setValue={setClockMode} options={[{v:"off",l:"Desligado"},{v:"always",l:"Sempre"},{v:"15min",l:"A cada 15min"},{v:"30min",l:"A cada 30min"}]}/>
+      <BtnGrp label="📺 AVISAR PRÓXIMO PROGRAMA" value={nextUpMode} setValue={setNextUpMode} options={[{v:"off",l:"Não avisar"},{v:"5min",l:"5 min antes"},{v:"10min",l:"10 min antes"},{v:"15min",l:"15 min antes"}]}/>
+      <div style={{borderTop:"1px solid rgba(255,255,255,0.06)",paddingTop:16,marginTop:4,display:"flex",gap:8,justifyContent:"flex-end"}}>
+        <button onClick={onClose} style={{padding:"10px 18px",borderRadius:6,cursor:"pointer",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",color:"#aaa",fontSize:13}}>Cancelar</button>
+        <button onClick={save} style={{padding:"10px 22px",borderRadius:6,cursor:"pointer",background:"linear-gradient(135deg,#1a73e8,#4fc3f7)",border:"none",color:"#fff",fontSize:13,fontWeight:700}}>Salvar</button>
+      </div>
+    </div>
+  </div>;
+}
+
+// ============================================
+// PRE-LOADER do próximo vídeo (buffer invisível)
+// Monta um iframe oculto com o próximo vídeo para pré-carregar.
+// Garante transição suave sem tela preta entre clipes.
+// ============================================
+function VideoPreloader({nextVideoId}){
+  const [preloadId,setPreloadId]=useState(null);
+  // Pré-carrega 8s antes do fim (tempo suficiente pro iframe iniciar)
+  useEffect(()=>{
+    if(!nextVideoId){setPreloadId(null);return}
+    const t=setTimeout(()=>setPreloadId(nextVideoId),100);
+    return()=>{clearTimeout(t);setPreloadId(null)};
+  },[nextVideoId]);
+  if(!preloadId)return null;
+  return <iframe
+    key={`preload_${preloadId}`}
+    src={`https://www.youtube.com/embed/${preloadId}?autoplay=0&mute=1&controls=0&disablekb=1&modestbranding=1&rel=0&enablejsapi=0`}
+    style={{position:"fixed",width:1,height:1,opacity:0,pointerEvents:"none",border:"none",left:-9999,top:-9999}}
+    title="preload"
+    allow="autoplay"
+    tabIndex={-1}
+    aria-hidden="true"
+  />;
+}
+
 export default function TVWeb(){
   const [channels, setChannels] = useState([]);
   const [allPrograms, setAllPrograms] = useState([]);
@@ -710,9 +854,18 @@ export default function TVWeb(){
   const [selProg, setSP] = useState(null);
   const [fade, setFade] = useState(false);
   const [muted, setMuted] = useState(true);
-  // Tick: forces re-render every 3s to auto-switch videos
+  const [showSettings, setShowSettings] = useState(false);
+  // Settings: persistido em localStorage (leve, sem precisar de Firestore)
+  const [settings, setSettings] = useState(()=>{
+    try{ return JSON.parse(localStorage.getItem("tvweb_settings")||"{}") }catch{ return {} }
+  });
+  const saveSettings = (s) => {
+    setSettings(s);
+    try{ localStorage.setItem("tvweb_settings", JSON.stringify(s)) }catch{}
+  };
+  // Tick: 1s para transições suaves de vídeo na playlist
   const [tick, setTick] = useState(0);
-  useEffect(()=>{const i=setInterval(()=>setTick(t=>t+1),3000);return()=>clearInterval(i)},[]);
+  useEffect(()=>{const i=setInterval(()=>setTick(t=>t+1),1000);return()=>clearInterval(i)},[]);
 
   const hideTimer=useRef(null);
   const cRef=useRef(null);
@@ -771,7 +924,7 @@ export default function TVWeb(){
   // ========== DERIVED STATE (recalcs every tick) ==========
   const CHANNELS=channels;
   const ch=CHANNELS.find(c=>c.id===curCh)||CHANNELS[0];
-  const schedule=useMemo(()=>ch?buildSchedule(allPrograms,ch.id,ch):[],[allPrograms,ch,tick]);
+  const schedule=useMemo(()=>ch?buildSchedule(allPrograms,ch.id,ch):[],[allPrograms,ch]);
   const cp=getCurProg(schedule);
   const ci=schedule.findIndex(p=>p.id===cp?.id);
   const np=ci>=0?schedule[ci+1]:null;
@@ -791,6 +944,18 @@ export default function TVWeb(){
   },[cp]);
 
   const currentVideo=resolveCurrentVideo();
+
+  // Próximo vídeo para pré-carregar
+  const nextVideoForPreload = (() => {
+    if(!cp||!currentVideo.videoId)return null;
+    const videos = cp.videos||[];
+    if(videos.length<=1)return null;
+    // Só pré-carrega quando faltam ≤8s para trocar de vídeo
+    const info = getVideoPlaybackInfo(cp);
+    if(!info||info.remaining>8)return null;
+    const nextIdx = (info.videoIndex+1) % videos.length;
+    return extractYTId(videos[nextIdx]?.youtubeUrl)||null;
+  })();
 
   // Força novo iframe quando o VÍDEO muda (não só o programa)
   const videoKey=`${curCh}_${cp?.id}_v${currentVideo.videoIndex}_${currentVideo.videoId}`;
@@ -843,7 +1008,11 @@ export default function TVWeb(){
 
   // ========== UNMUTE ==========
   const handleUnmute=useCallback(()=>{
-    if(cp)ytStartRef.current=Math.max(0,Math.floor(getElapsed(cp)+(cp.mediaOffset||0)));
+    if(cp){
+      // Para playlists multi-vídeo: usa getVideoPlaybackInfo que já calcula o vídeo correto e posição
+      const info=getVideoPlaybackInfo(cp);
+      ytStartRef.current=info?Math.floor(info.position):Math.max(0,Math.floor(getElapsed(cp)+(cp.mediaOffset||0)));
+    }
     ytKeyRef.current=ytKeyRef.current+"_unmuted";
     setMuted(false);
   },[cp]);
@@ -881,8 +1050,9 @@ export default function TVWeb(){
     }
     if(e.key==="ArrowUp")swDir(-1);
     else if(e.key==="ArrowDown")swDir(1);
-    else if(e.key==="Escape"){setEPG(false);setFull(false);setSP(null)}
+    else if(e.key==="Escape"){setEPG(false);setFull(false);setSP(null);setShowSettings(false)}
     else if(e.key==="g"||e.key==="G"){if(showFull){setFull(false);setEPG(true)}else if(showEPG)setEPG(false);else setEPG(true)}
+    else if(e.key==="s"||e.key==="S"){const tag=(document.activeElement?.tagName||"").toLowerCase();if(tag!=="input"&&tag!=="textarea"&&tag!=="select")setShowSettings(v=>!v)}
     showOSDNow();
   };window.addEventListener("keydown",h);return()=>window.removeEventListener("keydown",h)},[swDir,showOSDNow,showEPG,showFull]);
 
@@ -897,7 +1067,7 @@ export default function TVWeb(){
   // ========== CLICK HANDLER (on the video overlay only) ==========
   const handleVideoClick=useCallback(()=>{
     // Don't activate audio if menus are open
-    if(showEPG||showFull||selProg)return;
+    if(showEPG||showFull||selProg||showSettings)return;
     
     const now=Date.now();
     if(now-lastClickTimeRef.current<300){
@@ -961,21 +1131,33 @@ export default function TVWeb(){
       animation:"pulseFull 2s ease infinite",
     }}>🔇 Clique para ativar o som</button>}
 
-    {/* ===== GC (lower-third de música/programa) — AGORA SINCRONIZADO COM O VÍDEO ===== */}
-    {!showEPG&&!showFull&&<GCBar channel={ch} program={cp} nextProgram={np}/>}
+    {/* ===== VIDEO PRELOADER (buffer invisível do próximo clipe) ===== */}
+    {nextVideoForPreload&&<VideoPreloader nextVideoId={nextVideoForPreload}/>}
+
+    {/* ===== GC (lower-third de música/programa) ===== */}
+    {!showEPG&&!showFull&&!cp?.isJingle&&<GCBar channel={ch} program={cp} nextProgram={np}/>}
+
+    {/* ===== RELÓGIO PERSISTENTE (apenas quando OSD está oculto, pois OSDHeader já tem relógio) ===== */}
+    {!showOSD&&!showEPG&&!showFull&&settings.clockMode&&settings.clockMode!=="off"&&<PersistentClock channel={ch} clockMode={settings.clockMode}/>}
+
+    {/* ===== PRÓXIMO PROGRAMA ("Em X minutos...") — só quando OSD está oculto ===== */}
+    {!showOSD&&!showEPG&&!showFull&&np&&settings.nextUpMode&&settings.nextUpMode!=="off"&&<NextUpOverlay nextProgram={np} clockMode={settings.clockMode||"off"} nextUpMode={settings.nextUpMode}/>}
+
+    {/* ===== MENU DE CONFIGURAÇÕES ===== */}
+    {showSettings&&<SettingsMenu settings={settings} onSave={saveSettings} onClose={()=>setShowSettings(false)}/>}
 
     {/* ===== OSD HEADER (TV-style, 20s) ===== */}
-    <OSDHeader channel={ch} program={cp} visible={showOSD&&!showEPG&&!showFull}/>
+    <OSDHeader channel={ch} program={cp} visible={showOSD&&!showEPG&&!showFull&&!cp?.isJingle}/>
 
     {/* ===== OSD FOOTER (TV-style, 20s) ===== */}
-    <OSDFooter program={cp} nextProgram={np} visible={showOSD&&!showEPG&&!showFull}
-      onOpenEPG={()=>setEPG(true)} onOpenFull={()=>setFull(true)} onFullscreen={()=>{if(!document.fullscreenElement)cRef.current?.requestFullscreen?.();else document.exitFullscreen?.()}}/>
+    <OSDFooter program={cp} nextProgram={np} visible={showOSD&&!showEPG&&!showFull&&!cp?.isJingle}
+      onOpenEPG={()=>setEPG(true)} onOpenFull={()=>setFull(true)} onOpenSettings={()=>setShowSettings(true)} onFullscreen={()=>{if(!document.fullscreenElement)cRef.current?.requestFullscreen?.();else document.exitFullscreen?.()}}/>
 
 
     {/* ===== EPG / FULL / MODAL (above everything) ===== */}
     {showEPG&&<EPGCompact channels={CHANNELS} allPrograms={allPrograms} currentChannelId={curCh} onSelectChannel={id=>{swCh(id);setEPG(false)}} onSelectProgram={setSP} onOpenFull={()=>{setEPG(false);setFull(true)}} onClose={()=>setEPG(false)}/>}
     {showFull&&<FullDay channels={CHANNELS} allPrograms={allPrograms} currentChannelId={curCh} onClose={()=>setFull(false)} onProgramClick={setSP}/>}
-    {selProg&&<ProgModal program={selProg} channel={CHANNELS.find(c=>buildSchedule(allPrograms,c.id,c).some(p=>p.id===selProg.id))||ch} onClose={()=>setSP(null)} onWatch={(chId)=>{swCh(chId);setEPG(false);setFull(false)}}/>}
+    {selProg&&<ProgModal program={selProg} channel={CHANNELS.find(c=>c.id===(selProg.canalId||selProg.srcProgId&&allPrograms.find(p=>p.id===selProg.srcProgId)?.canalId))||ch} onClose={()=>setSP(null)} onWatch={(chId)=>{swCh(chId);setEPG(false);setFull(false)}}/>}
 
     <style>{`
       @keyframes slideUp{from{transform:translateY(100%);opacity:0}to{transform:translateY(0);opacity:1}}
