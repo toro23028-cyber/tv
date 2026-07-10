@@ -95,7 +95,7 @@ function buildScheduleAdmin(programs, channelId, channel, selDate) {
     .sort((a, b) => a._absStart - b._absStart);
   if (!channel?.eternity || real.length === 0) {
     return programs
-      .filter(p => p.canalId === channelId && p.data === effectiveSelDate)
+      .filter(p => p.canalId === channelId && p.data === selDate)
       .sort((a, b) => Number(a.horarioInicio) - Number(b.horarioInicio));
   }
   const days = Math.max(1, Number(channel.eternityDays) || 1);
