@@ -84,7 +84,9 @@ function dateSecondsToAbsolute(dateStr,secondsInDay){
 }
 function getAbsoluteNow(){
   const now=new Date();
-  return Math.floor((now-BASE_DATE)/1000);
+  const local=now.getHours()*3600+now.getMinutes()*60+now.getSeconds();
+  const today=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")}`;
+  return dateSecondsToAbsolute(today,local);
 }
 
 // YouTube metadata extraction
@@ -910,6 +912,161 @@ function DupModal({dates,onDup,onClose}){
 // ============================================
 // MAIN
 // ============================================
+// ============================================
+// JINGLES TAB — Vinhetas de abertura/encerramento e intervalos comerciais
+// Vinheta = programa do tipo "vinheta" (isJingle:true, jingleType:"open"|"close"|"break")
+// Intervalo = programa com tipo "break" inserido entre blocos de programas normais
+// O TV.jsx detecta esses tipos e os toca sem nenhum visual de programa (tela limpa)
+// ============================================
+function JinglesTab({programs,channels,selCh,setSelCh,dates,selDate,setSelDate,notify}){
+  const [showModal,setShowModal]=useState(false);
+  const [editJingle,setEditJingle]=useState(null);
+  const [saving,setSaving]=useState(false);
+  const [form,setForm]=useState({nome:"",canalId:selCh||"",jingleType:"open",youtubeUrl:"",duracao:30,horarioInicio:0,data:selDate||""});
+
+  const iS={background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:4,padding:"8px 12px",color:"#fff",fontSize:13,outline:"none",width:"100%"};
+  const lS={fontSize:11,color:"#888",fontWeight:700,letterSpacing:0.5,marginBottom:6,display:"block"};
+
+  const jingles=programs.filter(p=>p.isJingle&&(!selCh||p.canalId===selCh)&&(!selDate||p.data===selDate))
+    .sort((a,b)=>Number(a.horarioInicio)-Number(b.horarioInicio));
+
+  const openAdd=()=>{
+    setForm({nome:"",canalId:selCh||channels[0]?.id||"",jingleType:"open",youtubeUrl:"",duracao:30,horarioInicio:0,data:selDate||dates[0]||""});
+    setEditJingle(null);setShowModal(true);
+  };
+  const openEdit=(j)=>{
+    setForm({nome:j.nome,canalId:j.canalId,jingleType:j.jingleType||"open",youtubeUrl:j.youtubeId||"",duracao:Number(j.duracao),horarioInicio:Number(j.horarioInicio),data:j.data});
+    setEditJingle(j);setShowModal(true);
+  };
+  const handleSave=async()=>{
+    if(!form.youtubeUrl.trim()){notify("❌ URL do YouTube é obrigatória");return}
+    setSaving(true);
+    const vidId=extractYouTubeId(form.youtubeUrl.trim());
+    const dur=Number(form.duracao)||30;
+    const start=Number(form.horarioInicio)||0;
+    const payload={
+      nome:form.nome||({open:"Vinheta de Abertura",close:"Vinheta de Encerramento",break:"Intervalo Comercial"}[form.jingleType]),
+      canalId:form.canalId,
+      isJingle:true,
+      jingleType:form.jingleType,
+      youtubeId:vidId||form.youtubeUrl.trim(),
+      videos:[{youtubeUrl:form.youtubeUrl.trim(),titulo:form.nome||"",duration:dur}],
+      duracao:dur,
+      horarioInicio:start,
+      horarioFim:start+dur,
+      data:form.data,
+      classificacao:"L",tags:["HD"],
+    };
+    try{
+      if(editJingle){await updateDoc(doc(db,"programs",String(editJingle.id)),payload);notify("✅ Vinheta atualizada");}
+      else{await addDoc(collection(db,"programs"),payload);notify("✅ Vinheta adicionada");}
+      setShowModal(false);
+    }catch(err){console.error(err);notify("❌ Erro ao salvar");}
+    setSaving(false);
+  };
+  const handleDelete=async(j)=>{
+    if(!confirm(`Remover "${j.nome}"?`))return;
+    try{await deleteDoc(doc(db,"programs",String(j.id)));notify("🗑️ Removido");}catch(err){notify("❌ Erro ao remover")}
+  };
+  const TYPE_LABELS={open:"🎬 Abertura",close:"🏁 Encerramento",break:"📢 Intervalo"};
+  const TYPE_COLORS={open:"rgba(76,175,80,0.2)",close:"rgba(244,67,54,0.15)",break:"rgba(255,152,0,0.15)"};
+  const TYPE_BORDER={open:"rgba(76,175,80,0.4)",close:"rgba(244,67,54,0.35)",break:"rgba(255,152,0,0.35)"};
+
+  return <div>
+    {/* Filtros */}
+    <div style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap",alignItems:"center"}}>
+      <select value={selCh||""} onChange={e=>setSelCh(e.target.value)} style={{...iS,width:180}}>
+        <option value="">Todos os canais</option>
+        {channels.filter(c=>!c.isInfo).map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}
+      </select>
+      <select value={selDate||""} onChange={e=>setSelDate(e.target.value)} style={{...iS,width:160}}>
+        {dates.map(d=><option key={d} value={d}>{d}</option>)}
+      </select>
+      <div style={{flex:1}}/>
+      <button onClick={openAdd} style={{padding:"10px 18px",borderRadius:6,cursor:"pointer",background:"linear-gradient(135deg,#9c27b0,#ba68c8)",border:"none",color:"#fff",fontSize:13,fontWeight:700}}>+ Adicionar Vinheta</button>
+    </div>
+
+    {/* Explicação */}
+    <div style={{marginBottom:16,padding:"12px 16px",background:"rgba(156,39,176,0.08)",border:"1px solid rgba(156,39,176,0.2)",borderRadius:8,fontSize:12,color:"#bbb",lineHeight:1.6}}>
+      <b style={{color:"#ce93d8"}}>🎬 Abertura:</b> toca no início do canal (antes do primeiro programa do dia).<br/>
+      <b style={{color:"#ef9a9a"}}>🏁 Encerramento:</b> toca ao fim do dia ou ao término de um bloco.<br/>
+      <b style={{color:"#ffcc80"}}>📢 Intervalo:</b> inserido entre programas. O player detecta e executa sem mostrar informações de programa.<br/>
+      <span style={{color:"#777"}}>Configure o horário de início exato e a duração do clipe. A grade se mantém sincronizada.</span>
+    </div>
+
+    {/* Lista */}
+    {jingles.length===0&&<div style={{padding:40,textAlign:"center",color:"#555"}}>Nenhuma vinheta cadastrada para esta seleção.</div>}
+    <div style={{display:"flex",flexDirection:"column",gap:8}}>
+      {jingles.map(j=>{
+        const ch=channels.find(c=>c.id===j.canalId);
+        const thumb=j.youtubeId?`https://img.youtube.com/vi/${j.youtubeId}/mqdefault.jpg`:null;
+        return <div key={j.id} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 14px",borderRadius:8,background:TYPE_COLORS[j.jingleType]||"rgba(255,255,255,0.03)",border:`1px solid ${TYPE_BORDER[j.jingleType]||"rgba(255,255,255,0.06)"}`}}>
+          {thumb&&<img src={thumb} alt="" style={{width:64,height:40,borderRadius:4,objectFit:"cover",flexShrink:0}}/>}
+          <div style={{minWidth:120,flexShrink:0}}>
+            <div style={{fontSize:13,fontWeight:700,color:"#fff",marginBottom:2}}>{fmtSec(j.horarioInicio)}</div>
+            <div style={{fontSize:10,color:"#666"}}>até {fmtSec(Number(j.horarioInicio)+Number(j.duracao))}</div>
+          </div>
+          <div style={{width:3,height:40,borderRadius:2,background:ch?.cor||"#555",flexShrink:0}}/>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:2}}>
+              <span style={{fontSize:13,fontWeight:600,color:"#fff"}}>{j.nome}</span>
+              <span style={{fontSize:10,padding:"2px 8px",borderRadius:3,background:TYPE_COLORS[j.jingleType],border:`1px solid ${TYPE_BORDER[j.jingleType]}`,color:"#fff",fontWeight:700}}>{TYPE_LABELS[j.jingleType]||j.jingleType}</span>
+            </div>
+            <div style={{fontSize:11,color:"#888"}}>{ch?.nome||j.canalId} · {fDur(Number(j.duracao))}</div>
+          </div>
+          <button onClick={()=>openEdit(j)} style={{background:"rgba(26,115,232,0.15)",border:"1px solid rgba(26,115,232,0.3)",color:"#4fc3f7",padding:"6px 12px",borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:600}}>✏️</button>
+          <button onClick={()=>handleDelete(j)} style={{background:"rgba(244,67,54,0.1)",border:"1px solid rgba(244,67,54,0.3)",color:"#f44336",padding:"6px 12px",borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:600}}>🗑️</button>
+        </div>;
+      })}
+    </div>
+
+    {/* Modal de edição */}
+    {showModal&&<div onClick={()=>setShowModal(false)} style={{position:"fixed",inset:0,zIndex:100,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:"#14161e",borderRadius:12,maxWidth:500,width:"100%",border:"1px solid rgba(255,255,255,0.1)",padding:24,maxHeight:"90vh",overflowY:"auto"}}>
+        <div style={{fontSize:16,fontWeight:700,color:"#fff",marginBottom:20}}>{editJingle?"Editar":"Nova"} Vinheta / Intervalo</div>
+        <div style={{display:"flex",flexDirection:"column",gap:14}}>
+          <div><label style={lS}>TIPO</label>
+            <div style={{display:"flex",gap:8}}>
+              {[{v:"open",l:"🎬 Abertura"},{v:"close",l:"🏁 Encerramento"},{v:"break",l:"📢 Intervalo"}].map(o=>
+                <button key={o.v} onClick={()=>setForm(f=>({...f,jingleType:o.v}))} style={{flex:1,padding:"8px 0",borderRadius:6,cursor:"pointer",fontSize:12,fontWeight:600,background:form.jingleType===o.v?"#9c27b0":"rgba(255,255,255,0.06)",border:form.jingleType===o.v?"1px solid #ba68c8":"1px solid rgba(255,255,255,0.1)",color:form.jingleType===o.v?"#fff":"#aaa"}}>{o.l}</button>)}
+            </div>
+          </div>
+          <div><label style={lS}>CANAL</label>
+            <select value={form.canalId} onChange={e=>setForm(f=>({...f,canalId:e.target.value}))} style={iS}>
+              {channels.filter(c=>!c.isInfo).map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}
+            </select>
+          </div>
+          <div><label style={lS}>DATA</label>
+            <select value={form.data} onChange={e=>setForm(f=>({...f,data:e.target.value}))} style={iS}>
+              {dates.map(d=><option key={d} value={d}>{d}</option>)}
+            </select>
+          </div>
+          <div><label style={lS}>NOME (opcional)</label>
+            <input value={form.nome} onChange={e=>setForm(f=>({...f,nome:e.target.value}))} placeholder="Ex: Vinheta de Abertura TREND TV" style={iS}/>
+          </div>
+          <div><label style={lS}>URL DO YOUTUBE (vídeo da vinheta)</label>
+            <input value={form.youtubeUrl} onChange={e=>setForm(f=>({...f,youtubeUrl:e.target.value}))} placeholder="https://youtu.be/..." style={iS}/>
+          </div>
+          <div style={{display:"flex",gap:10}}>
+            <div style={{flex:1}}><label style={lS}>HORÁRIO DE INÍCIO</label>
+              <input type="time" value={fmtSec(form.horarioInicio)} onChange={e=>{const[h,m]=e.target.value.split(":");setForm(f=>({...f,horarioInicio:(parseInt(h)||0)*3600+(parseInt(m)||0)*60}))}} style={iS}/>
+              <div style={{fontSize:10,color:"#666",marginTop:4}}>{fmtSec(form.horarioInicio)}</div>
+            </div>
+            <div style={{flex:1}}><label style={lS}>DURAÇÃO (segundos)</label>
+              <input type="number" min="5" max="600" value={form.duracao} onChange={e=>setForm(f=>({...f,duracao:Number(e.target.value)}))} style={iS}/>
+              <div style={{fontSize:10,color:"#666",marginTop:4}}>{fDur(form.duracao)}</div>
+            </div>
+          </div>
+          <div style={{display:"flex",gap:8,marginTop:8}}>
+            <button onClick={()=>setShowModal(false)} style={{flex:1,padding:12,borderRadius:6,cursor:"pointer",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",color:"#aaa",fontSize:13}}>Cancelar</button>
+            <button onClick={handleSave} disabled={saving} style={{flex:2,padding:12,borderRadius:6,cursor:"pointer",background:"linear-gradient(135deg,#9c27b0,#ba68c8)",border:"none",color:"#fff",fontSize:13,fontWeight:700}}>{saving?"Salvando...":"✓ Salvar"}</button>
+          </div>
+        </div>
+      </div>
+    </div>}
+  </div>;
+}
+
 export default function AdminPanel(){
   const dates=genDates(30);
   const [tab,setTab]=useState("schedule");
@@ -1185,7 +1342,7 @@ export default function AdminPanel(){
     <div style={{maxWidth:900,margin:"0 auto",padding:20}}>
       {/* Tabs */}
       <div style={{display:"flex",gap:2,borderBottom:"2px solid #1e2030",marginBottom:20}}>
-        {[{id:"schedule",label:"📅 Programação"},{id:"channels",label:"📺 Canais"}].map(t=>
+        {[{id:"schedule",label:"📅 Programação"},{id:"channels",label:"📺 Canais"},{id:"jingles",label:"🎬 Vinhetas & Intervalos"}].map(t=>
           <button key={t.id} onClick={()=>setTab(t.id)} style={{padding:"10px 20px",fontSize:13,fontWeight:600,cursor:"pointer",background:tab===t.id?"#1a73e8":"transparent",color:tab===t.id?"#fff":"#888",border:"none",borderRadius:"6px 6px 0 0"}}>{t.label}</button>)}
       </div>
 
@@ -1324,6 +1481,8 @@ export default function AdminPanel(){
         <button onClick={createSkyChannel} style={{marginBottom:16,padding:"10px 16px",borderRadius:6,cursor:"pointer",background:"rgba(26,115,232,0.15)",border:"1px solid rgba(26,115,232,0.3)",color:"#4fc3f7",fontSize:13,fontWeight:600}}>📡 Recriar Canal Sky</button>
         <ChannelEditor channels={channels} onUpdate={setCh} onAdd={addChannel} onDelete={delChannel}/>
       </>}
+
+      {tab==="jingles"&&<JinglesTab programs={programs} channels={channels} selCh={selCh} setSelCh={setSelCh} dates={dates} selDate={selDate} setSelDate={setSelDate} notify={notify} />}
     </div>
 
     {showModal&&<ProgramModal mode={editProg?"edit":"add"} program={editProg} channels={channels} selectedChannel={selCh} selectedDate={selDate} existingPrograms={programs} onSave={handleSave} onClose={()=>{setSM(false);setEP(null)}}/>}
