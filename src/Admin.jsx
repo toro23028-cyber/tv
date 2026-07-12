@@ -539,6 +539,7 @@ function TimelineView({programs,channels,selectedChannel,onEdit,onDelete,onReord
 function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existingPrograms,onSave,onClose}){
   const isEdit=mode==="edit";
   const [nome,setNome]=useState(program?.nome||"");
+  const md=()=>setDirty(true); // markDirty — chama junto com qualquer setter
   const [canalId,setCanalId]=useState(program?.canalId??selectedChannel);
   const [classificacao,setClassificacao]=useState(program?.classificacao||"L");
   const [tags,setTags]=useState(program?.tags||["HD"]);
@@ -565,6 +566,7 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
   const [isJingle,setIsJingle]=useState(program?.isJingle||false);
   const [error,setError]=useState("");
   const [saving,setSaving]=useState(false);
+  const [dirty,setDirty]=useState(false); // true quando usuário mexeu em algo
   // Start time
   const [startMode,setSM]=useState(isEdit?"custom":"auto");
   const [startH,setSH]=useState(isEdit?Math.floor(program.horarioInicio/3600):0);
@@ -634,7 +636,7 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
     <div onClick={e=>e.stopPropagation()} style={{background:"#14161e",borderRadius:12,maxWidth:640,width:"100%",border:"1px solid rgba(255,255,255,0.1)",maxHeight:"92vh",overflowY:"auto"}}>
       <div style={{padding:"16px 20px",borderBottom:"1px solid rgba(255,255,255,0.08)",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <span style={{fontSize:16,fontWeight:700,color:"#fff"}}>{isEdit?"✏️ Editar":"➕ Novo"} Programa</span>
-        <button onClick={onClose} style={{background:"none",border:"none",color:"#888",cursor:"pointer",fontSize:18}}>✕</button>
+        <button onClick={()=>onClose(dirty)} style={{background:"none",border:"none",color:"#888",cursor:"pointer",fontSize:18}}>✕</button>
       </div>
       <div style={{padding:20,display:"flex",flexDirection:"column",gap:16}}>
 
@@ -656,7 +658,7 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
 
         {/* Nome */}
         <div><label style={lS}>NOME DO PROGRAMA</label>
-          <input value={nome} onChange={e=>setNome(e.target.value)} placeholder="Ex: Documentário" style={{...iS,width:"100%"}}/></div>
+          <input value={nome} onChange={e=>{setNome(e.target.value);md()}} placeholder="Ex: Documentário" style={{...iS,width:"100%"}}/></div>
 
         {/* Videos */}
         <div>
@@ -945,7 +947,7 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
         </div>
 
         <div style={{display:"flex",gap:8}}>
-          <button onClick={onClose} style={{flex:1,padding:12,borderRadius:6,cursor:"pointer",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",color:"#aaa",fontSize:13,fontWeight:600}}>Cancelar</button>
+          <button onClick={()=>onClose(dirty)} style={{flex:1,padding:12,borderRadius:6,cursor:"pointer",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",color:"#aaa",fontSize:13,fontWeight:600}}>Cancelar</button>
           <button onClick={save} disabled={hasOverlap||saving} style={{flex:2,padding:12,borderRadius:6,cursor:hasOverlap||saving?"not-allowed":"pointer",background:hasOverlap||saving?"#333":"#1a73e8",border:"none",color:"#fff",fontSize:13,fontWeight:700,opacity:hasOverlap||saving?0.5:1}}>{saving?"⏳ Salvando...":isEdit?"💾 Salvar":"✅ Agendar"}</button>
         </div>
       </div>
@@ -1611,10 +1613,43 @@ export default function AdminPanel(){
 
         {/* Stats */}
         <div style={{display:"flex",gap:16,padding:"12px 16px",marginBottom:16,background:"rgba(255,255,255,0.03)",borderRadius:8,fontSize:12,color:"#888",flexWrap:"wrap",alignItems:"center"}}>
+          {/* Checkbox selecionar todos */}
+          {selCh&&dayProgs.filter(p=>p.canalId===selCh&&!p._isProjected).length>0&&(()=>{
+            const selectableProgs=dayProgs.filter(p=>p.canalId===selCh&&!p._isProjected);
+            const allSelected=selectableProgs.length>0&&selectableProgs.every(p=>selectedProgs.has(p.id));
+            const someSelected=selectableProgs.some(p=>selectedProgs.has(p.id));
+            return <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",userSelect:"none"}} title={allSelected?"Desmarcar todos":"Selecionar todos"}>
+              <input type="checkbox" checked={allSelected} ref={el=>{if(el)el.indeterminate=someSelected&&!allSelected}}
+                onChange={()=>{
+                  if(allSelected){setSelectedProgs(new Set())}
+                  else{const ns=new Set(selectedProgs);selectableProgs.forEach(p=>ns.add(p.id));setSelectedProgs(ns)}
+                }}
+                style={{width:16,height:16,accentColor:"#4caf50",cursor:"pointer"}}/>
+              <span style={{color:someSelected?"#4caf50":"#888",fontWeight:someSelected?700:400}}>
+                {someSelected?`${selectedProgs.size} selecionado(s)`:"Todos"}
+              </span>
+            </label>;
+          })()}
           <span>📊 <strong style={{color:"#fff"}}>{dayProgs.filter(p=>p.canalId===selCh).length}</strong> programas</span>
           <span>⏱ <strong style={{color:"#fff"}}>{secTo(totalSch).h}h{secTo(totalSch).m>0?`${secTo(totalSch).m}min`:""}</strong> agendado</span>
           <span>📭 <strong style={{color:totalSch>=86400?"#4caf50":"#ff9800"}}>{secTo(Math.max(0,86400-totalSch)).h}h{secTo(Math.max(0,86400-totalSch)).m>0?`${secTo(Math.max(0,86400-totalSch)).m}min`:""}</strong> livre</span>
           <div style={{flex:1}}/>
+          {/* Apagar todos selecionados */}
+          {selectedProgs.size>0&&<button onClick={async()=>{
+            const ids=[...selectedProgs];
+            if(!confirm(`🗑️ APAGAR ${ids.length} PROGRAMA(S)
+
+Essa ação é irreversível. Todos os ${ids.length} programas selecionados serão removidos do banco.
+
+Deseja continuar?`))return;
+            notify(`🗑️ Apagando ${ids.length} programas...`);
+            let ok=0,fail=0;
+            for(const id of ids){
+              try{await deleteDoc(doc(db,"programs",id));ok++}catch{fail++}
+            }
+            setSelectedProgs(new Set());
+            notify(`✅ ${ok} removido(s)${fail>0?` · ❌ ${fail} erro(s)`:""}`);
+          }} style={{padding:"8px 14px",borderRadius:6,cursor:"pointer",fontSize:11,fontWeight:700,background:"rgba(244,67,54,0.12)",border:"1px solid rgba(244,67,54,0.35)",color:"#f44336",whiteSpace:"nowrap"}}>🗑️ Apagar {selectedProgs.size}</button>}
           <button onClick={async()=>{
             if(!selCh){notify("Selecione um canal");return}
             const confirmed=confirm("🔧 CORRIGIR PROGRAMAÇÃO\n\nIsso vai:\n✓ Apagar programas de dias passados (que já foram exibidos)\n✓ Resolver sobreposições (encurta o anterior)\n✓ Fechar buracos (programas se encostam)\n✓ Se o dia não cobrir 24h, estica o último programa\n\nCanal: "+channels.find(c=>c.id===selCh)?.nome+"\nDeseja continuar?");
@@ -1724,7 +1759,23 @@ export default function AdminPanel(){
       </>}
 
       {/* FLOATING CLONE BUTTON - RIGHT SIDE */}
-      {selectedProgs.size>0&&<button onClick={()=>{const selected=dayProgs.filter(p=>selectedProgs.has(p.id));setCloneMenuProgs(selected)}} style={{position:"fixed",bottom:40,right:40,width:180,padding:14,borderRadius:8,cursor:"pointer",background:"linear-gradient(135deg,#4caf50,#81c784)",border:"none",color:"#fff",fontSize:14,fontWeight:700,boxShadow:"0 4px 20px rgba(76,175,80,0.4)",zIndex:50,transition:"all 0.3s"}}>📋 Clonar {selectedProgs.size}</button>}
+      {selectedProgs.size>0&&<div style={{position:"fixed",bottom:40,right:40,display:"flex",flexDirection:"column",gap:8,zIndex:50}}>
+        <button onClick={()=>{const selected=dayProgs.filter(p=>selectedProgs.has(p.id));setCloneMenuProgs(selected)}} style={{padding:"14px 20px",borderRadius:8,cursor:"pointer",background:"linear-gradient(135deg,#4caf50,#81c784)",border:"none",color:"#fff",fontSize:14,fontWeight:700,boxShadow:"0 4px 20px rgba(76,175,80,0.4)",whiteSpace:"nowrap"}}>📋 Clonar {selectedProgs.size}</button>
+        <button onClick={async()=>{
+          const ids=[...selectedProgs];
+          if(!confirm(`🗑️ APAGAR ${ids.length} PROGRAMA(S)
+
+Essa ação é irreversível.
+
+Deseja continuar?`))return;
+          notify(`🗑️ Apagando ${ids.length} programas...`);
+          let ok=0,fail=0;
+          for(const id of ids){try{await deleteDoc(doc(db,"programs",id));ok++}catch{fail++}}
+          setSelectedProgs(new Set());
+          notify(`✅ ${ok} removido(s)${fail>0?` · ❌ ${fail} erro(s)`:""}`);
+        }} style={{padding:"14px 20px",borderRadius:8,cursor:"pointer",background:"linear-gradient(135deg,#f44336,#e57373)",border:"none",color:"#fff",fontSize:14,fontWeight:700,boxShadow:"0 4px 20px rgba(244,67,54,0.4)",whiteSpace:"nowrap"}}>🗑️ Apagar {selectedProgs.size}</button>
+        <button onClick={()=>setSelectedProgs(new Set())} style={{padding:"8px 20px",borderRadius:8,cursor:"pointer",background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.12)",color:"#aaa",fontSize:12}}>✕ Cancelar seleção</button>
+      </div>}
 
       {tab==="channels"&&<>
         <button onClick={createSkyChannel} style={{marginBottom:16,padding:"10px 16px",borderRadius:6,cursor:"pointer",background:"rgba(26,115,232,0.15)",border:"1px solid rgba(26,115,232,0.3)",color:"#4fc3f7",fontSize:13,fontWeight:600}}>📡 Recriar Canal Sky</button>
@@ -1733,7 +1784,12 @@ export default function AdminPanel(){
 
     </div>
 
-    {showModal&&<ProgramModal mode={editProg?"edit":"add"} program={editProg} channels={channels} selectedChannel={selCh} selectedDate={effectiveSelDate} existingPrograms={programs} onSave={handleSave} onClose={()=>{setSM(false);setEP(null)}}/>}
+    {showModal&&<ProgramModal mode={editProg?"edit":"add"} program={editProg} channels={channels} selectedChannel={selCh} selectedDate={effectiveSelDate} existingPrograms={programs} onSave={handleSave} onClose={(dirty)=>{
+  if(dirty&&!confirm("Fechar sem salvar?
+
+As alterações feitas não foram salvas e serão perdidas."))return;
+  setSM(false);setEP(null);
+}}/>}
 
     {/* Clone menu - appears near clone button */}
     {cloneMenuProgs.length>0&&<div onClick={()=>setCloneMenuProgs([])} style={{position:"fixed",inset:0,zIndex:100}}>
