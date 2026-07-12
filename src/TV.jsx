@@ -860,8 +860,14 @@ function ChannelLogoOverlay({channel, program, showOSD, fade}){
   const progLogo  = program?.overlayLogoUrl;
   const chanLogo  = channel?.overlayLogoUrl;
   const logoUrl   = progLogo || chanLogo;
-  const corner    = program?.overlayCorner || channel?.overlayCorner || "tr";
-  const size      = program?.overlaySize   || channel?.overlaySize   || 64;
+  // Canto: programa sobrescreve canal, mas só se tiver valor não-vazio.
+  // Fallback final: "tr" (superior direito)
+  const corner    = (program?.overlayCorner && program.overlayCorner !== "")
+    ? program.overlayCorner
+    : (channel?.overlayCorner && channel.overlayCorner !== "")
+      ? channel.overlayCorner
+      : "tr";
+  const size      = program?.overlaySize || channel?.overlaySize || 64;
 
   const [visible, setVisible] = useState(false);
   const [animKey, setAnimKey] = useState(0); // força re-animação a cada troca de programa
