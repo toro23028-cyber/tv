@@ -555,6 +555,7 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
   const [thumbnailUrl,setTU]=useState(program?.thumbnailUrl||null);
   const [gcAlways,setGcAlways]=useState(program?.gcAlways||false);
   const [gcNever,setGcNever]=useState(program?.gcNever||false);
+  const [maratona,setMaratona]=useState(program?.maratona||false);
   const [blocoDuracao,setBlocoDuracao]=useState(program?.blocoDuracao||BLOCO_PADRAO);
   const [isTemplate,setIsTemplate]=useState(program?.isTemplate||false);
   const [jingleType,setJingleType]=useState(program?.jingleType||"");  // ""=programa normal, "open"|"close"|"break"=vinheta
