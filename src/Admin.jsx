@@ -556,6 +556,9 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
   const [gcAlways,setGcAlways]=useState(program?.gcAlways||false);
   const [gcNever,setGcNever]=useState(program?.gcNever||false);
   const [maratona,setMaratona]=useState(program?.maratona||false);
+  const [overlayLogoUrl,setPOLU]=useState(program?.overlayLogoUrl||"");
+  const [overlayCorner,setPOLC]=useState(program?.overlayCorner||"");
+  const [overlaySize,setPOLS]=useState(program?.overlaySize||0);
   const [blocoDuracao,setBlocoDuracao]=useState(program?.blocoDuracao||BLOCO_PADRAO);
   const [isTemplate,setIsTemplate]=useState(program?.isTemplate||false);
   const [jingleType,setJingleType]=useState(program?.jingleType||"");  // ""=programa normal, "open"|"close"|"break"=vinheta
@@ -580,6 +583,9 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
     setGcAlways(t.gcAlways||false);
     setMaratona(t.maratona||false);
     setBlocoDuracao(t.blocoDuracao||BLOCO_PADRAO);
+    setPOLU(t.overlayLogoUrl||"");
+    setPOLC(t.overlayCorner||"");
+    setPOLS(t.overlaySize||0);
     setTT(t.thumbnailType||"youtube");
     setTU(t.thumbnailUrl||null);
     // Não copia vídeos — só a estrutura do programa
@@ -615,7 +621,7 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
     
     setSaving(true);
     try {
-      onSave({id:isEdit?program.id:`prog_${Date.now()}`,nome,canalId,classificacao,tags,sinopse,data:selectedDate,duracao:dur,horarioInicio:horIn,horarioFim:horFim,youtubeId:videos[0].youtubeUrl,videos:videos.filter(v=>v.youtubeUrl.trim()),thumbnailType,thumbnailUrl,gcAlways,maratona,blocoDuracao:Number(blocoDuracao)||BLOCO_PADRAO,isTemplate,gcNever,isJingle,jingleType:isJingle?jingleType:""});
+      onSave({id:isEdit?program.id:`prog_${Date.now()}`,nome,canalId,classificacao,tags,sinopse,data:selectedDate,duracao:dur,horarioInicio:horIn,horarioFim:horFim,youtubeId:videos[0].youtubeUrl,videos:videos.filter(v=>v.youtubeUrl.trim()),thumbnailType,thumbnailUrl,gcAlways,maratona,blocoDuracao:Number(blocoDuracao)||BLOCO_PADRAO,isTemplate,gcNever,isJingle,jingleType:isJingle?jingleType:"",overlayLogoUrl:overlayLogoUrl.trim()||null,overlayCorner:overlayCorner||null,overlaySize:overlaySize||null});
       setSaving(false);
     } catch(err) {
       console.error("Erro ao salvar:",err);
@@ -923,6 +929,21 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
           <div style={{fontSize:10,color:"#666"}}>O padrão aparece para uso rápido ao criar novos programas (só a estrutura — você altera os vídeos a cada vez)</div></div>
         </label>
 
+        {/* Logo overlay por programa */}
+        <div style={{padding:"10px 12px",background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:6}}>
+          <div style={{fontSize:12,fontWeight:600,color:"#ccc",marginBottom:6}}>🖼️ Logo na tela (opcional — sobrescreve a do canal)</div>
+          <input value={overlayLogoUrl} onChange={e=>setPOLU(e.target.value)} placeholder="URL da logo PNG (deixe vazio = usa a do canal)" style={{...iS,width:"100%",marginBottom:overlayLogoUrl?6:0}}/>
+          {overlayLogoUrl&&<>
+            <img src={overlayLogoUrl} alt="preview" style={{height:36,maxWidth:100,objectFit:"contain",background:"rgba(255,255,255,0.05)",borderRadius:3,padding:3,marginBottom:6,display:"block"}} onError={e=>e.target.style.display="none"}/>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:6}}>
+              {[{v:"tr",l:"↗ Sup. Dir."},{v:"tl",l:"↖ Sup. Esq."},{v:"br",l:"↘ Inf. Dir."},{v:"bl",l:"↙ Inf. Esq."}].map(o=>
+                <button key={o.v} onClick={()=>setPOLC(o.v)} style={{padding:"4px 10px",borderRadius:4,cursor:"pointer",fontSize:10,background:overlayCorner===o.v?"rgba(26,115,232,0.3)":"rgba(255,255,255,0.04)",border:overlayCorner===o.v?"1px solid #1a73e8":"1px solid rgba(255,255,255,0.08)",color:overlayCorner===o.v?"#4fc3f7":"#888"}}>{o.l}</button>
+              )}
+            </div>
+          </>}
+          <div style={{fontSize:10,color:"#666"}}>Se vazio, usa a logo configurada no canal. Se preenchido, esta logo aparece só durante este programa.</div>
+        </div>
+
         <div style={{display:"flex",gap:8}}>
           <button onClick={onClose} style={{flex:1,padding:12,borderRadius:6,cursor:"pointer",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",color:"#aaa",fontSize:13,fontWeight:600}}>Cancelar</button>
           <button onClick={save} disabled={hasOverlap||saving} style={{flex:2,padding:12,borderRadius:6,cursor:hasOverlap||saving?"not-allowed":"pointer",background:hasOverlap||saving?"#333":"#1a73e8",border:"none",color:"#fff",fontSize:13,fontWeight:700,opacity:hasOverlap||saving?0.5:1}}>{saving?"⏳ Salvando...":isEdit?"💾 Salvar":"✅ Agendar"}</button>
@@ -948,12 +969,15 @@ function ChannelEditor({channels,onUpdate,onAdd,onDelete}){
   const [eternity,setEternity]=useState(false);
   const [eternityDays,setEternityDays]=useState(1);
   const [saving,setSaving]=useState(false);
+  const [overlayLogoUrl,setOLU]=useState("");
+  const [overlayCorner,setOLC]=useState("tr");
+  const [overlaySize,setOLS]=useState(64);
 
-  const startEdit=(ch)=>{setEditing(ch.id);setNome(ch.nome);setLogo(ch.logo);setLT(ch.logoType||"emoji");setLU(ch.logoUrl||null);setCor(ch.cor);setNumber(ch.numero||0);setGcAlways(ch.gcAlways||false);setIsMusic(ch.isMusic||false);setEternity(ch.eternity||false);setEternityDays(ch.eternityDays||1)};
+  const startEdit=(ch)=>{setEditing(ch.id);setNome(ch.nome);setLogo(ch.logo);setLT(ch.logoType||"emoji");setLU(ch.logoUrl||null);setCor(ch.cor);setNumber(ch.numero||0);setGcAlways(ch.gcAlways||false);setIsMusic(ch.isMusic||false);setEternity(ch.eternity||false);setEternityDays(ch.eternityDays||1);setOLU(ch.overlayLogoUrl||"");setOLC(ch.overlayCorner||"tr");setOLS(ch.overlaySize||64)};
   const save=async()=>{
     setSaving(true);
     try {
-      const updated = {nome,numero,logo,logoType,logoUrl,cor,gcAlways,isMusic,eternity,eternityDays:Number(eternityDays)||1};
+      const updated = {nome,numero,logo,logoType,logoUrl,cor,gcAlways,isMusic,eternity,eternityDays:Number(eternityDays)||1,overlayLogoUrl:overlayLogoUrl.trim()||null,overlayCorner,overlaySize:Number(overlaySize)||64};
       await updateDoc(doc(db,"channels",editing), updated);
       setEditing(null);
     } catch(err) {
@@ -1014,6 +1038,24 @@ function ChannelEditor({channels,onUpdate,onAdd,onDelete}){
             <div><div style={{fontSize:16,fontWeight:700,color:"#fff"}}>{nome||"Sem nome"}</div><div style={{fontSize:12,color:"#888"}}>Canal {ch.numero}</div></div>
           </div>
         </div>
+
+        {/* Logo Overlay */}
+        <div><label style={lS}>🖼️ LOGO NA TELA (PNG)</label>
+          <div style={{fontSize:11,color:"#666",marginBottom:8}}>URL de uma imagem PNG (com fundo transparente). Aparece sobre o vídeo no canto escolhido. Deixe vazio para desativar.</div>
+          <input value={overlayLogoUrl} onChange={e=>setOLU(e.target.value)} placeholder="https://exemplo.com/logo-canal.png" style={{...iS,width:"100%",marginBottom:8}}/>
+          {overlayLogoUrl&&<img src={overlayLogoUrl} alt="preview" style={{height:48,maxWidth:120,objectFit:"contain",background:"rgba(255,255,255,0.05)",borderRadius:4,padding:4,marginBottom:8,display:"block"}} onError={e=>e.target.style.display="none"}/>}
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:8}}>
+            {[{v:"tr",l:"↗ Sup. Direito"},{v:"tl",l:"↖ Sup. Esquerdo"},{v:"br",l:"↘ Inf. Direito"},{v:"bl",l:"↙ Inf. Esquerdo"}].map(o=>
+              <button key={o.v} onClick={()=>setOLC(o.v)} style={{padding:"6px 12px",borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:600,background:overlayCorner===o.v?"rgba(26,115,232,0.3)":"rgba(255,255,255,0.04)",border:overlayCorner===o.v?"1px solid #1a73e8":"1px solid rgba(255,255,255,0.08)",color:overlayCorner===o.v?"#4fc3f7":"#888"}}>{o.l}</button>
+            )}
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <span style={{fontSize:11,color:"#888"}}>Tamanho:</span>
+            <input type="range" min={32} max={160} step={8} value={overlaySize} onChange={e=>setOLS(Number(e.target.value))} style={{flex:1}}/>
+            <span style={{fontSize:11,color:"#ccc",minWidth:30}}>{overlaySize}px</span>
+          </div>
+        </div>
+
         <div style={{display:"flex",gap:8}}>
           <button onClick={()=>setEditing(null)} style={{flex:1,padding:10,borderRadius:4,cursor:"pointer",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",color:"#aaa",fontSize:12}}>Cancelar</button>
           <button onClick={save} style={{flex:1,padding:10,borderRadius:4,cursor:"pointer",background:"#1a73e8",border:"none",color:"#fff",fontSize:12,fontWeight:700,opacity:saving?0.5:1}}>{saving?"Salvando...":"💾 Salvar"}</button>
