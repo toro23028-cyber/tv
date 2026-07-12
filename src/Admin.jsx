@@ -621,7 +621,7 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
     
     setSaving(true);
     try {
-      onSave({id:isEdit?program.id:`prog_${Date.now()}`,nome,canalId,classificacao,tags,sinopse,data:selectedDate,duracao:dur,horarioInicio:horIn,horarioFim:horFim,youtubeId:videos[0].youtubeUrl,videos:videos.filter(v=>v.youtubeUrl.trim()),thumbnailType,thumbnailUrl,gcAlways,maratona,blocoDuracao:Number(blocoDuracao)||BLOCO_PADRAO,isTemplate,gcNever,isJingle,jingleType:isJingle?jingleType:"",overlayLogoUrl:overlayLogoUrl.trim()||null,overlayCorner:overlayCorner||null,overlaySize:overlaySize||null});
+      onSave({id:isEdit?program.id:`prog_${Date.now()}`,nome,canalId,classificacao,tags,sinopse,data:selectedDate,duracao:dur,horarioInicio:horIn,horarioFim:horFim,youtubeId:videos[0].youtubeUrl,videos:videos.filter(v=>v.youtubeUrl.trim()),thumbnailType,thumbnailUrl,gcAlways,maratona,blocoDuracao:Number(blocoDuracao)||BLOCO_PADRAO,isTemplate,gcNever,isJingle,jingleType:isJingle?jingleType:"",overlayLogoUrl:overlayLogoUrl.trim()||null,overlayCorner:overlayCorner||"",overlaySize:overlaySize||null});
       setSaving(false);
     } catch(err) {
       console.error("Erro ao salvar:",err);
@@ -977,7 +977,7 @@ function ChannelEditor({channels,onUpdate,onAdd,onDelete}){
   const save=async()=>{
     setSaving(true);
     try {
-      const updated = {nome,numero,logo,logoType,logoUrl,cor,gcAlways,isMusic,eternity,eternityDays:Number(eternityDays)||1,overlayLogoUrl:overlayLogoUrl.trim()||null,overlayCorner,overlaySize:Number(overlaySize)||64};
+      const updated = {nome,numero,logo,logoType,logoUrl,cor,gcAlways,isMusic,eternity,eternityDays:Number(eternityDays)||1,overlayLogoUrl:overlayLogoUrl.trim()||null,overlayCorner:overlayCorner||"tr",overlaySize:Number(overlaySize)||64};
       await updateDoc(doc(db,"channels",editing), updated);
       setEditing(null);
     } catch(err) {
@@ -1044,9 +1044,10 @@ function ChannelEditor({channels,onUpdate,onAdd,onDelete}){
           <div style={{fontSize:11,color:"#666",marginBottom:8}}>URL de uma imagem PNG (com fundo transparente). Aparece sobre o vídeo no canto escolhido. Deixe vazio para desativar.</div>
           <input value={overlayLogoUrl} onChange={e=>setOLU(e.target.value)} placeholder="https://exemplo.com/logo-canal.png" style={{...iS,width:"100%",marginBottom:8}}/>
           {overlayLogoUrl&&<img src={overlayLogoUrl} alt="preview" style={{height:48,maxWidth:120,objectFit:"contain",background:"rgba(255,255,255,0.05)",borderRadius:4,padding:4,marginBottom:8,display:"block"}} onError={e=>e.target.style.display="none"}/>}
+          <div style={{fontSize:11,color:"#888",marginBottom:6}}>Posição na tela:</div>
           <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:8}}>
             {[{v:"tr",l:"↗ Sup. Direito"},{v:"tl",l:"↖ Sup. Esquerdo"},{v:"br",l:"↘ Inf. Direito"},{v:"bl",l:"↙ Inf. Esquerdo"}].map(o=>
-              <button key={o.v} onClick={()=>setOLC(o.v)} style={{padding:"6px 12px",borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:600,background:overlayCorner===o.v?"rgba(26,115,232,0.3)":"rgba(255,255,255,0.04)",border:overlayCorner===o.v?"1px solid #1a73e8":"1px solid rgba(255,255,255,0.08)",color:overlayCorner===o.v?"#4fc3f7":"#888"}}>{o.l}</button>
+              <button key={o.v} onClick={()=>setOLC(o.v)} style={{padding:"6px 12px",borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:600,background:overlayCorner===o.v?"rgba(26,115,232,0.35)":"rgba(255,255,255,0.04)",border:overlayCorner===o.v?"2px solid #1a73e8":"1px solid rgba(255,255,255,0.08)",color:overlayCorner===o.v?"#fff":"#888"}}>{o.l}</button>
             )}
           </div>
           <div style={{display:"flex",alignItems:"center",gap:8}}>
