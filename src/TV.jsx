@@ -834,6 +834,14 @@ function VideoPreloader({nextVideoId}){
   />;
 }
 
+
+// Retorna a chave a usar na URL para um canal:
+// prefere o número (ex: 2), só usa o ID do Firebase como último recurso
+function channelUrlKey(ch){
+  if(!ch)return null;
+  const n=Number(ch.numero);
+  return (n&&n>0)?String(n):ch.id;
+}
 export default function TVWeb(){
   const [channels, setChannels] = useState([]);
   const [allPrograms, setAllPrograms] = useState([]);
@@ -954,12 +962,15 @@ export default function TVWeb(){
             }
           }
           if(!resolved)resolved=sorted[0].id; // fallback: primeiro canal
-          // Seta URL se ainda não tem ?canal
+          // Sempre normaliza a URL para o formato limpo (?canal=NUMERO)
+          // Corrige URLs com ID do Firebase (ex: ?canal=TYb2xqCnhk1zAR5o12Rt)
           try{
             const url=new URL(window.location);
-            if(!url.searchParams.get("canal")){
-              const ch=sorted.find(c=>c.id===resolved);
-              url.searchParams.set("canal",ch?.numero||resolved);
+            const chObj=sorted.find(c=>c.id===resolved);
+            const key=channelUrlKey(chObj)||resolved;
+            const current=url.searchParams.get("canal");
+            if(current!==key){
+              url.searchParams.set("canal",key);
               window.history.replaceState({},"",url);
             }
           }catch{}
@@ -1108,9 +1119,9 @@ export default function TVWeb(){
       // Atualiza a URL sem recarregar (cada canal tem sua URL para compartilhar)
       try{
         const ch=channels.find(c=>c.id===id);
-        const num=ch?.numero||id;
+        const key=channelUrlKey(ch)||id;
         const url=new URL(window.location);
-        url.searchParams.set("canal",num);
+        url.searchParams.set("canal",key);
         window.history.replaceState({},"",url);
       }catch{}
     },300);
