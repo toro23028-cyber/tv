@@ -340,32 +340,29 @@ const GC_DELAY=5, GC_DURATION=25, GC_END_LEAD=30;
 
 function GCBar({channel,program,nextProgram}){
   const isMusic=!!channel?.isMusic;
-  const gcAlways=!!(program?.gcAlways||channel?.gcAlways);
+  // gcNever no programa SOBRESCREVE gcAlways do canal — permite desativar por programa
+  const gcNever=!!(program?.gcNever);
+  const gcAlways=!gcNever&&!!(program?.gcAlways||channel?.gcAlways);
   const [visible,setVisible]=useState(false);
   const contKey=program?.contKey||program?.id;
 
   useEffect(()=>{
-    if(!program||program.isPlaceholder){setVisible(false);return}
+    if(!program||program.isPlaceholder||gcNever){setVisible(false);return}
     if(gcAlways){setVisible(true);return}
     if(!isMusic){setVisible(false);return}
 
     const upd=()=>{
       const vInfo = getVideoPlaybackInfo(program);
       if(!vInfo){ setVisible(false); return; }
-
-      // Lógica correta e sincronizada com a música:
-      // - Mostra GC entre 5s e 30s do clipe (intro)
-      // - Mostra GC nos últimos 30s do clipe, exceto os últimos 5s (outro limpo)
       const showIntro = vInfo.position >= GC_DELAY && vInfo.position < (GC_DELAY + GC_DURATION);
       const showOutro = vInfo.remaining <= GC_END_LEAD && vInfo.remaining > (GC_END_LEAD - GC_DURATION);
-
       setVisible(showIntro || showOutro);
     };
 
     upd();
     const i=setInterval(upd,500);
     return()=>clearInterval(i);
-  },[contKey,channel?.id,gcAlways,isMusic,program]);
+  },[contKey,channel?.id,gcAlways,gcNever,isMusic,program]);
 
   // Título atual: usa o vídeo correto da playlist quando disponível
   // (calculado aqui, fora do useEffect, para reutilizar sem segunda chamada)
@@ -1200,6 +1197,12 @@ export default function TVWeb(){
           )}
         </div>
       )}
+      {/* Cobre a barra de título do YouTube que aparece no início/troca de vídeo.
+          O YouTube mostra o título nas primeiras ~3s em cima e nas últimas ~3s.
+          Posicionamos um retângulo preto exatamente sobre essa área. */}
+      <div style={{position:"absolute",top:0,left:0,right:0,height:"12%",background:"#000",pointerEvents:"none",zIndex:2}}/>
+      {/* Cobre a barra inferior (logo do YouTube + tempo que às vezes aparece) */}
+      <div style={{position:"absolute",bottom:0,left:0,right:0,height:"8%",background:"#000",pointerEvents:"none",zIndex:2}}/>
     </div>
 
     {/* ===== CLICK BARRIER (completely above iframe, below menus) ===== */}
