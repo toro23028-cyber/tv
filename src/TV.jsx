@@ -1197,13 +1197,14 @@ export default function TVWeb(){
           )}
         </div>
       )}
-      {/* Cobre a barra de título do YouTube que aparece no início/troca de vídeo.
-          O YouTube mostra o título nas primeiras ~3s em cima e nas últimas ~3s.
-          Posicionamos um retângulo preto exatamente sobre essa área. */}
-      <div style={{position:"absolute",top:0,left:0,right:0,height:"12%",background:"#000",pointerEvents:"none",zIndex:2}}/>
-      {/* Cobre a barra inferior (logo do YouTube + tempo que às vezes aparece) */}
-      <div style={{position:"absolute",bottom:0,left:0,right:0,height:"8%",background:"#000",pointerEvents:"none",zIndex:2}}/>
     </div>
+
+    {/* Barras pretas cobrindo topo/base do iframe — escondem título e logo do YouTube.
+        Ficam acima do player (zIndex:1) mas abaixo do click barrier (zIndex:2). */}
+    {ytSrc&&!cp?.isPlaceholder&&<>
+      <div style={{position:"absolute",top:0,left:0,right:0,height:"12%",background:"#000",pointerEvents:"none",zIndex:2,opacity:fade?0:1,transition:"opacity 0.5s"}}/>
+      <div style={{position:"absolute",bottom:0,left:0,right:0,height:"8%",background:"#000",pointerEvents:"none",zIndex:2,opacity:fade?0:1,transition:"opacity 0.5s"}}/>
+    </>}
 
     {/* ===== CLICK BARRIER (completely above iframe, below menus) ===== */}
     <div onClick={handleVideoClick} style={{position:"absolute",inset:0,zIndex:2}} />
