@@ -1257,6 +1257,16 @@ function JinglesTab({programs,channels,selCh,setSelCh,dates,selDate,setSelDate,n
   </div>;
 }
 
+
+// Fisher-Yates shuffle — retorna novo array embaralhado (não muta o original)
+function shuffleArray(arr){
+  const a=[...arr];
+  for(let i=a.length-1;i>0;i--){
+    const j=Math.floor(Math.random()*(i+1));
+    [a[i],a[j]]=[a[j],a[i]];
+  }
+  return a;
+}
 export default function AdminPanel(){
   // Gera 7 dias passados + 30 dias futuros para ver programas base do eternity
   // Recalcula a janela de datas sempre que o componente re-renderiza
@@ -1448,7 +1458,10 @@ export default function AdminPanel(){
           horarioFim:endTime,
           duracao:sourceProgram.duracao,
           youtubeId:sourceProgram.youtubeId,
-          videos:sourceProgram.videos,
+          // Auto-shuffle: embaralha a playlist ao clonar para evitar repetição na mesma ordem
+          videos:sourceProgram.videos&&sourceProgram.videos.length>1
+            ?shuffleArray(sourceProgram.videos)
+            :sourceProgram.videos,
           sinopse:sourceProgram.sinopse,
           classificacao:sourceProgram.classificacao,
           tags:sourceProgram.tags||[],
@@ -1460,7 +1473,7 @@ export default function AdminPanel(){
       }
       setCloneMenuProgs([]);
       setSelectedProgs(new Set());
-      notify(`✅ ${cloneMenuProgs.length} programa(s) clonado(s)!`);
+      notify(`✅ ${cloneMenuProgs.length} programa(s) clonado(s) com playlist embaralhada!`);
     } catch(err) {
       console.error("Erro ao clonar programa:",err);
       notify("❌ Erro ao clonar programa");
@@ -1484,7 +1497,9 @@ export default function AdminPanel(){
           horarioFim:endTime,
           duracao:sourceProgram.duracao,
           youtubeId:sourceProgram.youtubeId,
-          videos:sourceProgram.videos,
+          videos:sourceProgram.videos&&sourceProgram.videos.length>1
+            ?shuffleArray(sourceProgram.videos)
+            :sourceProgram.videos,
           sinopse:sourceProgram.sinopse,
           classificacao:sourceProgram.classificacao,
           tags:sourceProgram.tags||[],
@@ -1498,7 +1513,7 @@ export default function AdminPanel(){
       setCloneMenuProgs([]);
       setSelectedProgs(new Set());
       setCloneData({channel:"",date:null,time:""});
-      notify(`✅ ${cloneMenuProgs.length} programa(s) clonado(s) em outro canal!`);
+      notify(`✅ ${cloneMenuProgs.length} programa(s) clonado(s) em outro canal com playlist embaralhada!`);
     } catch(err) {
       console.error("Erro ao clonar programa:",err);
       notify("❌ Erro ao clonar programa");
@@ -1668,6 +1683,27 @@ export default function AdminPanel(){
             }
             notify(`✅ Corrigido! ${cleaned} antigo(s) removido(s), ${fixed} ajuste(s) na grade${filled>0?", último esticado até 24h":""}`);
           }} style={{padding:"8px 16px",borderRadius:6,cursor:"pointer",fontSize:11,fontWeight:700,background:"rgba(255,152,0,0.12)",border:"1px solid rgba(255,152,0,0.35)",color:"#ff9800",whiteSpace:"nowrap"}}>🔧 Corrigir Programação</button>
+          <button onClick={async()=>{
+            if(!selCh){notify("Selecione um canal");return}
+            const dayReal=programs.filter(p=>p.canalId===selCh&&p.data===effectiveSelDate&&!p.isJingle&&!p.isTemplate);
+            if(dayReal.length<2){notify("Precisa de pelo menos 2 programas para randomizar");return}
+            if(!confirm(`🔀 RANDOMIZAR GRADE\n\nEmbaralha a ordem dos ${dayReal.length} programa(s) redistribuindo os horários.\nAs playlists também serão embaralhadas.\n\nDeseja continuar?`))return;
+            notify("🔀 Randomizando...");
+            const starts=[...dayReal].sort((a,b)=>Number(a.horarioInicio)-Number(b.horarioInicio)).map(p=>Number(p.horarioInicio));
+            const shuffledProgs=shuffleArray(dayReal);
+            let cur=starts[0];
+            let changed=0;
+            for(const p of shuffledProgs){
+              const dur=Number(p.duracao);
+              const videos=p.videos&&p.videos.length>1?shuffleArray(p.videos):p.videos;
+              try{
+                await updateDoc(doc(db,"programs",String(p.id)),{horarioInicio:cur,horarioFim:cur+dur,videos:videos||p.videos});
+                changed++;
+              }catch(err){console.error("Randomizar err:",err)}
+              cur+=dur;
+            }
+            notify(`✅ ${changed} programa(s) randomizados!`);
+          }} style={{padding:"8px 14px",borderRadius:6,cursor:"pointer",fontSize:11,fontWeight:700,background:"rgba(156,39,176,0.12)",border:"1px solid rgba(156,39,176,0.35)",color:"#ce93d8",whiteSpace:"nowrap"}}>🔀 Randomizar grade</button>
         </div>
 
         <div style={{marginBottom:8,display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
