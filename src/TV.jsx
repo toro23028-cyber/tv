@@ -875,52 +875,6 @@ export default function TVWeb(){
   // Index de skip: quando um vídeo é bloqueado, avança pro próximo
   const [skipVideoIndex,setSkipVideoIndex]=useState(null); // {progId, fromIndex}
 
-  // Listener postMessage do YouTube IFrame API
-  // playerInfo.playerState == -1 (não iniciado) após onReady pode indicar bloqueio
-  // error codes: 100=not found, 101/150=embed blocked
-  useEffect(()=>{
-    const handler=(e)=>{
-      if(!e.data||typeof e.data!=="string")return;
-      try{
-        const msg=JSON.parse(e.data);
-        if(msg.event==="infoDelivery"&&msg.info){
-          const state=msg.info.playerState;
-          const errCode=msg.info.errorCode;
-          // errorCode 100=vídeo não encontrado, 101/150=bloqueado por direitos autorais
-          if(errCode===100||errCode===101||errCode===150){
-            const vid=ytVideoId;
-            if(vid){
-              console.warn("TV: vídeo bloqueado/não disponível, pulando:",vid,"(código",errCode+")");
-              blockVideo(vid);
-              // Força skip pro próximo vídeo
-              if(cp){
-                const info=getVideoPlaybackInfo(cp);
-                if(info)setSkipVideoIndex({progId:cp.id,fromIndex:info.videoIndex});
-              }
-            }
-          }
-        }
-        // Também captura evento "onError" legado
-        if(msg.event==="onError"){
-          const errCode=msg.info;
-          if(errCode===100||errCode===101||errCode===150){
-            const vid=ytVideoId;
-            if(vid){
-              console.warn("TV: onError bloqueado:",vid,"código",errCode);
-              blockVideo(vid);
-              if(cp){
-                const info=getVideoPlaybackInfo(cp);
-                if(info)setSkipVideoIndex({progId:cp.id,fromIndex:info.videoIndex});
-              }
-            }
-          }
-        }
-      }catch{}
-    };
-    window.addEventListener("message",handler);
-    return()=>window.removeEventListener("message",handler);
-  },[cp,ytVideoId,blockVideo]);
-
   const hideTimer=useRef(null);
   const cRef=useRef(null);
   const wRef=useRef(null);
@@ -1087,6 +1041,29 @@ export default function TVWeb(){
   const ytSrc=ytVideoId
     ?`https://www.youtube.com/embed/${ytVideoId}?autoplay=1&mute=${muted?1:0}&start=${ytStartRef.current}&controls=0&disablekb=1&modestbranding=1&rel=0&showinfo=0&iv_load_policy=3&fs=0&playsinline=1&cc_load_policy=0&cc_lang_pref=none&enablejsapi=1&origin=${encodeURIComponent(typeof window!=="undefined"?window.location.origin:"")}`
     :null;
+
+  // ========== DETECÇÃO DE VÍDEO BLOQUEADO (postMessage YouTube API) ==========
+  // Deve ficar APÓS ytVideoId estar definido na cadeia de render
+  useEffect(()=>{
+    const handler=(e)=>{
+      if(!e.data||typeof e.data!=="string")return;
+      try{
+        const msg=JSON.parse(e.data);
+        const errCode=msg.event==="infoDelivery"?msg.info?.errorCode:
+                      msg.event==="onError"?msg.info:null;
+        if(errCode===100||errCode===101||errCode===150){
+          console.warn("TV: vídeo bloqueado, pulando. código:",errCode);
+          blockVideo(ytVideoId);
+          if(cp){
+            const info=getVideoPlaybackInfo(cp);
+            if(info)setSkipVideoIndex({progId:cp.id,fromIndex:info.videoIndex});
+          }
+        }
+      }catch{}
+    };
+    window.addEventListener("message",handler);
+    return()=>window.removeEventListener("message",handler);
+  },[cp,ytVideoId,blockVideo]);
 
   // ========== OSD VISIBILITY (20 seconds) ==========
   const showOSDNow=useCallback(()=>{
