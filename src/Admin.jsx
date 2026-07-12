@@ -554,7 +554,7 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
   const [thumbnailType,setTT]=useState(program?.thumbnailType||"youtube");
   const [thumbnailUrl,setTU]=useState(program?.thumbnailUrl||null);
   const [gcAlways,setGcAlways]=useState(program?.gcAlways||false);
-  const [maratona,setMaratona]=useState(program?.maratona||false);
+  const [gcNever,setGcNever]=useState(program?.gcNever||false);
   const [blocoDuracao,setBlocoDuracao]=useState(program?.blocoDuracao||BLOCO_PADRAO);
   const [isTemplate,setIsTemplate]=useState(program?.isTemplate||false);
   const [jingleType,setJingleType]=useState(program?.jingleType||"");  // ""=programa normal, "open"|"close"|"break"=vinheta
@@ -614,7 +614,7 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
     
     setSaving(true);
     try {
-      onSave({id:isEdit?program.id:`prog_${Date.now()}`,nome,canalId,classificacao,tags,sinopse,data:selectedDate,duracao:dur,horarioInicio:horIn,horarioFim:horFim,youtubeId:videos[0].youtubeUrl,videos:videos.filter(v=>v.youtubeUrl.trim()),thumbnailType,thumbnailUrl,gcAlways,maratona,blocoDuracao:Number(blocoDuracao)||BLOCO_PADRAO,isTemplate,isJingle,jingleType:isJingle?jingleType:""});
+      onSave({id:isEdit?program.id:`prog_${Date.now()}`,nome,canalId,classificacao,tags,sinopse,data:selectedDate,duracao:dur,horarioInicio:horIn,horarioFim:horFim,youtubeId:videos[0].youtubeUrl,videos:videos.filter(v=>v.youtubeUrl.trim()),thumbnailType,thumbnailUrl,gcAlways,maratona,blocoDuracao:Number(blocoDuracao)||BLOCO_PADRAO,isTemplate,gcNever,isJingle,jingleType:isJingle?jingleType:""});
       setSaving(false);
     } catch(err) {
       console.error("Erro ao salvar:",err);
@@ -821,10 +821,15 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
                 <option value="close">🏁 Encerramento</option>
               </select>}
             </label>
-            <label style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:gcAlways?"rgba(156,39,176,0.12)":"rgba(255,255,255,0.02)",border:gcAlways?"1px solid rgba(156,39,176,0.4)":"1px solid rgba(255,255,255,0.06)",borderRadius:6,cursor:"pointer"}}>
-              <input type="checkbox" checked={gcAlways} onChange={e=>setGcAlways(e.target.checked)} style={{width:16,height:16,accentColor:"#9c27b0",cursor:"pointer"}}/>
-              <div><div style={{fontSize:13,fontWeight:600,color:gcAlways?"#ce93d8":"#ccc"}}>♪ GC durante todo o programa</div>
-              <div style={{fontSize:11,color:"#777"}}>Escolha manual: o GC fica fixo na tela enquanto este programa estiver no ar (em canais comuns o GC não entra sozinho; em canais 🎵 ele já entra no início/fim dos clipes)</div></div>
+            <label style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:gcAlways?"rgba(156,39,176,0.12)":"rgba(255,255,255,0.02)",border:gcAlways?"1px solid rgba(156,39,176,0.4)":"1px solid rgba(255,255,255,0.06)",borderRadius:6,cursor:"pointer",opacity:gcNever?0.4:1}}>
+              <input type="checkbox" checked={gcAlways} disabled={gcNever} onChange={e=>{setGcAlways(e.target.checked)}} style={{width:16,height:16,accentColor:"#9c27b0",cursor:gcNever?"not-allowed":"pointer"}}/>
+              <div><div style={{fontSize:13,fontWeight:600,color:gcAlways?"#ce93d8":"#ccc"}}>♪ GC sempre ativo neste programa</div>
+              <div style={{fontSize:11,color:"#777"}}>GC fica fixo na tela durante todo este programa (independente do padrão do canal)</div></div>
+            </label>
+            <label style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:gcNever?"rgba(244,67,54,0.10)":"rgba(255,255,255,0.02)",border:gcNever?"1px solid rgba(244,67,54,0.35)":"1px solid rgba(255,255,255,0.06)",borderRadius:6,cursor:"pointer",opacity:gcAlways?0.4:1}}>
+              <input type="checkbox" checked={gcNever} disabled={gcAlways} onChange={e=>{setGcNever(e.target.checked)}} style={{width:16,height:16,accentColor:"#f44336",cursor:gcAlways?"not-allowed":"pointer"}}/>
+              <div><div style={{fontSize:13,fontWeight:600,color:gcNever?"#ef9a9a":"#ccc"}}>🚫 Desativar GC neste programa</div>
+              <div style={{fontSize:11,color:"#777"}}>Suprime o GC mesmo que o canal tenha GC automático ativado (canal de música ou gcAlways no canal)</div></div>
             </label>
             <label style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:maratona?"rgba(255,202,40,0.10)":"rgba(255,255,255,0.02)",border:maratona?"1px solid rgba(255,202,40,0.4)":"1px solid rgba(255,255,255,0.06)",borderRadius:6,cursor:"pointer"}}>
               <input type="checkbox" checked={maratona} onChange={e=>setMaratona(e.target.checked)} style={{width:16,height:16,accentColor:"#ffca28",cursor:"pointer"}}/>
