@@ -842,6 +842,95 @@ function channelUrlKey(ch){
   const n=Number(ch.numero);
   return (n&&n>0)?String(n):ch.id;
 }
+
+// ============================================
+// LOGO OVERLAY — exibe a logo PNG do canal (ou do programa) na tela
+// Posição configurável: "tl" "tr" "bl" "br" (canto) 
+// Prioridade: programa.overlayLogo > canal.overlayLogo
+// A logo some durante o OSD (para não conflitar) e volta suave
+// ============================================
+const CORNER_STYLES = {
+  tr: {top:16, right:20, bottom:"auto", left:"auto"},
+  tl: {top:16, left:20, bottom:"auto", right:"auto"},
+  br: {bottom:80, right:20, top:"auto", left:"auto"},
+  bl: {bottom:80, left:20, top:"auto", right:"auto"},
+};
+function ChannelLogoOverlay({channel, program, showOSD, fade}){
+  // Resolve qual logo usar: programa sobrescreve canal
+  const progLogo  = program?.overlayLogoUrl;
+  const chanLogo  = channel?.overlayLogoUrl;
+  const logoUrl   = progLogo || chanLogo;
+  const corner    = program?.overlayCorner || channel?.overlayCorner || "tr";
+  const size      = program?.overlaySize   || channel?.overlaySize   || 64;
+
+  const [visible, setVisible] = useState(false);
+  const [animKey, setAnimKey] = useState(0); // força re-animação a cada troca de programa
+
+  useEffect(()=>{
+    if(!logoUrl){ setVisible(false); return; }
+    setVisible(true);
+  },[logoUrl]);
+
+  // Re-anima quando troca de programa
+  useEffect(()=>{ setAnimKey(k=>k+1); },[program?.id]);
+
+  if(!logoUrl || fade) return null;
+
+  const pos = CORNER_STYLES[corner] || CORNER_STYLES.tr;
+  const isBottom = corner.startsWith("b");
+
+  return <div key={animKey} style={{
+    position:"absolute", ...pos, zIndex:8,
+    pointerEvents:"none",
+    opacity: showOSD ? 0.35 : 1,
+    transition:"opacity 0.6s ease",
+    animation: isBottom
+      ? "logoSlideUp 0.6s cubic-bezier(0.22,1,0.36,1)"
+      : "logoSlideDown 0.6s cubic-bezier(0.22,1,0.36,1)",
+  }}>
+    <img src={logoUrl} alt="" style={{
+      width:size, height:"auto", maxHeight:size*1.5,
+      objectFit:"contain",
+      filter:"drop-shadow(0 2px 8px rgba(0,0,0,0.7))",
+      display:"block",
+    }}/>
+  </div>;
+}
+
+// ============================================
+// TRANSITION OVERLAY — efeito in/out entre programas
+// Pisca um fade preto suave quando cp.id muda (não no reload, não na troca de canal)
+// ============================================
+function ProgramTransition({programId, channelId}){
+  const [show, setShow] = useState(false);
+  const prevId = useRef(null);
+  const prevCh = useRef(null);
+
+  useEffect(()=>{
+    // Só anima quando o PROGRAMA muda, não quando o canal muda
+    if(!programId) return;
+    if(prevCh.current !== channelId){
+      prevCh.current = channelId;
+      prevId.current = programId;
+      return; // troca de canal: sem transição (já tem o fade do swCh)
+    }
+    if(prevId.current && prevId.current !== programId){
+      setShow(true);
+      const t = setTimeout(()=>setShow(false), 1200);
+      prevId.current = programId;
+      return ()=>clearTimeout(t);
+    }
+    prevId.current = programId;
+  },[programId, channelId]);
+
+  if(!show) return null;
+  return <div style={{
+    position:"absolute", inset:0, zIndex:6, pointerEvents:"none",
+    background:"#000",
+    animation:"progTransition 1.2s ease forwards",
+  }}/>;
+}
+
 export default function TVWeb(){
   const [channels, setChannels] = useState([]);
   const [allPrograms, setAllPrograms] = useState([]);
@@ -1200,6 +1289,12 @@ export default function TVWeb(){
     {/* ===== WATERMARK ===== */}
     <div style={{position:"absolute",top:16,right:20,fontSize:14,fontWeight:700,color:"rgba(255,255,255,0.12)",letterSpacing:2,zIndex:3,pointerEvents:"none"}}>TVWEB</div>
 
+    {/* ===== LOGO OVERLAY (PNG do canal ou programa) ===== */}
+    <ChannelLogoOverlay channel={ch} program={cp} showOSD={showOSD} fade={fade}/>
+
+    {/* ===== TRANSIÇÃO ENTRE PROGRAMAS (fade preto suave) ===== */}
+    <ProgramTransition programId={cp?.srcProgId||cp?.id} channelId={curCh}/>
+
     {/* ===== UNMUTE BUTTON ===== */}
     {muted&&<button onClick={e=>{e.stopPropagation();handleUnmute()}} style={{
       position:"absolute",bottom:"50%",left:"50%",transform:"translate(-50%,50%)",zIndex:15,
@@ -1242,6 +1337,9 @@ export default function TVWeb(){
       @keyframes slideDown{from{transform:translateY(-20px);opacity:0}to{transform:translateY(0);opacity:1}}
       @keyframes pulseFull{0%,100%{opacity:.6;transform:translate(-50%,50%) scale(1)}50%{opacity:1;transform:translate(-50%,50%) scale(1.05)}}
       @keyframes gcIn{from{transform:translateX(-40px);opacity:0}to{transform:translateX(0);opacity:1}}
+      @keyframes logoSlideDown{from{transform:translateY(-12px);opacity:0}to{transform:translateY(0);opacity:1}}
+      @keyframes logoSlideUp{from{transform:translateY(12px);opacity:0}to{transform:translateY(0);opacity:1}}
+      @keyframes progTransition{0%{opacity:0.85}40%{opacity:0.85}100%{opacity:0}}
       .epg-scroll::-webkit-scrollbar{height:0;width:8px}
       .epg-scroll::-webkit-scrollbar-track{background:transparent}
       .epg-scroll::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.15);border-radius:4px}
