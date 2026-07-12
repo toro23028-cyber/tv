@@ -303,6 +303,45 @@ function getCurProg(schedule) {
 }
 function getElapsed(prog) { return getNow() - prog.horarioInicio }
 
+// ============================================
+// getTodayPrograms — helper para a Home.jsx
+// Retorna os programas de HOJE para todos os canais,
+// respeitando o modo Eternity (projeta os programas do ciclo).
+// A Home deve usar isso em vez de programs.filter(p => p.data === today).
+//
+// Uso na Home:
+//   import { getTodayPrograms } from "./TV";
+//   const todayByChannel = getTodayPrograms(programs, channels);
+//   // { [channelId]: [programa_atual, proximo, ...] }
+// ============================================
+export function getTodayPrograms(programs, channels) {
+  const result = {};
+  for (const ch of channels) {
+    if (ch.isInfo) continue;
+    const sched = buildSchedule(programs, ch.id, ch);
+    result[ch.id] = sched.filter(p => !p.isPlaceholder);
+  }
+  return result;
+}
+
+// getThumbnailForChannel — retorna a thumbnail do programa atual de um canal
+// Funciona com eternity: pega o srcProgId para buscar a imagem original
+export function getThumbnailForChannel(programs, channels, channelId) {
+  const ch = channels.find(c => c.id === channelId);
+  if (!ch) return null;
+  const sched = buildSchedule(programs, channelId, ch);
+  const cur = getCurProg(sched);
+  if (!cur) return null;
+  // Tenta encontrar o programa original para pegar thumbnail
+  const srcId = cur.srcProgId || cur.id;
+  const src = programs.find(p => p.id === srcId) || cur;
+  if (src.thumbnailType === "custom" && src.thumbnailUrl) return src.thumbnailUrl;
+  const vid = src.videos?.[0]?.youtubeUrl || src.youtubeId;
+  if (!vid) return null;
+  const id = extractYTId(vid);
+  return id ? `https://img.youtube.com/vi/${id}/mqdefault.jpg` : null;
+}
+
 // Encontra qual programa está rodando AGORA em qualquer hora dos 7 dias
 function getCurrentProgramAbsolute(programs, channelId) {
   const now = getAbsoluteNow();
