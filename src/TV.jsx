@@ -1271,28 +1271,29 @@ export default function TVWeb(){
 
   // ========== CLICK HANDLER (on the video overlay only) ==========
   const handleVideoClick=useCallback(()=>{
-    // Se menus abertos → fecha tudo, mostra OSD
-    if(showEPG||showFull||selProg||showSettings){
-      setEPG(false);setFull(false);setSP(null);setShowSettings(false);
-      showOSDNow();
-      return;
-    }
+    // Toque/clique na tela → fecha TUDO e apaga o OSD
+    // (independente do estado — menus abertos, OSD visível, qualquer coisa)
     const now=Date.now();
-    // Duplo clique → tela cheia
+    // Duplo clique → tela cheia (não esconde OSD)
     if(now-lastClickTimeRef.current<300){
+      lastClickTimeRef.current=0;
       if(!document.fullscreenElement)cRef.current?.requestFullscreen?.();
       else document.exitFullscreen?.();
-      lastClickTimeRef.current=0;
       return;
     }
     lastClickTimeRef.current=now;
-    // Ativa áudio se mudo
+    // Primeiro toque com som mudo → ativa o som e mostra OSD
     if(muted){ handleUnmute(); showOSDNow(); return; }
-    // Toggle OSD: visível → esconde; oculto → mostra
-    if(showOSD){
+    // Se OSD ou menus visíveis → fecha TUDO
+    if(showOSD||showEPG||showFull||selProg||showSettings){
       clearTimeout(hideTimer.current);
       setOSD(false);
+      setEPG(false);
+      setFull(false);
+      setSP(null);
+      setShowSettings(false);
     } else {
+      // OSD oculto e sem menus → mostra OSD
       showOSDNow();
     }
   },[muted,handleUnmute,showOSDNow,showOSD,showEPG,showFull,selProg,showSettings]);
@@ -1304,7 +1305,7 @@ export default function TVWeb(){
   if(!ch) return null;
 
   // ========== RENDER ==========
-  return <div ref={cRef} onWheel={handleWheel} onMouseMove={showOSDNow}
+  return <div ref={cRef} onWheel={handleWheel}
     style={{width:"100%",height:"100vh",background:"#000",position:"relative",fontFamily:"'Segoe UI','Roboto',-apple-system,sans-serif",overflow:"hidden",cursor:"default",userSelect:"none"}}>
 
     {/* ===== YOUTUBE PLAYER (completely isolated) ===== */}
