@@ -1010,16 +1010,7 @@ export default function TVWeb(){
   const [tick, setTick] = useState(0);
   useEffect(()=>{const i=setInterval(()=>setTick(t=>t+1),1000);return()=>clearInterval(i)},[]);
 
-  // Detecta quando o vídeo está nos últimos ~1.5s e ativa overlay preto
-  // Isso evita que a tela de encerramento/thumb do YouTube apareça entre os vídeos
-  useEffect(()=>{
-    if(!cp||cp.isPlaceholder){setEndBlack(false);return;}
-    const info=getVideoPlaybackInfo(cp);
-    if(!info){setEndBlack(false);return;}
-    // Ativa quando restam menos de 1.5s no clipe atual
-    const nearEnd = info.remaining <= 1.5 && info.remaining >= 0;
-    setEndBlack(nearEnd);
-  },[tick,cp]);
+
 
   // Index de skip: quando um vídeo é bloqueado, avança pro próximo
   const [skipVideoIndex,setSkipVideoIndex]=useState(null); // {progId, fromIndex}
@@ -1213,6 +1204,15 @@ export default function TVWeb(){
     window.addEventListener("message",handler);
     return()=>window.removeEventListener("message",handler);
   },[cp,ytVideoId,blockVideo]);
+
+  // ========== END BLACK — cobre iframe nos últimos 1.5s para evitar tela de encerramento do YouTube ==========
+  useEffect(()=>{
+    if(!cp||cp.isPlaceholder){setEndBlack(false);return;}
+    const info=getVideoPlaybackInfo(cp);
+    if(!info){setEndBlack(false);return;}
+    const nearEnd = info.remaining <= 1.5 && info.remaining >= 0;
+    setEndBlack(nearEnd);
+  },[tick,cp]);
 
   // ========== OSD VISIBILITY (20 seconds) ==========
   const showOSDNow=useCallback(()=>{
