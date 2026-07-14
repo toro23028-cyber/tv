@@ -547,6 +547,7 @@ function OSDFooter({program,nextProgram,onOpenEPG,onOpenFull,onOpenSettings,onFu
         {nextProgram && <span style={{fontSize:13,color:"#777"}}>A seguir: <span style={{color:"#bbb",fontWeight:600}}>{nextProgram.nome}</span> · {nextProgram.horarioTexto}</span>}
       </div>
       <div style={{display:"flex",gap:10}}>
+        <button onClick={e=>{e.stopPropagation();window.location.href="/"}} style={{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.12)",color:"#ccc",padding:"10px 16px",borderRadius:6,cursor:"pointer",fontSize:14}} title="Ir para Home">🏠</button>
         <button onClick={e=>{e.stopPropagation();onOpenEPG()}} style={{background:"rgba(255,255,255,0.1)",border:"1px solid rgba(255,255,255,0.15)",color:"#ccc",padding:"10px 22px",borderRadius:6,cursor:"pointer",fontSize:14,fontWeight:600}}>▲ Guia Rápido</button>
         <button onClick={e=>{e.stopPropagation();onOpenSettings()}} style={{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.12)",color:"#ccc",padding:"10px 16px",borderRadius:6,cursor:"pointer",fontSize:14}}>⚙️</button>
         <button onClick={e=>{e.stopPropagation();onFullscreen()}} style={{background:"rgba(255,255,255,0.1)",border:"1px solid rgba(255,255,255,0.15)",color:"#ccc",padding:"10px 22px",borderRadius:6,cursor:"pointer",fontSize:14,fontWeight:600}}>{isFullscreen?"↙ Sair":"⛶ Tela Cheia"}</button>
