@@ -1271,19 +1271,31 @@ export default function TVWeb(){
 
   // ========== CLICK HANDLER (on the video overlay only) ==========
   const handleVideoClick=useCallback(()=>{
-    // Don't activate audio if menus are open
-    if(showEPG||showFull||selProg||showSettings)return;
-    
+    // Se menus abertos → fecha tudo, mostra OSD
+    if(showEPG||showFull||selProg||showSettings){
+      setEPG(false);setFull(false);setSP(null);setShowSettings(false);
+      showOSDNow();
+      return;
+    }
     const now=Date.now();
+    // Duplo clique → tela cheia
     if(now-lastClickTimeRef.current<300){
       if(!document.fullscreenElement)cRef.current?.requestFullscreen?.();
       else document.exitFullscreen?.();
+      lastClickTimeRef.current=0;
+      return;
     }
     lastClickTimeRef.current=now;
-    // Any click on video area activates audio
-    if(muted)handleUnmute();
-    showOSDNow();
-  },[muted,handleUnmute,showOSDNow,showEPG,showFull,selProg]);
+    // Ativa áudio se mudo
+    if(muted){ handleUnmute(); showOSDNow(); return; }
+    // Toggle OSD: visível → esconde; oculto → mostra
+    if(showOSD){
+      clearTimeout(hideTimer.current);
+      setOSD(false);
+    } else {
+      showOSDNow();
+    }
+  },[muted,handleUnmute,showOSDNow,showOSD,showEPG,showFull,selProg,showSettings]);
 
   // ========== LOADING ==========
   if(loading) return <div style={{width:"100%",height:"100vh",background:"#000",display:"flex",alignItems:"center",justifyContent:"center",color:"#888",fontFamily:"system-ui",fontSize:16}}>
