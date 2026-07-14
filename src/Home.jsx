@@ -36,7 +36,15 @@ function Hero({ch,cur,next,thumb,active,onWatch}){
       pointerEvents:active?"auto":"none",overflow:"hidden"}}>
 
       {/* Imagem de fundo */}
-      {thumb&&<img src={thumb} alt="" onLoad={()=>setLoaded(true)} onError={()=>setLoaded(false)}
+      {thumb&&<img src={thumb} alt="" onLoad={()=>setLoaded(true)}
+        onError={e=>{
+          // maxresdefault não existe para todos os vídeos → tenta hqdefault
+          if(e.target.src.includes("maxresdefault")){
+            e.target.src=e.target.src.replace("maxresdefault","hqdefault");
+          } else {
+            setLoaded(false);
+          }
+        }}
         style={{position:"absolute",inset:0,width:"100%",height:"100%",objectFit:"cover",
           objectPosition:"center 20%",
           filter:"brightness(0.42) saturate(1.15)",
@@ -162,7 +170,14 @@ function Card({ch,cur,thumb,active,onClick}){
       {/* Thumb */}
       <div style={{position:"relative",paddingBottom:"56.25%",background:`linear-gradient(135deg,${cor}22,#0a0c12)`}}>
         {thumb&&<img src={thumb} alt="" style={{position:"absolute",inset:0,width:"100%",height:"100%",
-          objectFit:"cover",opacity:0.88}} onError={e=>e.target.style.display="none"}/>}
+          objectFit:"cover",opacity:0.88}}
+          onError={e=>{
+            if(e.target.src.includes("maxresdefault")){
+              e.target.src=e.target.src.replace("maxresdefault","hqdefault");
+            } else {
+              e.target.style.display="none";
+            }
+          }}/>}
         {!thumb&&<div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",
           justifyContent:"center",fontSize:32,opacity:0.3}}>
           {ch.logoType==="custom"&&ch.logoUrl
