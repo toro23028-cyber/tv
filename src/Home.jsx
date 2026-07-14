@@ -28,7 +28,14 @@ function Bar({start,end,cor}){
 // ─── Hero (100vh, Netflix-style) ────────────────────────────
 function Hero({ch,cur,next,thumb,active,onWatch}){
   const[loaded,setLoaded]=useState(false);
-  useEffect(()=>setLoaded(false),[thumb]);
+  const imgRef=useRef(null);
+  useEffect(()=>{
+    setLoaded(false);
+    // Se a imagem já está em cache, onLoad não dispara — checamos .complete
+    if(imgRef.current&&imgRef.current.complete&&imgRef.current.naturalWidth>0){
+      setLoaded(true);
+    }
+  },[thumb]);
   if(!ch)return null;
   const cor=ch.cor||"#c0392b";
   return(
@@ -36,7 +43,7 @@ function Hero({ch,cur,next,thumb,active,onWatch}){
       pointerEvents:active?"auto":"none",overflow:"hidden"}}>
 
       {/* Imagem de fundo */}
-      {thumb&&<img src={thumb} alt="" onLoad={()=>setLoaded(true)} onError={()=>setLoaded(false)}
+      {thumb&&<img ref={imgRef} src={thumb} alt="" onLoad={()=>setLoaded(true)} onError={()=>setLoaded(false)}
         style={{position:"absolute",inset:0,width:"100%",height:"100%",objectFit:"cover",
           objectPosition:"center 20%",
           filter:"brightness(0.42) saturate(1.15)",
@@ -72,10 +79,10 @@ function Hero({ch,cur,next,thumb,active,onWatch}){
 
         {cur&&!cur.isPlaceholder?<>
           {/* Título */}
-          <h1 style={{fontSize:"clamp(2rem,4.5vw,3.6rem)",fontWeight:900,color:"#fff",
-            lineHeight:1.05,margin:"0 0 12px",letterSpacing:"-0.02em",
+          <h1 style={{fontSize:"clamp(1.6rem,4vw,3.2rem)",fontWeight:900,color:"#fff",
+            lineHeight:1.08,margin:"0 0 12px",letterSpacing:"-0.02em",
             textShadow:"0 2px 30px rgba(0,0,0,0.9)",
-            display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden"}}>
+            wordBreak:"break-word",overflowWrap:"break-word"}}>
             {cur.nome}
           </h1>
 
@@ -197,7 +204,7 @@ function Card({ch,cur,thumb,active,onClick}){
   );
 }
 
-const clampW=190; // largura dos cards
+const clampW=240; // largura dos cards
 
 // ─── Slider ─────────────────────────────────────────────────
 function Slider({channels,todayByChannel,thumbnails,activeId,onSelect}){
@@ -220,7 +227,7 @@ function Slider({channels,todayByChannel,thumbnails,activeId,onSelect}){
     return()=>{el.removeEventListener("scroll",upd);window.removeEventListener("resize",upd)};
   },[upd]);
 
-  const go=d=>ref.current?.scrollTo({left:ref.current.scrollLeft+d*(clampW+10)*3,behavior:"smooth"});
+  const go=d=>ref.current?.scrollTo({left:ref.current.scrollLeft+d*(clampW+12)*3,behavior:"smooth"});
   const vis=channels.filter(c=>!c.isInfo);
 
   return(
