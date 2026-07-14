@@ -335,8 +335,8 @@ export default function Home(){
         </nav>
       </header>
 
-      {/* ── HERO 100vh ── */}
-      <div style={{position:"relative",height:"100vh",overflow:"hidden",background:"#060608"}}>
+      {/* ── HERO 85vh ── */}
+      <div style={{position:"relative",height:"clamp(520px,85vh,800px)",overflow:"hidden",background:"#060608"}}>
         {vis.map((ch,i)=>{
           const sched=todayByChannel[ch.id]||[];
           const cur=sched.find(p=>now>=p.horarioInicio&&now<p.horarioFim)||sched[0];
@@ -376,9 +376,9 @@ export default function Home(){
         </>}
       </div>
 
-      {/* ── SLIDER — sobrepõe a parte inferior do hero ── */}
-      <div style={{marginTop:-110,position:"relative",zIndex:10,
-        padding:"0 clamp(20px,4vw,56px) 0"}}>
+      {/* ── SLIDER — abaixo do hero, sem sobreposição ── */}
+      <div style={{background:"linear-gradient(to bottom,#060608 0%,#060608 100%)",
+        padding:"28px clamp(20px,4vw,56px) 0"}}>
         <div style={{display:"flex",alignItems:"baseline",gap:10,marginBottom:12}}>
           <h2 style={{fontSize:15,fontWeight:700,margin:0,letterSpacing:0.5,color:"#fff"}}>Canais ao vivo</h2>
           <span style={{fontSize:11,color:"rgba(255,255,255,0.28)"}}>{vis.length} canais</span>
