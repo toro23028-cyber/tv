@@ -339,7 +339,8 @@ export function getThumbnailForChannel(programs, channels, channelId) {
   const vid = src.videos?.[0]?.youtubeUrl || src.youtubeId;
   if (!vid) return null;
   const id = extractYTId(vid);
-  return id ? `https://img.youtube.com/vi/${id}/mqdefault.jpg` : null;
+  // maxresdefault = 1280×720 (nem sempre existe), hqdefault = 480×360 (sempre existe)
+  return id ? `https://img.youtube.com/vi/${id}/maxresdefault.jpg` : null;
 }
 
 // Encontra qual programa está rodando AGORA em qualquer hora dos 7 dias
@@ -994,6 +995,7 @@ export default function TVWeb(){
   const [selProg, setSP] = useState(null);
   const [fade, setFade] = useState(false);
   const [muted, setMuted] = useState(true);
+  const [endBlack, setEndBlack] = useState(false); // cobre iframe nos últimos ~1.5s antes do YouTube mostrar tela de encerramento
   const [showSettings, setShowSettings] = useState(false);
   // Settings: persistido em localStorage (leve, sem precisar de Firestore)
   const [settings, setSettings] = useState(()=>{
@@ -1006,6 +1008,17 @@ export default function TVWeb(){
   // Tick: 1s para transições suaves de vídeo na playlist
   const [tick, setTick] = useState(0);
   useEffect(()=>{const i=setInterval(()=>setTick(t=>t+1),1000);return()=>clearInterval(i)},[]);
+
+  // Detecta quando o vídeo está nos últimos ~1.5s e ativa overlay preto
+  // Isso evita que a tela de encerramento/thumb do YouTube apareça entre os vídeos
+  useEffect(()=>{
+    if(!cp||cp.isPlaceholder){setEndBlack(false);return;}
+    const info=getVideoPlaybackInfo(cp);
+    if(!info){setEndBlack(false);return;}
+    // Ativa quando restam menos de 1.5s no clipe atual
+    const nearEnd = info.remaining <= 1.5 && info.remaining >= 0;
+    setEndBlack(nearEnd);
+  },[tick,cp]);
 
   // Index de skip: quando um vídeo é bloqueado, avança pro próximo
   const [skipVideoIndex,setSkipVideoIndex]=useState(null); // {progId, fromIndex}
@@ -1335,15 +1348,13 @@ export default function TVWeb(){
       )}
     </div>
 
-    {/* Barras pretas cobrindo topo/base do iframe — escondem título e logo do YouTube.
-        Ficam acima do player (zIndex:1) mas abaixo do click barrier (zIndex:2). */}
-    {ytSrc&&!cp?.isPlaceholder&&<>
-      <div style={{position:"absolute",top:0,left:0,right:0,height:"12%",background:"#000",pointerEvents:"none",zIndex:2,opacity:fade?0:1,transition:"opacity 0.5s"}}/>
-      <div style={{position:"absolute",bottom:0,left:0,right:0,height:"8%",background:"#000",pointerEvents:"none",zIndex:2,opacity:fade?0:1,transition:"opacity 0.5s"}}/>
-    </>}
+
 
     {/* ===== CLICK BARRIER (completely above iframe, below menus) ===== */}
     <div onClick={handleVideoClick} style={{position:"absolute",inset:0,zIndex:2}} />
+
+    {/* ===== END BLACK — cobre iframe nos últimos 1.5s para evitar tela de encerramento do YouTube ===== */}
+    {endBlack&&!fade&&<div style={{position:"absolute",inset:0,zIndex:3,background:"#000",pointerEvents:"none"}}/>}
 
     {/* ===== WATERMARK ===== */}
     <div style={{position:"absolute",top:16,right:20,fontSize:14,fontWeight:700,color:"rgba(255,255,255,0.12)",letterSpacing:2,zIndex:3,pointerEvents:"none"}}>TVWEB</div>
