@@ -389,42 +389,82 @@ export default function Home(){
           onSelect={ch=>{const i=vis.findIndex(c=>c.id===ch.id);if(i>=0)goHero(i);}}/>
       </div>
 
-      {/* ── A SEGUIR ── */}
-      {vis.some(ch=>(todayByChannel[ch.id]||[]).some(p=>p.horarioInicio>now&&!p.isPlaceholder))&&(
+      {/* ── GUIA RÁPIDO ── */}
       <section style={{padding:"24px clamp(20px,4vw,56px) 64px"}}>
-        <h2 style={{fontSize:15,fontWeight:700,margin:"0 0 14px",letterSpacing:0.5,color:"#fff"}}>A seguir</h2>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:10}}>
-          {vis.map(ch=>{
-            const upcoming=(todayByChannel[ch.id]||[]).filter(p=>p.horarioInicio>now&&!p.isPlaceholder).slice(0,3);
-            if(!upcoming.length)return null;
-            const cor=ch.cor||"#4fc3f7";
-            return(
-              <div key={ch.id} style={{background:"rgba(255,255,255,0.035)",
-                border:"1px solid rgba(255,255,255,0.06)",borderRadius:10,padding:"13px 15px",
-                transition:"border-color 0.2s"}}
-                onMouseEnter={e=>e.currentTarget.style.borderColor=`${cor}44`}
-                onMouseLeave={e=>e.currentTarget.style.borderColor="rgba(255,255,255,0.06)"}>
-                <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:10}}>
-                  {ch.logoType==="custom"&&ch.logoUrl
-                    ?<img src={ch.logoUrl} alt="" style={{height:15,objectFit:"contain"}}/>
-                    :<span style={{fontSize:14}}>{ch.logo||"📺"}</span>}
-                  <span style={{fontSize:9,fontWeight:900,color:cor,letterSpacing:1.5,textTransform:"uppercase"}}>{ch.nome}</span>
-                </div>
-                {upcoming.map((p,i)=>(
-                  <div key={p.id} style={{display:"flex",gap:9,alignItems:"flex-start",
-                    paddingTop:i?8:0,borderTop:i?"1px solid rgba(255,255,255,0.05)":undefined}}>
-                    <span style={{fontSize:11,fontWeight:700,color:"#777",minWidth:40,
-                      textAlign:"right",paddingTop:1,flexShrink:0}}>{fmtHM(p.horarioInicio)}</span>
-                    <span style={{fontSize:12,fontWeight:600,color:"#ddd",flex:1,
-                      whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{p.nome}</span>
-                  </div>
-                ))}
-              </div>
-            );
-          }).filter(Boolean)}
+        <h2 style={{fontSize:15,fontWeight:700,margin:"0 0 14px",letterSpacing:0.5,color:"#fff"}}>Guia de programação</h2>
+        <div style={{overflowX:"auto",scrollbarWidth:"thin",scrollbarColor:"rgba(255,255,255,0.1) transparent"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",tableLayout:"fixed",minWidth:700}}>
+            <tbody>
+              {vis.map(ch=>{
+                const sched=todayByChannel[ch.id]||[];
+                const cur=sched.find(p=>now>=p.horarioInicio&&now<p.horarioFim);
+                const upcoming=sched.filter(p=>p.horarioInicio>now&&!p.isPlaceholder);
+                const cor=ch.cor||"#4fc3f7";
+                // slots: programa atual + próximos 4
+                const slots=[cur,...upcoming.slice(0,4)].filter(Boolean).slice(0,5);
+                return(
+                  <tr key={ch.id} style={{borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
+                    {/* Nome do canal */}
+                    <td style={{width:140,padding:"10px 16px 10px 0",verticalAlign:"middle",flexShrink:0}}>
+                      <a href={`/tv?canal=${ch.numero||ch.id}`}
+                        style={{display:"flex",alignItems:"center",gap:7,textDecoration:"none"}}>
+                        {ch.logoType==="custom"&&ch.logoUrl
+                          ?<img src={ch.logoUrl} alt="" style={{height:18,objectFit:"contain"}}/>
+                          :<span style={{fontSize:16}}>{ch.logo||"📺"}</span>}
+                        <span style={{fontSize:11,fontWeight:800,color:cor,letterSpacing:0.8,
+                          textTransform:"uppercase",whiteSpace:"nowrap"}}>{ch.nome}</span>
+                      </a>
+                    </td>
+                    {/* Slots de programa */}
+                    {slots.map((p,i)=>{
+                      const isNow=now>=p.horarioInicio&&now<p.horarioFim;
+                      const pct=isNow?Math.min(100,((now-p.horarioInicio)/Math.max(1,p.duracao))*100):0;
+                      return(
+                        <td key={p.id} style={{padding:"6px 4px",verticalAlign:"middle"}}>
+                          <a href={`/tv?canal=${ch.numero||ch.id}`} style={{
+                            display:"block",padding:"8px 10px",borderRadius:6,textDecoration:"none",
+                            background:isNow?"rgba(255,255,255,0.08)":"rgba(255,255,255,0.03)",
+                            border:isNow?`1px solid ${cor}44`:"1px solid rgba(255,255,255,0.05)",
+                            position:"relative",overflow:"hidden",
+                            transition:"background 0.15s,border-color 0.15s"}}
+                            onMouseEnter={e=>{e.currentTarget.style.background="rgba(255,255,255,0.1)";e.currentTarget.style.borderColor=`${cor}66`}}
+                            onMouseLeave={e=>{e.currentTarget.style.background=isNow?"rgba(255,255,255,0.08)":"rgba(255,255,255,0.03)";e.currentTarget.style.borderColor=isNow?`${cor}44`:"rgba(255,255,255,0.05)"}}>
+                            {/* Barra de progresso no programa atual */}
+                            {isNow&&<div style={{position:"absolute",bottom:0,left:0,right:0,height:2,
+                              background:"rgba(255,255,255,0.06)"}}>
+                              <div style={{width:`${pct}%`,height:"100%",background:cor,
+                                transition:"width 10s linear"}}/>
+                            </div>}
+                            <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:2}}>
+                              {isNow&&<span style={{fontSize:8,fontWeight:900,color:"#f44336",letterSpacing:0.5}}>● AO VIVO</span>}
+                              <span style={{fontSize:10,color:"rgba(255,255,255,0.4)",fontWeight:600}}>
+                                {fmtHM(p.horarioInicio)}
+                              </span>
+                            </div>
+                            <div style={{fontSize:12,fontWeight:600,
+                              color:isNow?"#fff":"rgba(255,255,255,0.7)",
+                              whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                              {p.nome}
+                            </div>
+                          </a>
+                        </td>
+                      );
+                    })}
+                    {/* Preenche colunas vazias se tiver menos de 5 slots */}
+                    {Array.from({length:Math.max(0,5-slots.length)}).map((_,i)=>(
+                      <td key={`empty-${i}`} style={{padding:"6px 4px"}}>
+                        <div style={{padding:"8px 10px",borderRadius:6,
+                          background:"rgba(255,255,255,0.015)",
+                          border:"1px solid rgba(255,255,255,0.03)",height:46}}/>
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       </section>
-      )}
 
       {/* ── FOOTER ── */}
       <footer style={{borderTop:"1px solid rgba(255,255,255,0.04)",
