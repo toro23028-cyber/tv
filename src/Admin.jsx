@@ -1785,9 +1785,7 @@ Deseja continuar?`))return;
     </div>
 
     {showModal&&<ProgramModal mode={editProg?"edit":"add"} program={editProg} channels={channels} selectedChannel={selCh} selectedDate={effectiveSelDate} existingPrograms={programs} onSave={handleSave} onClose={(dirty)=>{
-  if(dirty&&!confirm("Fechar sem salvar?
-
-As alterações feitas não foram salvas e serão perdidas."))return;
+  if(dirty&&!confirm("Fechar sem salvar?\n\nAs alterações feitas não foram salvas e serão perdidas."))return;
   setSM(false);setEP(null);
 }}/>}
 
