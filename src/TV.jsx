@@ -339,8 +339,9 @@ export function getThumbnailForChannel(programs, channels, channelId) {
   const vid = src.videos?.[0]?.youtubeUrl || src.youtubeId;
   if (!vid) return null;
   const id = extractYTId(vid);
-  // maxresdefault = 1280×720 (nem sempre existe), hqdefault = 480×360 (sempre existe)
-  return id ? `https://img.youtube.com/vi/${id}/maxresdefault.jpg` : null;
+  // hqdefault = 480×360 — sempre disponível para qualquer vídeo do YouTube
+  // maxresdefault retorna placeholder preto quando não existe (não gera onError)
+  return id ? `https://img.youtube.com/vi/${id}/hqdefault.jpg` : null;
 }
 
 // Encontra qual programa está rodando AGORA em qualquer hora dos 7 dias
