@@ -1,21 +1,7 @@
 {
-  "name": "tvweb",
-  "version": "1.0.0",
-  "type": "module",
-  "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
-  },
-  "dependencies": {
-    "firebase": "^10.12.2",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "react-router-dom": "^6.23.1"
-  },
-  "devDependencies": {
-    "@types/react": "^18.3.3",
-    "@vitejs/plugin-react": "^4.3.1",
-    "vite": "^5.3.1"
-  }
+  "name":"trendtv", "version":"1.1.0", "private":true, "type":"module",
+  "engines":{"node":">=22.12.0"},
+  "scripts":{"dev":"vite --host 0.0.0.0","build":"vite build","preview":"vite preview","test":"node --test tests/*.test.mjs"},
+  "dependencies":{"firebase":"^12.18.0","react":"^19.2.0","react-dom":"^19.2.0","react-router-dom":"^7.13.0"},
+  "devDependencies":{"vite":"^8.0.13","@vitejs/plugin-react":"^6.0.2"}
 }
