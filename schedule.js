@@ -1,4 +1,4 @@
-import {getToday,getNow,dateSecondsToAbsolute,fmtHM} from './clock.js';
+import {getToday,getNow,dateSecondsToAbsolute,absoluteToDateSeconds,fmtHM} from './clock.js';
 import {extractYouTubeId} from './youtube-id.js';
 export const DAY = 86400;
 const mod = (n,m) => ((n%m)+m)%m;
@@ -103,6 +103,15 @@ export function getVideoPlaybackInfo(prog,now=getNow()) {
 }
 export function getTodayPrograms(programs,channels,date=getToday()) {
   return Object.fromEntries(channels.filter(c=>!c.isInfo).map(c=>[c.id,buildSchedule(programs,c.id,c,date).filter(p=>!p.isPlaceholder)]));
+}
+export const guideTime = seconds => `${seconds>=DAY?'Amanhã · ':''}${fmtHM(mod(seconds,DAY))}`;
+// Keep daily playback semantics, but expose a continuous two-day guide timeline.
+export function buildGuideSchedule(programs,channelId,channel,date=getToday()) {
+  const tomorrow=absoluteToDateSeconds(dateSecondsToAbsolute(date)+DAY).date;
+  return [date,tomorrow].flatMap((day,index)=>buildSchedule(programs,channelId,channel,day).map(p=>({
+    ...p,horarioInicio:p.horarioInicio+index*DAY,horarioFim:p.horarioFim+index*DAY,
+    horarioTexto:guideTime(p.horarioInicio+index*DAY),horarioFimTexto:guideTime(p.horarioFim+index*DAY),
+  })));
 }
 export function thumbnailForProgram(p) {
   if(!p || p.isPlaceholder) return null;

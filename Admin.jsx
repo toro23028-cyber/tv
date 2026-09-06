@@ -30,6 +30,19 @@ const BASE_DATE=new Date("2026-01-01T00:00:00Z");
 // ===== Maratona / blocos virtuais (mesma regra da TV) =====
 const BLOCO_PADRAO=10800;      // 3h
 const AUTO_MARATONA_MIN=21600; // 6h → vira Maratona automático
+const GENERIC_PROGRAM_DESCRIPTIONS=[
+  'Uma seleção especial com conteúdo variado, ritmo leve e atrações pensadas para acompanhar o público ao longo da programação.',
+  'Programa com episódios, quadros e momentos escolhidos para manter a audiência envolvida do começo ao fim.',
+  'Uma faixa de entretenimento com histórias, entrevistas, música e curiosidades em clima de programação contínua.',
+  'Conteúdo selecionado para quem quer assistir sem pressa, com uma curadoria simples, direta e fácil de acompanhar.',
+  'Uma programação especial com vídeos organizados para criar uma experiência fluida, dinâmica e agradável.',
+  'Faixa temática com atrações variadas, bons momentos e uma sequência pensada para prender a atenção do espectador.',
+  'Programa de exibição contínua com conteúdo popular, linguagem acessível e ritmo ideal para assistir na TV.',
+  'Uma sessão especial com vídeos selecionados para preencher a grade com variedade, leveza e identidade de canal.',
+  'Conteúdo de destaque na grade, reunindo momentos marcantes, temas conhecidos e uma apresentação simples para o público.',
+  'Uma atração versátil da programação, criada para funcionar bem em diferentes horários e manter o canal sempre vivo.',
+];
+function randomProgramDescription(){return GENERIC_PROGRAM_DESCRIPTIONS[Math.floor(Math.random()*GENERIC_PROGRAM_DESCRIPTIONS.length)];}
 // Formata segundos que podem passar de 24h: 90000 → "01:00 (+1d)"
 function fmtSecX(s){s=Number(s);if(s<86400)return fmtSec(s);const d=Math.floor(s/86400);return `${fmtSec(s%86400)} (+${d}d)`}
 // Duração legível com suporte a >24h: 90000 → "1d 1h"
@@ -368,7 +381,7 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
   const [canalId,setCanalId]=useState(program?.canalId??selectedChannel);
   const [classificacao,setClassificacao]=useState(program?.classificacao||"L");
   const [tags,setTags]=useState(program?.tags||["HD"]);
-  const [sinopse,setSinopse]=useState(program?.sinopse||"");
+  const [sinopse,setSinopse]=useState(program?.sinopse||randomProgramDescription());
   const [durationPreset,setDP]=useState(0);
   const [customH,setCH]=useState(program?Math.floor(program.duracao/3600):1);
   const [customM,setCM]=useState(program?Math.floor((program.duracao%3600)/60):0);
@@ -404,7 +417,7 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
     setNome(t.nome);
     setClassificacao(t.classificacao||"L");
     setTags(t.tags||["HD"]);
-    setSinopse(t.sinopse||"");
+    setSinopse(t.sinopse||randomProgramDescription());
     setCH(Math.floor((t.duracao||3600)/3600));
     setCM(Math.floor(((t.duracao||3600)%3600)/60));setCS(Number(t.duracao||3600)%60);
     setDP(0);
@@ -434,6 +447,7 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
   const dispThumb=thumbnailType==="custom"&&thumbnailUrl?thumbnailUrl:yt;
 
   const save=async()=>{
+    const finalSinopse=sinopse.trim()||randomProgramDescription();
     if(!nome.trim()){setError("Digite o nome");return}
     if(saving)return;
     if(!Number.isFinite(dur)||dur<1||dur>2592000){setError('Use uma duração entre 1 segundo e 30 dias.');return;}
@@ -458,7 +472,7 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
     
     setSaving(true);
     try {
-      await onSave({id:isEdit?program.id:`prog_${Date.now()}`,nome,canalId,classificacao,tags,sinopse,data:selectedDate,duracao:dur,horarioInicio:horIn,horarioFim:horFim,youtubeId:videos.find(v=>v.youtubeUrl?.trim()).youtubeUrl,videos:videos.filter(v=>v.youtubeUrl.trim()),thumbnailType,thumbnailUrl,gcAlways,maratona,blocoDuracao:Number(blocoDuracao)||BLOCO_PADRAO,isTemplate,gcNever,isJingle,jingleType:isJingle?jingleType:"",overlayLogoUrl:overlayLogoUrl.trim()||null,overlayCorner:overlayCorner||"",overlaySize:overlaySize||null});
+      await onSave({id:isEdit?program.id:`prog_${Date.now()}`,nome,canalId,classificacao,tags,sinopse:finalSinopse,data:selectedDate,duracao:dur,horarioInicio:horIn,horarioFim:horFim,youtubeId:videos.find(v=>v.youtubeUrl?.trim()).youtubeUrl,videos:videos.filter(v=>v.youtubeUrl.trim()),thumbnailType,thumbnailUrl,gcAlways,maratona,blocoDuracao:Number(blocoDuracao)||BLOCO_PADRAO,isTemplate,gcNever,isJingle,jingleType:isJingle?jingleType:"",overlayLogoUrl:overlayLogoUrl.trim()||null,overlayCorner:overlayCorner||"",overlaySize:overlaySize||null});
       setSaving(false);
     } catch(err) {
       console.error("Erro ao salvar:",err);
@@ -730,8 +744,11 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
         </div>
 
         {/* Synopsis */}
-        <div><label style={lS}>SINOPSE</label>
-          <textarea value={sinopse} onChange={e=>setSinopse(e.target.value)} placeholder="Descrição..." style={{...iS,width:"100%",height:70,resize:"vertical",fontFamily:"inherit"}}/></div>
+        <div><div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:6}}>
+          <label style={{...lS,marginBottom:0}}>SINOPSE</label>
+          <button onClick={()=>{setSinopse(randomProgramDescription());md();}} style={{padding:"6px 10px",borderRadius:4,cursor:"pointer",fontSize:11,background:"rgba(79,195,247,0.10)",border:"1px solid rgba(79,195,247,0.28)",color:"#4fc3f7",fontWeight:700}}>🎲 Aleatorizar descrição</button>
+        </div>
+          <textarea value={sinopse} onChange={e=>{setSinopse(e.target.value);md();}} placeholder="Descrição..." style={{...iS,width:"100%",height:70,resize:"vertical",fontFamily:"inherit"}}/></div>
 
         {/* Preview */}
         <div style={{padding:14,background:"rgba(26,115,232,0.08)",borderRadius:8,border:"1px solid rgba(26,115,232,0.2)"}}>
@@ -1343,8 +1360,22 @@ Deseja continuar?`))return;
             const changes=shuffleArray(dayReal).map(p=>{const at=absoluteToDateSeconds(cursor);cursor+=Number(p.duracao);return {...p,data:at.date,horarioInicio:at.seconds,horarioFim:at.seconds+Number(p.duracao),videos:p.videos?.length>1?shuffleArray(p.videos):p.videos||[]};});
             try{assertNoConflicts(programs,changes,channels);await commitPrograms(changes);notify(`${changes.length} programas randomizados e salvos.`);}catch(e){notify(e.message);}
           }} style={{padding:"8px 14px",borderRadius:6,cursor:"pointer",fontSize:11,fontWeight:700,background:"rgba(156,39,176,0.12)",border:"1px solid rgba(156,39,176,0.35)",color:"#ce93d8",whiteSpace:"nowrap"}}>🔀 Randomizar grade</button>
+          <button onClick={async()=>{
+            if(!selCh){notify("Selecione um canal");return}
+            const targets=programs.filter(p=>p.canalId===selCh&&p.data===effectiveSelDate&&!p.isJingle&&!p.isTemplate&&p.videos?.length>1);
+            if(!targets.length){notify("Nenhuma playlist com mais de um vídeo neste dia.");return}
+            if(!confirm(`🔀 ALEATORIZAR PLAYLISTS\n\nEmbaralhar os vídeos internos de ${targets.length} programa(s), mantendo os mesmos horários?`))return;
+            try{await commitPrograms(targets.map(p=>({...p,videos:shuffleArray(p.videos)})));notify(`${targets.length} playlist(s) embaralhada(s) e salva(s).`);}catch(e){notify(e.message);}
+          }} style={{padding:"8px 14px",borderRadius:6,cursor:"pointer",fontSize:11,fontWeight:700,background:"rgba(79,195,247,0.10)",border:"1px solid rgba(79,195,247,0.35)",color:"#4fc3f7",whiteSpace:"nowrap"}}>🔀 Aleatorizar playlists</button>
         </div>
 
+        <button className="secondary" onClick={async()=>{
+          if(!selCh){notify('Selecione um canal.');return;}
+          const targets=programs.filter(p=>p.canalId===selCh&&p.data===effectiveSelDate&&!p.isJingle&&!p.isTemplate&&!p.sinopse?.trim());
+          if(!targets.length){notify('Todos os programas deste dia já têm descrição.');return;}
+          if(!confirm(`Preencher descrições genéricas em ${targets.length} programas? As descrições existentes serão mantidas.`))return;
+          try{await commitPrograms(targets.map(p=>({...p,sinopse:randomProgramDescription()})));notify('Descrições preenchidas.');}catch(e){notify(e.message);}
+        }}>Preencher descrições vazias</button>
         <div style={{marginBottom:8,display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
           <div style={{fontSize:11,color:"#555"}}>{viewMode==="lista"?"⠿ Arraste para reordenar programas":"🖱️ Arraste os blocos para corrigir o horário (encaixe de 5min) · puxe a borda direita para mudar a duração · duplo clique para editar"}</div>
           <div style={{display:"flex",gap:4}}>

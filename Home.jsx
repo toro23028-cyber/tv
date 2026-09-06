@@ -2,7 +2,7 @@ import {useState,useEffect,useMemo,useRef} from 'react';
 import {Link,useNavigate} from 'react-router-dom';
 import {useCatalog} from './Catalog';
 import {getNow,getToday,fmtHM,broadcastDate,TIME_ZONE} from './clock';
-import {getTodayPrograms,getCurProg,thumbnailForProgram} from './schedule';
+import {buildGuideSchedule,guideTime,getCurProg,thumbnailForProgram} from './schedule';
 import {useFavorites,shareChannel} from './preferences';
 const normalize=s=>String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
 const route=ch=>`/canal/${encodeURIComponent(Number(ch.numero)>0?ch.numero:ch.id)}`;
@@ -23,7 +23,7 @@ export default function Home(){
   useEffect(()=>{const tick=()=>setNow(getNow());const timer=setInterval(tick,1000);document.addEventListener('visibilitychange',tick);return()=>{clearInterval(timer);document.removeEventListener('visibilitychange',tick);};},[]);
   useEffect(()=>{if(!notice)return;const timer=setTimeout(()=>setNotice(''),4000);return()=>clearTimeout(timer);},[notice]);
   const visible=useMemo(()=>channels.filter(c=>!c.isInfo),[channels]);
-  const schedule=useMemo(()=>getTodayPrograms(programs,visible,today),[programs,visible,today]);
+  const schedule=useMemo(()=>Object.fromEntries(visible.map(ch=>[ch.id,buildGuideSchedule(programs,ch.id,ch,today).filter(p=>!p.isPlaceholder)])),[programs,visible,today]);
   const index=Math.max(0,visible.findIndex(c=>c.id===activeId)),channel=visible[index];
   const current=channel?getCurProg(schedule[channel.id],now):null;
   const next=channel?schedule[channel.id]?.find(p=>p.horarioInicio>now):null;
@@ -39,7 +39,7 @@ export default function Home(){
   },[index,visible,schedule,Math.floor(now/60)]);
   useEffect(()=>{if(!detail)return;const h=e=>{if(e.key==='Escape')setDetail(null);};document.addEventListener('keydown',h);return()=>document.removeEventListener('keydown',h);},[detail]);
   const query=normalize(search);
-  const rows=sorted.map(ch=>({ch,items:(schedule[ch.id]||[]).filter(p=>query?normalize(`${ch.nome} ${p.nome} ${p.sinopse}`).includes(query):p.horarioFim>now).slice(0,query?30:5)})).filter(row=>!query||row.items.length);
+  const rows=[...sorted].sort((a,b)=>Number(b.id===channel?.id)-Number(a.id===channel?.id)).map(ch=>({ch,items:(schedule[ch.id]||[]).filter(p=>p.horarioFim>now&&p.horarioInicio<now+86400&&(!query||normalize(`${ch.nome} ${p.nome} ${p.sinopse}`).includes(query)))})).filter(row=>!query||row.items.length);
   if(loading)return <div className="page-message">Carregando TREND TV…</div>;
   return <main className="home-page">
     <header className="home-header"><Link className="brand" to="/">TREND TV</Link><nav><Link className="primary" to="/tv">▶ Assistir</Link><Link to="/admin">Admin</Link></nav></header>
@@ -66,12 +66,12 @@ export default function Home(){
         <div className="card-actions"><Link to={route(ch)}>Assistir ↗</Link><button aria-label={`Favoritar ${ch.nome}`} aria-pressed={favorites.includes(ch.id)} onClick={()=>toggleFavorite(ch.id)}>{favorites.includes(ch.id)?'★':'☆'}</button></div>
       </article>;})}</div>
     </section>
-    <section className="home-section" id="guia"><div className="section-title"><h2>Guia de programação</h2><span>{broadcastDate(new Date(),{day:'numeric',month:'long'})}</span></div>
+    <section className="home-section" id="guia"><div className="section-title"><h2>Guia ao vivo</h2><span>Próximas 24 horas</span></div>
       <label className="search-label">Buscar canal ou programa<input type="search" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Filme, música, documentário…"/></label>
-      <div className="guide-rows">{rows.map(({ch,items})=><div key={ch.id} className="guide-row"><Link className="guide-channel" to={route(ch)}><Logo channel={ch}/><strong>{ch.numero} · {ch.nome}</strong></Link><div className="guide-slots">{items.length?items.map(p=>{const live=now>=p.horarioInicio&&now<p.horarioFim;return <button key={p.id} className={live?'is-live':''} onClick={()=>setDetail({channel:ch,program:p})}><small>{fmtHM(p.horarioInicio)}{live?' · AO VIVO':now>=p.horarioFim?' · ENCERRADO':''}</small><strong>{p.isJingle?'🎬 ':''}{p.nome}</strong>{live&&<Progress program={p} now={now} color={ch.cor}/>}</button>;}):<p className="muted">Nenhum programa previsto para hoje.</p>}</div></div>)}{!rows.length&&<p className="muted">Nenhum programa encontrado. Tente outro nome.</p>}</div>
+      <div className="guide-rows">{rows.map(({ch,items})=><div key={ch.id} className="guide-row"><Link className="guide-channel" to={route(ch)}><Logo channel={ch}/><strong>{ch.numero} · {ch.nome}</strong></Link><div className="guide-slots">{items.length?items.map(p=>{const live=now>=p.horarioInicio&&now<p.horarioFim;return <button key={p.id} className={live?'is-live':''} onClick={()=>setDetail({channel:ch,program:p})}><small>{guideTime(p.horarioInicio)}{live?' · AO VIVO':now>=p.horarioFim?' · ENCERRADO':''}</small><strong>{p.isJingle?'🎬 ':''}{p.nome}</strong>{live&&<Progress program={p} now={now} color={ch.cor}/>}</button>;}):<p className="muted">Nenhum programa nas próximas 24 horas.</p>}</div></div>)}{!rows.length&&<p className="muted">Nenhum programa encontrado. Tente outro nome.</p>}</div>
     </section>
     <footer className="home-footer"><span>TREND TV · {new Date().getFullYear()}</span><span>{TIME_ZONE==="America/Sao_Paulo"?"Horários de Brasília":TIME_ZONE}</span></footer>
-    {detail&&<div className="modal-backdrop" onClick={()=>setDetail(null)}><section className="detail-card" role="dialog" aria-modal="true" aria-label={detail.program.nome} onClick={e=>e.stopPropagation()}><div className="detail-image"><Poster src={thumbnailForProgram(detail.program)}/></div><div className="detail-copy"><p>{detail.channel.nome} · {fmtHM(detail.program.horarioInicio)} – {fmtHM(detail.program.horarioFim)}</p><h2>{detail.program.nome}</h2><p>{detail.program.sinopse||'Acompanhe esta atração na programação do canal.'}</p><div className="hero-actions"><button className="primary" onClick={()=>navigate(route(detail.channel))}>Assistir ao canal</button><button onClick={async()=>{const text=await shareChannel(detail.channel,detail.program);if(text)setNotice(text);}}>Compartilhar</button><button autoFocus onClick={()=>setDetail(null)}>Fechar</button></div></div></section></div>}
+    {detail&&<div className="modal-backdrop" onClick={()=>setDetail(null)}><section className="detail-card" role="dialog" aria-modal="true" aria-label={detail.program.nome} onClick={e=>e.stopPropagation()}><div className="detail-image"><Poster src={thumbnailForProgram(detail.program)}/></div><div className="detail-copy"><p>{detail.channel.nome} · {guideTime(detail.program.horarioInicio)} – {guideTime(detail.program.horarioFim)}</p><h2>{detail.program.nome}</h2><p>{detail.program.sinopse||'Acompanhe esta atração na programação do canal.'}</p><div className="hero-actions"><button className="primary" onClick={()=>navigate(route(detail.channel))}>Assistir ao canal</button><button onClick={async()=>{const text=await shareChannel(detail.channel,detail.program);if(text)setNotice(text);}}>Compartilhar</button><button autoFocus onClick={()=>setDetail(null)}>Fechar</button></div></div></section></div>}
     {notice&&<div role="status" className="tv-notice">{notice}</div>}
   </main>;
 }
