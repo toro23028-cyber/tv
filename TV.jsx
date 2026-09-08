@@ -27,8 +27,6 @@ function Badge({c,big}){ return <span style={{display:"inline-flex",alignItems:"
 function Tag({t}){ const c={HD:"#1a73e8","4K":"#e91e63",DUB:"#4caf50",LEG:"#ff9800","5.1":"#9c27b0"}; return <span style={{fontSize:10,fontWeight:700,padding:"3px 7px",borderRadius:3,background:c[t]||"#555",color:"#fff"}}>{t}</span> }
 
 async function shareProgram(prog,ch){const message=await shareChannel(ch,prog);if(message)alert(message);}
-function scheduleNotif(prog,ch,min=5){ const [ns,setNs]=useState(getNow());
-  useEffect(()=>{const timer=setInterval(()=>setNs(getNow()),1000);return()=>clearInterval(timer);},[]);const ts=prog.horarioInicio-min*60;const delay=(ts-ns)*1000;if(delay<=0){alert("Já começou!");return}if(!("Notification"in window)){alert("Sem suporte.");return}Notification.requestPermission().then(p=>{if(p!=="granted")return;setTimeout(()=>{new Notification(`📺 ${prog.nome} em ${min}min!`,{body:`${ch?.nome} · ${prog.horarioTexto}`})},delay);alert(`✅ Lembrete definido!`)}) }
 
 // ============================================
 // GC (Gerador de Caracteres) - lower-third estilo canal de clipes
@@ -382,7 +380,6 @@ function FullDay({channels,allPrograms,currentChannelId,onClose,onProgramClick})
             </div>
             <div style={{display:"flex",flexDirection:"column",gap:4,flexShrink:0,paddingTop:2}}>
               <button onClick={e=>{e.stopPropagation();shareProgram(prog,ch)}} style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",color:"#aaa",padding:"8px 10px",borderRadius:6,cursor:"pointer",fontSize:12}}>📤</button>
-              {!isNow&&!isPast&&<button onClick={e=>{e.stopPropagation();scheduleNotif(prog,ch)}} style={{background:"rgba(255,152,0,0.1)",border:"1px solid rgba(255,152,0,0.2)",color:"#ff9800",padding:"8px 10px",borderRadius:6,cursor:"pointer",fontSize:12}}>🔔</button>}
             </div>
           </div>;
         })}
@@ -397,7 +394,6 @@ function FullDay({channels,allPrograms,currentChannelId,onClose,onProgramClick})
 function ProgModal({program,channel,onClose,onWatch}){
   if(!program) return null;
   const isNow=getNow()>=Number(program.horarioInicio)&&getNow()<Number(program.horarioFim);
-  const isFut=getNow()<Number(program.horarioInicio);
   return <div onClick={onClose} style={{position:"fixed",inset:0,zIndex:100,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
     <div onClick={e=>e.stopPropagation()} style={{background:"#1a1c24",borderRadius:10,maxWidth:500,width:"100%",border:"1px solid rgba(255,255,255,0.1)",overflowY:"auto",maxHeight:"90dvh"}}>
       <div style={{height:140,background:`linear-gradient(135deg,${channel?.cor||"#333"}33,#0a0c12)`,display:"flex",alignItems:"center",justifyContent:"center",position:"relative"}}>
@@ -413,7 +409,6 @@ function ProgModal({program,channel,onClose,onWatch}){
         <div style={{display:"flex",gap:8}}>
           {isNow&&onWatch&&<button onClick={()=>{onWatch(program.canalId);onClose()}} style={{flex:1,padding:12,background:"linear-gradient(135deg,#f44336,#e91e63)",border:"none",borderRadius:6,color:"#fff",cursor:"pointer",fontSize:14,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>▶ Assistir Agora</button>}
           <button onClick={()=>shareProgram(program,channel)} style={{flex:1,padding:12,background:"rgba(76,175,80,0.15)",border:"1px solid rgba(76,175,80,0.3)",borderRadius:6,color:"#4caf50",cursor:"pointer",fontSize:13,fontWeight:600}}>📤 Compartilhar</button>
-          {isFut&&<button onClick={()=>scheduleNotif(program,channel)} style={{flex:1,padding:12,background:"rgba(255,152,0,0.15)",border:"1px solid rgba(255,152,0,0.3)",borderRadius:6,color:"#ff9800",cursor:"pointer",fontSize:13,fontWeight:600}}>🔔 Lembrete</button>}
           <button onClick={onClose} style={{flex:1,padding:12,background:"rgba(26,115,232,0.2)",border:"1px solid rgba(26,115,232,0.3)",borderRadius:6,color:"#4fc3f7",cursor:"pointer",fontSize:13,fontWeight:600}}>Fechar</button>
         </div>
       </div>

@@ -51,7 +51,7 @@ A importação consulta até 50 IDs por chamada e aceita até 200 itens de uma p
 
 - Horários usam `America/Sao_Paulo` em todos os componentes, inclusive quando o espectador está em outro fuso. `VITE_BROADCAST_TIMEZONE` pode alterar isso no build.
 - Programas atravessando meia-noite e blocos de maratona preservam a posição original do vídeo.
-- No eternity, os N dias a partir da primeira data da grade formam o ciclo. Datas posteriores funcionam como exceções para aquela data; não viram novos ciclos sobrepostos. Uma âncora opcional pode ser definida no campo `eternityAnchor` do canal, no formato `AAAA-MM-DD`.
+- No eternity, os N dias a partir da âncora formam o ciclo. O botão **Criar ciclo aleatório de 7 dias** usa a grade real do dia selecionado, preenche os seis dias vazios seguintes, embaralha programas e playlists e ativa um ciclo de sete dias em uma única gravação.
 - O painel continua mostrando a origem de ciclos antigos. Editar uma projeção abre o cadastro original.
 - Vinhetas entram no horário agendado e têm prioridade. Ao terminar, o programa retorna à posição correspondente ao relógio; o intervalo não empurra toda a grade.
 - Um vídeo bloqueado fica indisponível até o próximo item previsto. Não se adianta a grade para ocupar esse tempo. Erros de bloqueio detectados durante reprodução expiram do cache após seis horas; marcações editoriais `blocked` podem ser atualizadas por Buscar Todos.
@@ -62,7 +62,7 @@ A importação consulta até 50 IDs por chamada e aceita até 200 itens de uma p
 
 Na aba **Notícias**, escolha um canal, habilite os formatos desejados e crie/importе itens. “Salvar rascunho” não altera o que está no ar. Marque cada item aprovado e use “Publicar na TV”.
 
-São fornecidos ticker, manchete em destaque e card de publicação manual com autor/fonte e link. O card é um layout editorial da TREND TV, não um tweet consultado pela API do X. O intervalo de rotação e o canto são configuráveis. Notícias urgentes recebem destaque; itens expiram em 24 horas por padrão e podem ser renovados. Apenas até 50 itens aprovados, com título/fonte e dentro da validade são publicados. A redação aceita até 100 itens.
+São fornecidos ticker, manchete em destaque e card de publicação manual com autor/fonte e link. O card é um layout editorial da TREND TV, não um tweet consultado pela API do X. O intervalo de rotação e o canto são configuráveis. Notícias urgentes recebem destaque; cada item permanece no ar por 10, 15, 20 ou 30 minutos a partir da publicação. Apenas até 50 itens aprovados, com título/fonte e dentro da validade são publicados. A redação aceita até 100 itens e limita cada manchete a 25 palavras e 240 caracteres.
 
 Importe arquivos RSS/XML, Atom ou JSON pelo botão do painel. Todas as importações entram como rascunho sem aprovação. A revisão usa manchetes e links, sem copiar matérias completas. O script opcional `scripts/rss_to_json.py` converte um RSS público em um arquivo que pode ser importado:
 
@@ -83,9 +83,9 @@ As imagens enviadas ao painel são reduzidas localmente antes de salvar, para re
 ## Verificação e limites
 
 - Build de produção concluído.
-- 17 testes de regressão aprovados: fuso, datas, meia-noite, maratona, eternity, vinhetas, conflitos, playlists, URLs e publicação editorial.
+- 22 testes de regressão aprovados: fuso, calendário, datas, meia-noite, maratona, eternity, vinhetas, conflitos, playlists, URLs e publicação editorial.
 - Não foram feitos testes visuais em navegador/celular, reprodução real do YouTube, instalação em dispositivos ou testes contra a conta Firebase do usuário. As regras foram fornecidas, mas não executadas no emulador nem publicadas.
-- Operações de lote usam gravação atômica e limite conservador de 400 alterações. Conflitos de grade são validados no painel; edições concorrentes de dois administradores ainda precisam de coordenação. Somente a reserva de numeração usa transação entre administradores.
+- Operações de lote usam gravação atômica, confirmação do servidor e limite conservador de 450 alterações. Conflitos de grade são validados no painel; edições concorrentes de dois administradores ainda precisam de coordenação. Somente a reserva de numeração usa transação entre administradores.
 - O bundle inicial ainda contém os SDKs React/Firebase e gera aviso de tamanho do Vite. As telas são carregadas separadamente.
 
 Consulte `ANALISE-E-CUSTOS.md` para a revisão e o que pode funcionar sem mensalidade.

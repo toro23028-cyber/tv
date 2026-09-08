@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {getToday,getNow,dateSecondsToAbsolute,absoluteToDateSeconds} from '../clock.js';
+import {getToday,getNow,dateSecondsToAbsolute,absoluteToDateSeconds,addBroadcastDays,getBroadcastWeekday} from '../clock.js';
 import {buildSchedule,getCurProg,getVideoPlaybackInfo,buildScheduleAdmin,findConflicts} from '../schedule.js';
 import {extractYouTubeId,parseYouTubeBulk,parseDurationISO} from '../youtube-id.js';
 import {publishableItems,parseNewsImport,safeSourceURL} from '../news.js';
@@ -8,6 +8,7 @@ const channel={id:'c'},date='2026-09-05',id1='abcdefghijk',id2='lmnopqrstuv';
 const p=(extra={})=>({id:'p',nome:'Programa',canalId:'c',data:date,horarioInicio:0,duracao:3600,youtubeId:id1,...extra});
 test('data e hora de Brasília permanecem no mesmo dia depois das 21h',()=>{const d=new Date('2026-09-06T01:30:00Z');assert.equal(getToday(d),date);assert.equal(getNow(d),22*3600+30*60);});
 test('conversão absoluta preserva segundos e virada de dia',()=>{assert.deepEqual(absoluteToDateSeconds(dateSecondsToAbsolute(date,86430)),{date:'2026-09-06',seconds:30});});
+test('calendário do painel cruza mês e ano sem depender do fuso local',()=>{assert.equal(addBroadcastDays('2026-12-31',1),'2027-01-01');assert.equal(addBroadcastDays('2026-03-01',-1),'2026-02-28');assert.equal(getBroadcastWeekday('2026-09-05'),'Sáb');});
 test('grade expirada não volta ao ar fora de eternity',()=>{assert.ok(buildSchedule([p({data:'2026-09-04'})],'c',channel,date).every(x=>x.isPlaceholder));});
 test('duração inválida não causa loop no fallback legado',()=>{for(const duracao of [-1,0,NaN,Infinity])assert.ok(buildSchedule([p({data:'',duracao})],'c',channel,date).every(x=>x.isPlaceholder));});
 test('programa após meia-noite preserva offset de mídia',()=>{const schedule=buildSchedule([p({data:'2026-09-04',horarioInicio:82800,duracao:7200})],'c',channel,date);const cur=getCurProg(schedule,1800);assert.equal(cur.mediaOffset,3600);assert.equal(getVideoPlaybackInfo(cur,1800).position,5400);});

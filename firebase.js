@@ -1,6 +1,6 @@
 import {getAuth} from "firebase/auth";
 import { initializeApp } from "firebase/app";
-import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, getDocs, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, writeBatch, runTransaction, getDoc } from "firebase/firestore";
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, getDocs, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, writeBatch, runTransaction, getDoc, waitForPendingWrites } from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCt0t7IvYYPMXTfXB1zZ6AB4Na9JpL50EQ",
@@ -20,4 +20,4 @@ export const db = initializeFirestore(app, {
 export const auth = getAuth(app);
 
 // Helper exports
-export { collection, doc, getDocs, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, writeBatch, runTransaction, getDoc };
+export { collection, doc, getDocs, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, writeBatch, runTransaction, getDoc, waitForPendingWrites };

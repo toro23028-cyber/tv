@@ -30,4 +30,12 @@ export function absoluteToDateSeconds(absolute) {
   const day = Math.floor(absolute/86400);
   return {date:new Date(BASE+day*86400000).toISOString().slice(0,10), seconds:absolute-day*86400};
 }
+export function addBroadcastDays(date,days=1) {
+  return absoluteToDateSeconds(dateSecondsToAbsolute(date)+Number(days)*86400).date;
+}
+export function getBroadcastWeekday(date) {
+  const days=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+  const absolute=dateSecondsToAbsolute(date);
+  return Number.isFinite(absolute)?days[new Date(BASE+absolute*1000).getUTCDay()]:'';
+}
 export function getAbsoluteNow(date = new Date()) { return dateSecondsToAbsolute(getToday(date),getNow(date)); }

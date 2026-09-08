@@ -1,12 +1,12 @@
 import {useCatalog} from './Catalog';
-import {assertDocumentSize,cleanProgram,commitPrograms,assertNoConflicts,saveChannelNumber} from './admin-data';
+import {assertDocumentSize,cleanProgram,commitPrograms,commitEternityWeek,assertNoConflicts,saveChannelNumber} from './admin-data';
 import NewsEditor from './NewsEditor';
-import {getToday,getNow,getAbsoluteNow,dateSecondsToAbsolute,absoluteToDateSeconds} from './clock.js';
+import {getToday,getNow,dateSecondsToAbsolute,absoluteToDateSeconds,addBroadcastDays,getBroadcastWeekday} from './clock.js';
 import {buildScheduleAdmin,findConflicts} from './schedule.js';
 import {extractYouTubeId,extractYouTubeId as extractYTId,extractPlaylistId,parseYouTubeBulk} from './youtube-id.js';
 import {fetchYouTubeMetadata,fetchYouTubePlaylistItems,enrichVideos} from './youtube.js';
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { db, collection, addDoc, updateDoc, deleteDoc, onSnapshot, doc, writeBatch, runTransaction } from "./firebase";
+import { db, collection, updateDoc, deleteDoc, onSnapshot, doc, runTransaction } from "./firebase";
 
 const DURATION_PRESETS = [
   { label:"15min", value:900 },{ label:"30min", value:1800 },{ label:"40min", value:2400 },
@@ -19,14 +19,12 @@ const EMOJI_LIST = ["📺","🎭","🎬","🌍","🎵","🎮","📡","🎨","�
 const COLOR_LIST = ["#2196F3","#E91E63","#4CAF50","#FF9800","#9C27B0","#f44336","#00bcd4","#ff5722","#607d8b","#78909C","#3f51b5","#8bc34a","#ffc107","#795548"];
 
 function fmtSec(s){const h=Math.floor(s/3600),m=Math.floor((s%3600)/60);return`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`}
-function getDayLabel(d){const x=new Date(d+"T00:00:00");const ds=["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"];return`${ds[x.getDay()]} ${x.getDate()}/${x.getMonth()+1}`}
+function getDayLabel(d){const [,m,day]=String(d).split('-');return`${getBroadcastWeekday(d)} ${Number(day)}/${Number(m)}`}
 function secTo(s){return{h:Math.floor(s/3600),m:Math.floor((s%3600)/60)}}
 function parseDur(h,m){return(parseInt(h)||0)*3600+(parseInt(m)||0)*60}
-function genDates(n){const ds=[]; let d=new Date(getToday()+"T00:00:00"); for(let i=0;i<n;i++){ const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,"0"),da=String(d.getDate()).padStart(2,"0"); ds.push(`${y}-${m}-${da}`); d.setDate(d.getDate()+1); } return ds}
+function parseTime(value){const match=/^(\d{2}):(\d{2})$/.exec(String(value||''));return match?Number(match[1])*3600+Number(match[2])*60:null;}
+function genDates(from=-7,to=60){const today=getToday(),ds=[];for(let i=from;i<=to;i++)ds.push(addBroadcastDays(today,i));return ds;}
 
-// Timeline absoluta (7 dias contínuos)
-const QUEUE_DAYS=7; // Mudar para 15, 30, etc conforme necessário - escalável!
-const BASE_DATE=new Date("2026-01-01T00:00:00Z");
 // ===== Maratona / blocos virtuais (mesma regra da TV) =====
 const BLOCO_PADRAO=10800;      // 3h
 const AUTO_MARATONA_MIN=21600; // 6h → vira Maratona automático
@@ -99,15 +97,6 @@ function ytThumb(id){const x=extractYTId(id);return x?`https://img.youtube.com/v
 
 const iS = {background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:4,padding:"8px 12px",color:"#fff",fontSize:13,outline:"none"};
 const lS = {fontSize:11,color:"#888",fontWeight:600,marginBottom:4,display:"block",letterSpacing:0.5};
-
-const DEFAULT_CHANNELS = [
-  {id:0,numero:0,nome:"Sobre",logo:"ℹ️",logoType:"emoji",logoUrl:null,cor:"#78909C"},
-  {id:1,numero:1,nome:"Canal 1",logo:"🎭",logoType:"emoji",logoUrl:null,cor:"#2196F3"},
-  {id:2,numero:2,nome:"Canal 2",logo:"🎬",logoType:"emoji",logoUrl:null,cor:"#E91E63"},
-  {id:3,numero:3,nome:"Canal 3",logo:"🌍",logoType:"emoji",logoUrl:null,cor:"#4CAF50"},
-  {id:4,numero:4,nome:"Canal 4",logo:"🎵",logoType:"emoji",logoUrl:null,cor:"#FF9800"},
-  {id:5,numero:5,nome:"Canal 5",logo:"🎮",logoType:"emoji",logoUrl:null,cor:"#9C27B0"},
-];
 
 function ChLogo({ch,size=28}){
   if(ch.logoType==="custom"&&ch.logoUrl) return <img src={ch.logoUrl} alt="" style={{width:size,height:size,borderRadius:4,objectFit:"cover"}}/>;
@@ -204,12 +193,12 @@ function GradeVisual({programs,channels,selectedChannel,selDate,onEdit,notify}){
         if(d.start===d.origStart)return;
         const pos=resolvePosition(d.start,d.origDur,others);
         if(pos===null){notify("❌ Não cabe: dia lotado neste canal");return}
-        await updateDoc(doc(db,"programs",String(p.id)),{horarioInicio:pos,horarioFim:pos+d.origDur});
+        await commitPrograms([{...p,horarioInicio:pos,horarioFim:pos+d.origDur}]);
         notify(`✅ ${p.isJingle?`🎬 ${p.nome}`:p.nome} → ${fmtSec(pos)}${pos!==d.start?" (encaixado)":""}`);
       }else{
         if(d.dur===d.origDur)return;
         const nd=Math.min(86400-d.origStart,resolveResize(d.origStart,d.dur,others));
-        await updateDoc(doc(db,"programs",String(p.id)),{duracao:nd,horarioFim:d.origStart+nd});
+        await commitPrograms([{...p,duracao:nd,horarioFim:d.origStart+nd}]);
         notify(`✅ ${p.isJingle?`🎬 ${p.nome}`:p.nome}: ${fDur(nd)}${nd!==d.dur?" (limitado ao próximo)":""}`);
       }
     }catch(err){console.error("Grade drag err:",err);notify("❌ Erro ao salvar no Firebase")}
@@ -800,7 +789,7 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
 // ============================================
 // CHANNEL EDITOR
 // ============================================
-function ChannelEditor({channels,onUpdate,onAdd,onDelete}){
+function ChannelEditor({channels,onAdd,onDelete}){
   const [editing,setEditing]=useState(null);
   const [nome,setNome]=useState("");
   const [numero,setNumber]=useState(0);
@@ -994,8 +983,8 @@ function JinglesTab({programs,channels,selCh,setSelCh,dates,selDate,setSelDate,n
     };
     try{
       assertNoConflicts(programs,[{...payload,id:editJingle?.id}],channels);
-      if(editJingle){await updateDoc(doc(db,"programs",String(editJingle.id)),payload);notify("✅ Vinheta atualizada");}
-      else{await addDoc(collection(db,"programs"),payload);notify("✅ Vinheta adicionada");}
+      await commitPrograms([{...payload,id:editJingle?.id||`jingle_${Date.now()}`}]);
+      notify(editJingle?"✅ Vinheta atualizada":"✅ Vinheta adicionada");
       setShowModal(false);
     }catch(err){notify(err.message||"Erro ao salvar");}
     setSaving(false);
@@ -1115,15 +1104,12 @@ function shuffleArray(arr){
 }
 export default function AdminPanel({onLogout}){
   const catalog=useCatalog();
-  // Gera 7 dias passados + 30 dias futuros para ver programas base do eternity
-  // Recalcula a janela de datas sempre que o componente re-renderiza
-  // (não pode usar useMemo com [] pois congela as datas no momento do mount)
-  const dates=[...new Set([...catalog.programs.map(p=>p.data).filter(Boolean),...genDates(30)])].sort();
   const [tab,setTab]=useState("schedule");
   const [newsDirty,setNewsDirty]=useState(false);
   const [selDate,setSelDate]=useState(getToday());
-  // Garante que selDate nunca fica em um dia que não existe mais nas datas disponíveis
-  const effectiveSelDate = dates.includes(selDate) ? selDate : getToday();
+  // Sempre inclui a data escolhida, sete dias anteriores e sessenta futuros.
+  const dates=[...new Set([...catalog.programs.map(p=>p.data).filter(Boolean),...genDates(),selDate])].sort();
+  const effectiveSelDate=selDate;
   const [selCh,setSelCh]=useState(null);
   const [viewMode,setViewMode]=useState("lista"); // "lista" | "grade"
   const [channels,setCh]=useState([]);
@@ -1136,6 +1122,7 @@ export default function AdminPanel({onLogout}){
   const [cloneData,setCloneData]=useState({channel:"",date:null,time:""});
   const [showDup,setSD]=useState(false);
   const [toast,setToast]=useState("");
+  const [eternityBusy,setEternityBusy]=useState(false);
 
   const notify=(m)=>{setToast(m);setTimeout(()=>setToast(""),3000)};
 
@@ -1145,8 +1132,7 @@ export default function AdminPanel({onLogout}){
   const handleSave=async p=>{
     assertNoConflicts(programs,[p],channels);
     const data=cleanProgram(p);assertDocumentSize(data);
-    if(editProg)await updateDoc(doc(db,'programs',p.id),data);
-    else await addDoc(collection(db,'programs'),data);
+    await commitPrograms([{...data,id:p.id}]);
     notify(editProg?'✅ Atualizado!':'✅ Agendado!');setSM(false);setEP(null);
   };
   const handleDel=async id=>{
@@ -1168,6 +1154,32 @@ export default function AdminPanel({onLogout}){
   const handleReorder=async updated=>{
     try{assertNoConflicts(programs,updated,channels);await commitPrograms(updated);notify('Nova ordem salva.');}catch(e){notify(e.message);}
   };
+  const buildEternityWeek=async()=>{
+    if(eternityBusy)return;
+    const source=programs.filter(p=>p.canalId===selCh&&p.data===effectiveSelDate&&!p.isJingle&&!p.isTemplate).sort((a,b)=>Number(a.horarioInicio)-Number(b.horarioInicio));
+    if(!source.length){notify('O dia selecionado precisa ter uma grade real para criar o ciclo.');return;}
+    const first=Math.min(...source.map(p=>Number(p.horarioInicio))),total=source.reduce((sum,p)=>sum+Number(p.duracao),0);
+    if(first+total>86400){notify('A grade não cabe em um dia. Ajuste os horários ou as durações antes de criar o ciclo.');return;}
+    const targetDates=Array.from({length:6},(_,i)=>addBroadcastDays(effectiveSelDate,i+1));
+    const occupied=programs.filter(p=>p.canalId===selCh&&targetDates.includes(p.data)&&!p.isJingle&&!p.isTemplate);
+    if(occupied.length){notify('Um dos próximos seis dias já tem programação real. Escolha um início com os dias seguintes vazios.');return;}
+    if(!confirm(`Criar um ciclo Eternity de 7 dias a partir de ${getDayLabel(effectiveSelDate)}? Os próximos seis dias serão preenchidos e aleatorizados.`))return;
+    setEternityBusy(true);
+    const changes=[];
+    for(const date of targetDates){
+      let cursor=dateSecondsToAbsolute(date,first);
+      for(const original of shuffleArray(source)){
+        const at=absoluteToDateSeconds(cursor),duration=Number(original.duracao);cursor+=duration;
+        changes.push({...cleanProgram(original),data:at.date,horarioInicio:at.seconds,horarioFim:at.seconds+duration,sinopse:original.sinopse?.trim()||randomProgramDescription(),videos:original.videos?.length>1?shuffleArray(original.videos):original.videos||[]});
+      }
+    }
+    try{
+      assertNoConflicts(programs,changes,channels);
+      await commitEternityWeek(selCh,{eternity:true,eternityDays:7,eternityAnchor:effectiveSelDate},changes);
+      notify(`Ciclo Eternity criado: ${changes.length} programas distribuídos em 7 dias.`);
+    }catch(e){notify(e.message||'Não foi possível criar o ciclo Eternity.');}
+    finally{setEternityBusy(false);}
+  };
   const addChannel=async()=>{
     try {
       const maxNum=channels.length>0?Math.max(...channels.map(c=>c.numero||0)):0;
@@ -1181,7 +1193,9 @@ export default function AdminPanel({onLogout}){
   };
 
   const delChannel=async(ch)=>{
-    if(!confirm(`Deletar canal "${ch.nome}"? Isso não deletará os programas agendados.`)) return;
+    const linked=programs.filter(p=>p.canalId===ch.id).length;
+    if(linked){alert(`Este canal ainda possui ${linked} programa(s). Remova ou transfira a grade antes de excluir o canal.`);return;}
+    if(!confirm(`Deletar canal "${ch.nome}"?`)) return;
     try {
       await runTransaction(db,async tx=>{
         const lock=doc(db,'channelNumbers',String(ch.numero)),reserved=await tx.get(lock);
@@ -1194,21 +1208,10 @@ export default function AdminPanel({onLogout}){
     }
   };
 
-  // Task 3: Create Sky channel if it doesn't exist
-  const createSkyChannel=async()=>{
-    try {
-      const skyCh={numero:32,nome:"Sky",logo:"📡",logoType:"emoji",logoUrl:null,cor:"#1a73e8"};
-      await saveChannelNumber(doc(collection(db,"channels")).id,skyCh,channels);
-      notify("📺 Canal Sky criado!");
-    } catch(err) {
-      console.error("Erro ao criar canal Sky:", err);
-      notify("❌ Erro ao criar canal Sky");
-    }
-  };
-
   const cloneInto=async(channelId,date,time)=>{
     const existing=buildScheduleAdmin(programs,channelId,channels.find(c=>c.id===channelId),date).filter(p=>!p.isJingle);
-    let cursor=dateSecondsToAbsolute(date,time===''?Math.max(0,...existing.map(p=>Number(p.horarioFim))):Number(time));
+    const chosen=parseTime(time);
+    let cursor=dateSecondsToAbsolute(date,chosen===null?Math.max(0,...existing.map(p=>Number(p.horarioFim))):chosen);
     const changes=cloneMenuProgs.map(item=>{
       const source=programs.find(p=>p.id===item.id)||item,at=absoluteToDateSeconds(cursor),duration=Number(source.duracao);
       cursor+=duration;
@@ -1264,7 +1267,13 @@ export default function AdminPanel({onLogout}){
       {tab==="schedule"&&<>
         {/* Date */}
         <div style={{marginBottom:20}}>
-          <div style={{fontSize:12,color:"#888",marginBottom:8,fontWeight:600}}>📅 DATA</div>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,flexWrap:"wrap"}}>
+            <div style={{fontSize:12,color:"#888",fontWeight:600}}>📅 DATA</div>
+            <button className="secondary" aria-label="Dia anterior" onClick={()=>setSelDate(addBroadcastDays(selDate,-1))}>←</button>
+            <input type="date" aria-label="Escolher data da programação" value={selDate} onChange={e=>e.target.value&&setSelDate(e.target.value)} style={{width:160}}/>
+            <button className="secondary" aria-label="Próximo dia" onClick={()=>setSelDate(addBroadcastDays(selDate,1))}>→</button>
+            {selDate!==getToday()&&<button className="secondary" onClick={()=>setSelDate(getToday())}>Hoje</button>}
+          </div>
           <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:8}}>
             {dates.map(d=>{const isT=d===getToday(),isS=d===selDate,isPast=d<getToday();
               const chObj=channels.find(c=>c.id===selCh);
@@ -1272,7 +1281,7 @@ export default function AdminPanel({onLogout}){
               const isEternityProj=chObj?.eternity&&!hasReal&&!isPast;
               return <button key={d} onClick={()=>setSelDate(d)} style={{minWidth:64,padding:"8px 8px",borderRadius:6,cursor:"pointer",textAlign:"center",background:isS?"#1a73e8":isPast?"rgba(255,255,255,0.02)":"rgba(255,255,255,0.04)",border:isS?"1px solid #1a73e8":isT?"1px solid #4fc3f7":"1px solid rgba(255,255,255,0.08)",color:isS?"#fff":isPast?"#555":"#ccc",fontSize:11,fontWeight:600,flexShrink:0}}>
                 <div style={{fontSize:9}}>{getDayLabel(d).split(" ")[0]}</div>
-                <div style={{fontSize:14,marginTop:1}}>{new Date(d+"T00:00:00").getDate()}</div>
+                <div style={{fontSize:14,marginTop:1}}>{Number(d.slice(8,10))}</div>
                 {isT&&<div style={{fontSize:8,color:isS?"#fff":"#4fc3f7",marginTop:1}}>HOJE</div>}
                 {hasReal&&<div title="Tem programas cadastrados" style={{width:4,height:4,borderRadius:"50%",background:isS?"#fff":"#4caf50",margin:"2px auto 0"}}/>}
                 {isEternityProj&&<div title="Projeção eternity" style={{width:4,height:4,borderRadius:"50%",background:isS?"#fff":"#4dd0e1",margin:"2px auto 0"}}/>}
@@ -1288,7 +1297,7 @@ export default function AdminPanel({onLogout}){
         {/* ETERNITY quick toggle for selected channel */}
         {(()=>{const c=channels.find(x=>x.id===selCh);if(!c)return null;const on=!!c.eternity;
           return <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",marginBottom:16,background:on?"rgba(0,188,212,0.08)":"rgba(255,255,255,0.02)",border:on?"1px solid rgba(0,188,212,0.35)":"1px solid rgba(255,255,255,0.06)",borderRadius:8,flexWrap:"wrap"}}>
-            <button onClick={async()=>{try{await updateDoc(doc(db,"channels",String(selCh)),{eternity:!on,eternityDays:Number(c.eternityDays)||1});notify(!on?"∞ Eternity LIGADO — a grade deste canal repete até você desligar":"Eternity desligado")}catch(err){console.error(err);notify("❌ Erro ao alternar Eternity")}}}
+            <button onClick={async()=>{try{if(!on&&!programs.some(p=>p.canalId===selCh&&p.data&&!p.isJingle&&!p.isTemplate)){notify('Cadastre uma grade real antes de ligar o Eternity.');return;}await updateDoc(doc(db,"channels",String(selCh)),{eternity:!on,eternityDays:Number(c.eternityDays)||1});notify(!on?"∞ Eternity LIGADO — a grade deste canal repete até você desligar":"Eternity desligado")}catch(err){console.error(err);notify("❌ Erro ao alternar Eternity")}}}
               style={{padding:"8px 18px",borderRadius:6,cursor:"pointer",fontSize:13,fontWeight:800,letterSpacing:0.5,background:on?"linear-gradient(135deg,#00bcd4,#4dd0e1)":"rgba(255,255,255,0.06)",border:on?"none":"1px solid rgba(255,255,255,0.15)",color:on?"#00323a":"#aaa"}}>
               ∞ ETERNITY: {on?"LIGADO":"DESLIGADO"}
             </button>
@@ -1300,6 +1309,7 @@ export default function AdminPanel({onLogout}){
               <span style={{fontSize:11,color:"#777"}}>A programação (a partir do 1º dia com programa) repete em loop na TV e no guia.</span>
             </>}
             {!on&&<span style={{fontSize:11,color:"#777"}}>Ligue para a programação deste canal se repetir para sempre até você interromper.</span>}
+            <button className="secondary" disabled={eternityBusy} onClick={buildEternityWeek} title="Usa a grade real do dia selecionado como base e preenche os seis dias seguintes">{eternityBusy?'Criando ciclo...':'Criar ciclo aleatório de 7 dias'}</button>
           </div>})()}
 
         {/* Stats */}
@@ -1414,10 +1424,7 @@ Deseja continuar?`))return;
 
       {tab==='news'&&<NewsEditor channels={channels} notify={notify} onDirty={setNewsDirty}/>}
       {tab==='jingles'&&<JinglesTab programs={programs} channels={channels} selCh={selCh} setSelCh={setSelCh} dates={dates} selDate={selDate} setSelDate={setSelDate} notify={notify}/>}
-      {tab==="channels"&&<>
-        <button onClick={createSkyChannel} style={{marginBottom:16,padding:"10px 16px",borderRadius:6,cursor:"pointer",background:"rgba(26,115,232,0.15)",border:"1px solid rgba(26,115,232,0.3)",color:"#4fc3f7",fontSize:13,fontWeight:600}}>📡 Recriar Canal Sky</button>
-        <ChannelEditor channels={channels} onUpdate={setCh} onAdd={addChannel} onDelete={delChannel}/>
-      </>}
+      {tab==="channels"&&<ChannelEditor channels={channels} onAdd={addChannel} onDelete={delChannel}/>} 
 
     </div>
 
@@ -1476,7 +1483,7 @@ Deseja continuar?`))return;
         {/* Hora - opcional, se não escolher data fica auto */}
         {cloneData.date&&<div style={{marginBottom:16}}>
           <label style={{fontSize:12,color:"#888",fontWeight:600,marginBottom:6,display:"block"}}>Hora (opcional)</label>
-          <input type="number" value={cloneData.time} onChange={e=>setCloneData({...cloneData,time:e.target.value})} min="0" max="86399" style={{width:"100%",padding:"8px 12px",borderRadius:4,background:"#14161e",border:"1px solid rgba(255,255,255,0.1)",color:"#fff",fontSize:13}} placeholder="deixe em branco para auto"/>
+          <input type="time" value={cloneData.time} onChange={e=>setCloneData({...cloneData,time:e.target.value})} style={{width:"100%",padding:"8px 12px",borderRadius:4,background:"#14161e",border:"1px solid rgba(255,255,255,0.1)",color:"#fff",fontSize:13}}/>
         </div>}
 
         <div style={{display:"flex",gap:10}}>
