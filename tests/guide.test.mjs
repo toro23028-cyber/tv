@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {buildGuideSchedule,getCurProg,getVideoPlaybackInfo,guideTime} from '../schedule.js';
 import {normalizeNewsItem,newsDuration,prepareNewsPublication,countWords} from '../news.js';
-const date='2026-09-05',ch={id:'c'};
+const date='2026-09-05',ch={id:'c',autoMode:'off'};
 const p=(extra={})=>({id:'p',nome:'Programa',canalId:'c',data:date,horarioInicio:82800,duracao:7200,youtubeId:'abcdefghijk',...extra});
 test('guia inclui amanhã e preserva reprodução na passagem da meia-noite',()=>{
   const source=[p(),p({id:'next',data:'2026-09-06',horarioInicio:3600,duracao:43200})];

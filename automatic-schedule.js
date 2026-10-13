@@ -3,12 +3,18 @@ import {extractYouTubeId,normalizeYouTubeChannel} from './youtube-id.js';
 export function hlsURL(value){try{const u=new URL(value);return u.protocol==='https:'&&!u.username&&!u.password?u.href:null}catch{return null}}
 function seed(value){let n=2166136261;for(const ch of value)n=Math.imul(n^ch.charCodeAt(0),16777619);return n>>>0}
 export function shuffled(list,key){const result=[...list];let n=seed(key);for(let i=result.length-1;i>0;i--){n=(Math.imul(n,1664525)+1013904223)>>>0;const j=n%(i+1);[result[i],result[j]]=[result[j],result[i]]}return result}
+export const effectiveAutoMode=c=>c?.autoMode||(c?.autoLiveChannel||c?.defaultLiveChannel||c?.autoLiveUrl||c?.defaultLiveUrl||c?.autoHlsUrl?'live':'playlists');
 export function autoPlaylistPool(programs,channel){
- const ids=new Set(channel?.autoPlaylistIds||[]);
- return programs.filter(p=>ids.has(p.id)&&!p.isLive&&!p.isJingle).map(p=>({...p,videos:(p.videos?.length?p.videos:[{youtubeUrl:p.youtubeId,duration:p.videoDuration||p.duracao,titulo:p.nome}]).filter(v=>extractYouTubeId(v.youtubeUrl)&&!v.blocked&&Number(v.duration)>0)})).filter(p=>p.videos.length);
+ const selected=channel?.autoPlaylistIds||[];
+ const ids=new Set(selected);
+ const available=programs.filter(p=>!p.isLive&&!p.isJingle&&(selected.length?ids.has(p.id):p.canalId===channel?.id&&!p.isTemplate));
+ return available.map(p=>{
+  const raw=p.videos?.length?p.videos:[{youtubeUrl:p.youtubeId,duration:p.videoDuration||p.duracao,titulo:p.nome}];
+  return {...p,videos:raw.map(v=>({...v,duration:Number(v.duration)>0?Number(v.duration):Math.max(1,Number(p.videoDuration||p.duracao)/raw.length||240),durationEstimated:!(Number(v.duration)>0)})).filter(v=>extractYouTubeId(v.youtubeUrl)&&!v.blocked)};
+ }).filter(p=>p.videos.length);
 }
 export function fillAutomaticSchedule(schedule,programs,channel,date){
- const mode=channel?.autoMode||'off';if(mode==='off')return schedule;
+ const mode=effectiveAutoMode(channel);if(mode==='off')return schedule;
  const pool=autoPlaylistPool(programs,channel),block=Math.max(900,Math.min(10800,(Number(channel.autoBlockMinutes)||60)*60));
  const base=dateSecondsToAbsolute(date),output=[];
  const liveChannel=normalizeYouTubeChannel(channel.autoLiveChannel||channel.defaultLiveChannel||'');

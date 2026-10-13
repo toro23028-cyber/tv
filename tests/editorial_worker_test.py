@@ -17,6 +17,9 @@ class WorkerTests(unittest.TestCase):
     def test_rss(self):
         result = w.parse_feed('<rss><channel><title>Fonte</title><item><title><![CDATA[Notícia & teste]]></title><link>https://example.com/1</link></item></channel></rss>', {'kind':'news'})
         self.assertEqual(result[0]['title'], 'Notícia & teste'); self.assertFalse(result[0]['approved'])
+    def test_latin1_xml(self):
+        raw='<?xml version="1.0" encoding="iso-8859-1"?><rss><channel><title>Fonte</title><item><title>Café</title></item></channel></rss>'.encode('latin1')
+        self.assertEqual(w.parse_feed(raw,{'kind':'news'})[0]['title'],'Café')
     def test_json_tweet_limit(self):
         result = w.parse_feed('[{"text":"' + 'a'*200 + '","author":"@perfil"}]', {'kind':'tweet'})
         self.assertEqual(len(result[0]['title']),160); self.assertEqual(result[0]['source'],'@perfil')

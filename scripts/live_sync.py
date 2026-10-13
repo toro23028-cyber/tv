@@ -19,7 +19,7 @@ def sync_lives(session,base,now=None):
         response.raise_for_status();data=response.json()
         for document in data.get('documents',[]):
             c={k:decode(v) for k,v in document.get('fields',{}).items()}
-            if c.get('autoMode')!='live' or now-c.get('autoLiveCheckedAt',0)<900000:continue
+            if (c.get('autoMode') or ('live' if c.get('autoLiveChannel') or c.get('defaultLiveChannel') or c.get('autoLiveUrl') or c.get('defaultLiveUrl') or c.get('autoHlsUrl') else 'playlists'))!='live' or now-c.get('autoLiveCheckedAt',0)<900000:continue
             if c.get('autoHlsUrl'):
                 try:
                     with urllib.request.urlopen(c['autoHlsUrl'],timeout=8) as stream:available=stream.read(8192).lstrip().startswith(b'#EXTM3U')

@@ -1,11 +1,12 @@
 import {createContext,useContext,useEffect,useState} from 'react';
+import {effectiveAutoMode} from './automatic-schedule';
 import {fetchActiveChannelLive} from './youtube-live-client';
 import {db,collection,onSnapshot} from './firebase';
 const Context=createContext(null);
 export function CatalogProvider({children}){
   const [catalog,setCatalog]=useState({channels:[],programs:[],loading:true,error:''});
   const [runtimeLives,setRuntimeLives]=useState({});
-  const liveSources=JSON.stringify(catalog.channels.filter(c=>c.autoMode==='live'&&!c.autoHlsUrl).map(c=>({id:c.id,source:c.autoLiveChannel||c.defaultLiveChannel||'',checkedAt:c.autoLiveCheckedAt||0})));
+  const liveSources=JSON.stringify(catalog.channels.filter(c=>effectiveAutoMode(c)==='live'&&!c.autoHlsUrl).map(c=>({id:c.id,source:c.autoLiveChannel||c.defaultLiveChannel||'',checkedAt:c.autoLiveCheckedAt||0})));
   useEffect(()=>{
     let active=true;const controller=new AbortController(),sources=JSON.parse(liveSources);
     const refresh=()=>Promise.allSettled(sources.map(async c=>{if(!c.source||Date.now()-c.checkedAt<15*60000)return;try{const result=await fetchActiveChannelLive(c.source,{signal:controller.signal});if(active)setRuntimeLives(list=>({...list,[c.id]:{source:c.source,autoLiveCheckedAt:Date.now(),autoLiveStatus:result.live?'live':'waiting',autoLiveVideoId:result.videoId||'',autoLiveTitle:result.title}}))}catch{}}));

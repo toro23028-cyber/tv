@@ -12,8 +12,9 @@ export async function importEditorialSource(id,{signal}={}){
 }
 
 export async function importFeedURL(source){
+ if(source.provider==='brightdata'){const data=await adminRequest(`/api/brightdata?snapshot=${encodeURIComponent(source.snapshotId)}`);return data.items.map(p=>normalizeNewsItem({...p,approved:false,autoImported:true}));}
  const data=await adminRequest('/api/editorial-feed',{method:'POST',body:source});
- return parseNewsImport(data.text,source.kind).map(p=>normalizeNewsItem({...p,kind:source.kind,source:p.source||data.name,title:source.kind==='news'?p.title.split(/\s+/).slice(0,NEWS_WORD_LIMIT).join(' '):p.title,approved:false}));
+ return parseNewsImport(data.text,source.kind).map(p=>normalizeNewsItem({...p,autoImported:true,kind:source.kind,source:p.source||data.name,title:source.kind==='news'?p.title.split(/\s+/).slice(0,NEWS_WORD_LIMIT).join(' '):p.title,approved:false}));
 }
 export async function importTweetURL(url){
  const data=await adminRequest(`/api/tweet-preview?url=${encodeURIComponent(url)}`);

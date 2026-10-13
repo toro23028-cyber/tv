@@ -12,5 +12,6 @@ export async function requireAdmin(req,fetcher=fetch){
 export async function boundedText(response,limit=500000){
  if(!response.body)throw new Error('Fonte sem conteúdo.');const reader=response.body.getReader();let size=0;const chunks=[];
  try{for(;;){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>limit)throw new Error('Fonte maior que 500 KB.');chunks.push(value);}}finally{await reader.cancel().catch(()=>{});}
- return Buffer.concat(chunks.map(v=>Buffer.from(v))).toString('utf8');
+ const bytes=Buffer.concat(chunks.map(v=>Buffer.from(v)));const declared=/charset=([^;\s]+)/i.exec(response.headers?.get?.('content-type')||'')?.[1]||/encoding=["']([^"']+)/i.exec(bytes.subarray(0,160).toString('ascii'))?.[1]||'utf-8';
+ try{return new TextDecoder(declared).decode(bytes)}catch{return bytes.toString('utf8')}
 }

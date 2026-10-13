@@ -28,9 +28,28 @@ def key(item):
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
-        raise ValueError('Redirecionamento recusado: use o endereço final do feed.')
+        u=urllib.parse.urlsplit(newurl)
+        if u.scheme!='https' or not u.hostname or u.username or u.password or u.port:raise ValueError('Redirecionamento inseguro.')
+        if any(not ipaddress.ip_address(a[4][0]).is_global for a in socket.getaddrinfo(u.hostname,443,socket.AF_INET)):raise ValueError('Destino não público.')
+        return super().redirect_request(req,fp,code,msg,headers,newurl)
 
 def read_feed(source):
+    if source.get('provider') == 'brightdata':
+        token = os.environ.get('BRIGHTDATA_API_TOKEN', '')
+        snapshot = source.get('snapshotId', '')
+        if not token or not re.fullmatch(r's_[a-zA-Z0-9]{6,100}',snapshot):raise ValueError('Configure a chave Bright Data e um snapshot válido.')
+        headers={'Authorization':'Bearer '+token}
+        with urllib.request.urlopen(urllib.request.Request('https://api.brightdata.com/datasets/v3/progress/'+snapshot,headers=headers),timeout=15) as response:state=json.load(response)
+        if state.get('status')!='ready':raise ValueError('Snapshot ainda não disponível.')
+        records=[]
+        with urllib.request.urlopen(urllib.request.Request('https://api.brightdata.com/datasets/v3/snapshot/'+snapshot+'?format=ndjson',headers=headers),timeout=15) as response:
+            size=0
+            while len(records)<100:
+                line=response.readline(3000001);size+=len(line)
+                if size>3000000:raise ValueError('Lote Bright Data acima de 3 MB.')
+                if not line:break
+                if line.strip():records.append(json.loads(line))
+        return parse_feed(json.dumps(records),{**source,'kind':'tweet'})
     u = urllib.parse.urlsplit(source['url'])
     if u.scheme != 'https' or not u.hostname or u.username or u.password or u.port:
         raise ValueError('Use feed HTTPS público.')
@@ -40,15 +59,19 @@ def read_feed(source):
     req = urllib.request.Request(source['url'], headers={'User-Agent': 'TrendTV-Editorial/2.0'})
     with urllib.request.build_opener(NoRedirect).open(req, timeout=15) as response:
         raw = response.read(500001)
+        charset=response.headers.get_content_charset()
     if len(raw) > 500000:
         raise ValueError('Feed acima de 500 KB.')
-    return parse_feed(raw, source)
+    return parse_feed(raw,{**source,'_encoding':charset})
 
 def parse_feed(raw, source):
     kind = source.get('kind', 'news')
     if kind not in LIMITS:
         raise ValueError('Tipo de conteúdo inválido.')
-    raw = raw.decode('utf-8-sig') if isinstance(raw, bytes) else raw
+    if isinstance(raw,bytes):
+        declaration=re.search(br'encoding=[\"\']([^\"\']+)',raw[:160])
+        encoding=source.get('_encoding') or (declaration.group(1).decode('ascii') if declaration else 'utf-8-sig')
+        raw=raw.decode(encoding)
     if raw.lstrip().startswith('<'):
         if '<!DOCTYPE' in raw.upper() or '<!ENTITY' in raw.upper():
             raise ValueError('Declarações XML não permitidas.')
@@ -68,10 +91,10 @@ def parse_feed(raw, source):
     result = []
     for p in items[:100]:
         if not isinstance(p, dict): continue
-        title = html.unescape(re.sub('<[^>]+>', '', str(p.get('title') or p.get('text') or ''))).strip()
+        title = html.unescape(re.sub('<[^>]+>', '', str(p.get('title') or p.get('text') or p.get('content') or ''))).strip()
         if kind == 'news': title = ' '.join(title.split()[:12])
         title = title[:LIMITS[kind]]
-        author = str(p.get('source') or p.get('author') or source.get('name') or 'TREND TV')[:48]
+        author = str(p.get('source') or p.get('author') or p.get('user_name') or p.get('username') or source.get('name') or 'TREND TV')[:48]
         url = str(p.get('url') or p.get('link') or '')
         if urllib.parse.urlsplit(url).scheme not in ('http', 'https'): url = ''
         if not title: continue
@@ -136,7 +159,7 @@ def sync_channel(session, base, document):
     if response.status_code not in (200, 404): response.raise_for_status()
     old_doc = response.json() if response.status_code == 200 else {}
     old = {k: decode(v) for k, v in old_doc.get('fields', {}).items()}
-    existing = old.get('items', [])
+    existing = [p for p in old.get('items', []) if not p.get('autoImported') or p.get('expiresAt',0)>now]
     existing_keys = {key(p) for p in existing}
     fresh = [p for p in fresh if key(p) not in existing_keys]
     if config.get('autoPublish') and config.get('config', {}).get('enabled'):

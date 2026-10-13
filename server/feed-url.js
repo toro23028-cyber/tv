@@ -12,3 +12,16 @@ export async function validateFeedURL(value,resolver=lookup){
  if(!addresses.length||addresses.some(p=>!publicIPv4(p.address)))throw new Error('A fonte precisa estar em um endereço público.');
  return url;
 }
+export async function fetchFeedURL(value,{fetcher=fetch,resolver=lookup,verifyInitial=true}={}){
+ let url=verifyInitial?await validateFeedURL(value,resolver):new URL(value);
+ for(let i=0;i<=3;i++){
+  const response=await fetcher(url,{redirect:'manual',signal:AbortSignal.timeout(12000),headers:{Accept:'application/rss+xml,application/atom+xml,application/json,text/xml','User-Agent':'TrendTV-Editorial/2.0'}});
+  if([301,302,303,307,308].includes(response.status)){
+   const location=response.headers.get('location');if(!location)throw new Error('Feed redirecionou sem endereço de destino.');
+   await response.body?.cancel();url=await validateFeedURL(new URL(location,url).href,resolver);continue;
+  }
+  if(!response.ok)throw new Error(`A fonte respondeu HTTP ${response.status}. Confira o link do feed.`);
+  return response;
+ }
+ throw new Error('O feed excedeu três redirecionamentos. Use seu endereço final.');
+}

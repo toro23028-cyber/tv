@@ -59,7 +59,7 @@ Referências: https://x.com/en/tos · https://developers.google.com/youtube/v3/d
 
 ## Testes e limites da entrega
 
-npm run check executa regressões, componentes simulados e build. Os testes Python verificam o importador e a sincronização. Nesta entrega passaram 76 testes JavaScript, 17 verificações de componentes/gravação simulada e 16 testes Python (editorial, playlists e descoberta de lives).
+npm run check executa regressões, componentes simulados e build. Os testes Python verificam o importador e a sincronização. Nesta entrega passaram 83 testes JavaScript, 19 verificações de componentes/gravação simulada e 17 testes Python (editorial, playlists e descoberta de lives).
 
 Não houve deploy, configuração de credenciais/fontes reais nem teste end-to-end em navegador nesta entrega. O pacote mantém somente código, configuração, ícones/PWA, scripts necessários, testes e este guia; relatórios e logs de atualizações antigas foram retirados do ZIP.
 
@@ -90,3 +90,22 @@ HLS fica sempre em 1×; o botão e a animação de recuperação em 2× continua
 A continuidade depende de configurar e manter pelo menos uma fonte reproduzível. A aplicação não inventa vídeos quando a base está vazia, todos os vídeos estão bloqueados ou as fontes externas deixam de funcionar. Sem importador ligado, não há atualização persistente com o site fechado; as buscas continuam quando alguém abre a Home/TV.
 
 A validação desta entrega foi local, com serviços simulados e renderização SSR. Não foi feito deploy nem reprodução end-to-end de uma live HLS real. O ZIP continua limpo, com código/configuração, scripts, testes e este guia.
+
+
+## Correção de compatibilidade, RSS e Bright Data
+
+Tweets/trends agora desaparecem ao sair do modo estúdio. Redação → Exibição na TV → Manter tweets no modo normal em canais de live permite a exceção por canal. Essa opção vem desligada e exige publicar a configuração; o pacote social continua respeitando seu próprio checkbox.
+
+Na leitura do catálogo público em 13/10/2026, quatro canais não tinham autoMode e um estava explicitamente em off; nenhum possuía uma base selecionada. Para corrigir a compatibilidade, canais sem autoMode agora aproveitam automaticamente programas gravados do próprio canal como reserva. Quando há uma fonte de live padrão, ela é priorizada. O modo off explícito continua sendo respeitado; Canais tem um botão para ativar a reserva usando o acervo existente. Canal sem vídeo disponível precisa receber uma base de outro canal ou novos programas. Nenhum dado real foi modificado durante a análise.
+
+Vídeos sem duração individual agora usam estimativa baseada na duração do programa, como já acontecia no player antigo. Para horários precisos, complete as durações pela API (Buscar Todos). Programas/modelos selecionados explicitamente continuam controlando a base; modelos não são escolhidos automaticamente para canais antigos.
+
+RSS: redirecionamentos HTTPS públicos agora são seguidos, com validação de cada destino e limite de saltos. Codificação ISO-8859-1 também é aceita. Importações expiradas marcadas como automáticas deixam de ocupar a fila; rascunhos manuais são preservados. O histórico de importação evita renovar repetidamente o mesmo conteúdo. A publicação automática pode tentar novamente itens pendentes depois de uma falha. O painel mostra o erro específico da fonte, incluindo sessão expirada; a sessão admin segue limitada a oito horas, exigindo novo login depois desse prazo. Importações antigas sem marcador não são apagadas automaticamente.
+
+A Bright Data é compatível por sua API de snapshots. Nesta versão, Redação → Importação simples e automática → Bright Data permite conectar um snapshot s_… já criado no provedor. Configure BRIGHTDATA_API_TOKEN no servidor Vercel (sem VITE_) e, para importação com painel fechado, também na máquina do importador. O serviço consulta o progresso da coleta, aguarda estar ready e lê até os primeiros 100 posts. Texto, perfil e link são convertidos para tweets da Redação; a publicação segue a opção de revisão/publicação automática já configurada. Também é possível importar o JSON exportado, respeitando o limite do painel.
+
+Esta integração não inicia coletas, não busca automaticamente listas do X e não descobre sozinha novos snapshots. A coleta e seu agendamento ficam na Bright Data; atualize o ID ou forneça um feed JSON continuamente atualizado para receber novos lotes. Não foi usada uma conta/token Bright Data real nesta entrega. Snapshots prontos são lotes de dados, não feeds que recebem posts novos continuamente.
+
+Em 13/10/2026, a página oficial anuncia cinco mil créditos mensais para novas contas, compartilhados com outros produtos, sem cartão de crédito. A seção de preços do Twitter mostra US$1,50 por mil registros no pagamento por uso, enquanto o menu mostra outra promoção. Portanto US$0,75/APIS25 não deve ser tratado como preço garantido da sua conta. Confira o benefício e limites no painel do provedor. Referências: https://brightdata.com.br/products/web-scraper/twitter · https://docs.brightdata.com/api-reference/scrapers/delivery-apis/download-snapshot
+
+Testes locais e simulados passaram. Não houve deploy, edição do banco real, teste em navegador com login nem importação de um RSS real da sua conta nesta entrega. O ZIP permanece sem arquivos antigos de atualização. Se um feed específico continuar falhando, seu link e a mensagem agora exibida serão necessários para investigar esse caso.

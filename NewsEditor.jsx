@@ -1,7 +1,7 @@
 import {adminRequest,importEditorialSource,importFeedURL,importTweetURL} from './editorial-client';
 import {useEffect,useState,useRef} from 'react';
 import {db,doc,getDoc,setDoc,writeBatch,runTransaction} from './firebase';
-import {DEFAULT_NEWS_CONFIG,GC_COLORS,normalizeGCColor,NEWS_DURATION_OPTIONS,NEWS_LIMITS,NEWS_WORD_LIMIT,countWords,newsDuration,prepareNewsPublication,normalizeNewsItem,parseNewsImport,publishableItems,safeSourceURL,editorialKey,dedupeEditorial,mergeEditorial} from './news';
+import {DEFAULT_NEWS_CONFIG,GC_COLORS,normalizeGCColor,NEWS_DURATION_OPTIONS,NEWS_LIMITS,NEWS_WORD_LIMIT,countWords,newsDuration,prepareNewsPublication,normalizeNewsItem,parseNewsImport,publishableItems,safeSourceURL,editorialKey,dedupeEditorial,mergeEditorial,mergeFeedQueue} from './news';
 import {assertDocumentSize} from './admin-data';
 import {extractYouTubeId,normalizeYouTubeChannel} from './youtube-id';
 import NewsOverlay from './NewsOverlay';
@@ -15,9 +15,11 @@ async function confirmWrite(promise){
 const KIND_LABEL={news:'Manchete',tweet:'Tweet',topic:'Trending topic'};
 export default function NewsEditor({channels,notify,onDirty}){
   const [channelId,setChannelId]=useState(''),[items,setItems]=useState([]),[config,setConfig]=useState(DEFAULT_NEWS_CONFIG),[busy,setBusy]=useState(false),[loading,setLoading]=useState(false),[error,setError]=useState(''),[dirty,setDirty]=useState(false),[preview,setPreview]=useState(false);
+  const importHistory=useRef(new Set());
   const operationLock=useRef(false),addLock=useRef({}),feedLock=useRef(false),liveState=useRef(null);
   const [sources,setSources]=useState([]),[sourceId,setSourceId]=useState(''),[feedBusy,setFeedBusy]=useState(false),[feedStatus,setFeedStatus]=useState('');
   const [defaultLiveUrl,setDefaultLiveUrl]=useState(''),[defaultLiveChannel,setDefaultLiveChannel]=useState('');
+  const [brightSnapshot,setBrightSnapshot]=useState('');
   const [feedSources,setFeedSources]=useState([]),[automationEnabled,setAutomationEnabled]=useState(false),[automaticPublish,setAutomaticPublish]=useState(false),[suppressedKeys,setSuppressedKeys]=useState([]),[sourceName,setSourceName]=useState(''),[sourceURL,setSourceURL]=useState(''),[sourceKind,setSourceKind]=useState('news'),[tweetURL,setTweetURL]=useState('');
   const [previewDevice,setPreviewDevice]=useState('desktop');
   const channel=channels.find(c=>c.id===channelId),input=useRef(null),[loadFailed,setLoadFailed]=useState(false);
@@ -28,12 +30,12 @@ export default function NewsEditor({channels,notify,onDirty}){
   useEffect(()=>{
     let active=true;if(!channelId)return;
     setLoading(true);setLoadFailed(false);setItems([]);setConfig(DEFAULT_NEWS_CONFIG);setDirty(false);setError('');
-    setSuppressedKeys([]);setFeedSources([]);setAutomationEnabled(false);setAutomaticPublish(false);
+    importHistory.current=new Set();setSuppressedKeys([]);setFeedSources([]);setAutomationEnabled(false);setAutomaticPublish(false);
     Promise.all([getDoc(doc(db,'newsDrafts',channelId)),getDoc(doc(db,'editorialAutomation',channelId)),getDoc(doc(db,'newsPublished',channelId))]).then(([draft,automation,published])=>{
       if(!active)return;
       if(draft.exists()){const data=draft.data();setItems((Array.isArray(data.items)?data.items:[]).map(p=>normalizeNewsItem(p)));setConfig({...DEFAULT_NEWS_CONFIG,...data.config});if(typeof data.defaultLiveUrl==='string')setDefaultLiveUrl(data.defaultLiveUrl);if(typeof data.defaultLiveChannel==='string')setDefaultLiveChannel(data.defaultLiveChannel);}
       if(published.exists())setItems(list=>mergeEditorial(list,publishableItems(published.data().items||[])));
-      if(automation.exists()){const data=automation.data();setFeedSources(Array.isArray(data.sources)?data.sources:[]);setAutomationEnabled(!!data.enabled);setAutomaticPublish(!!data.autoPublish);setSuppressedKeys(data.suppressedKeys||[]);}
+      if(automation.exists()){const data=automation.data();setFeedSources(Array.isArray(data.sources)?data.sources:[]);setAutomationEnabled(!!data.enabled);setAutomaticPublish(!!data.autoPublish);setSuppressedKeys(data.suppressedKeys||[]);importHistory.current=new Set(data.seenKeys||[]);}
     }).catch(()=>{if(active){setLoadFailed(true);setError('Não foi possível carregar a redação/fontes. Confira a conexão e atualize as regras do Firestore desta versão.');}}).finally(()=>{if(active)setLoading(false);});
     return()=>{active=false;};
   },[channelId]);
@@ -104,23 +106,26 @@ export default function NewsEditor({channels,notify,onDirty}){
     const current=liveState.current;if(feedLock.current||operationLock.current||!current.channelId||current.loading||current.loadFailed)return;
     feedLock.current=true;setFeedBusy(true);const requestChannel=current.channelId;
     try{
-      const incoming=[];let failed=0;
-      for(const source of current.feedSources){try{incoming.push(...await importFeedURL(source))}catch{failed++}}
+      const incoming=[];let failed=0;const failures=[];
+      for(const source of current.feedSources){try{incoming.push(...await importFeedURL(source))}catch(e){failed++;failures.push(`${source.name||'Fonte'}: ${e.message}`)}}
       if(liveState.current.channelId!==requestChannel)return;
-      if(!incoming.length){setFeedStatus(failed?'As fontes não responderam. Confira os links RSS/JSON.':'Nenhum item novo disponível.');return;}
-      const blocked=new Set(liveState.current.suppressedKeys);const allowed=incoming.filter(p=>!blocked.has(editorialKey(p)));const merged=mergeEditorial(liveState.current.items,allowed),added=merged.length-liveState.current.items.length;
-      setItems(merged);if(added)setDirty(true);setFeedStatus(`${added} itens novos · ${failed} fontes indisponíveis.`);
-      if(current.automaticPublish&&added){
-        const known=new Set(liveState.current.items.map(editorialKey));
-        const fresh=allowed.filter(p=>!known.has(editorialKey(p))).map(p=>({...p,approved:true}));
+      if(!incoming.length){setFeedStatus(failed?failures.join(' · '):'Nenhum item novo disponível.');return;}
+      const queue=mergeFeedQueue(liveState.current.items,incoming,liveState.current.suppressedKeys,Date.now(),[...importHistory.current]),merged=queue.items,added=queue.fresh.length;
+      for(const p of [...liveState.current.items.filter(p=>p.autoImported),...queue.fresh])importHistory.current.add(editorialKey(p));
+      setItems(merged);if(added)setDirty(true);setFeedStatus(`${added} itens novos · ${failed} fontes indisponíveis.${failures.length?' '+failures.join(' · '):''}`);
+      if(current.automaticPublish&&merged.some(p=>p.autoImported&&!p.approved&&Number(p.expiresAt)>Date.now())){
+        const fresh=merged.filter(p=>p.autoImported&&!p.approved&&Number(p.expiresAt)>Date.now()).map(p=>({...p,approved:true}));
         if(!current.config.enabled)throw new Error('Ative o pacote gráfico para publicar automaticamente.');
-        let publishedCount=0;
+        let publishedCount=0,publishedItems=[];
         await confirmWrite(runTransaction(db,async transaction=>{
           const target=doc(db,'newsPublished',requestChannel),snapshot=await transaction.get(target),existing=snapshot.exists()?snapshot.data():{};
-          const nowItems=publishableItems(existing.items||[]),newItems=publishableItems(prepareNewsPublication(fresh));
-          const combined=mergeEditorial(nowItems,newItems).slice(0,50);publishedCount=combined.length;
+          const autoRef=doc(db,'editorialAutomation',requestChannel),automation=await transaction.get(autoRef),state=automation.exists()?automation.data():{};
+          const blocked=new Set(state.suppressedKeys||[]);
+          const nowItems=publishableItems(existing.items||[]),newItems=publishableItems(prepareNewsPublication(fresh.filter(p=>!blocked.has(editorialKey(p)))));
+          transaction.set(autoRef,{seenKeys:[...new Set([...(state.seenKeys||[]),...importHistory.current])].slice(-2000)},{merge:true});
+          const combined=mergeEditorial(nowItems,newItems).slice(0,50);publishedCount=combined.length;publishedItems=combined;
           transaction.set(target,{...existing,items:combined,config:existing.config||current.config,updatedAt:Date.now()});
-        }));setFeedStatus(`${publishedCount} itens no ar · ${failed} fontes indisponíveis. Rascunhos manuais preservados.`);
+        }));const publishedMap=new Map(publishedItems.map(p=>[editorialKey(p),p]));setItems(list=>list.map(p=>publishedMap.get(editorialKey(p))||p));setFeedStatus(`${publishedCount} itens no ar · ${failed} fontes indisponíveis. Rascunhos manuais preservados.`);
       }
     }catch(e){setFeedStatus(e.message)}finally{feedLock.current=false;setFeedBusy(false)}
   }
@@ -137,18 +142,19 @@ export default function NewsEditor({channels,notify,onDirty}){
     {loading&&<p>Carregando redação…</p>}{error&&<p className="news-error" role="alert">{error}</p>}
     <fieldset className="news-controls" disabled={loading||busy||!channel||loadFailed||feedBusy}><legend>Exibição na TV</legend>
       <div className="news-feature-toggles">{[['enabled','Ativar pacote gráfico'],['gc','Manchete + subtítulo'],['ticker','Ticker inferior'],['social','Painel de mensagens']].map(([key,label])=><label key={key}><input type="checkbox" checked={!!config[key]} onChange={e=>changeConfig({[key]:e.target.checked})}/><span>{label}</span></label>)}</div>
-      <div className="news-settings-row"><label>Formato do GC<select value={config.gcLayout||'single'} onChange={e=>changeConfig({gcLayout:e.target.value})}><option value="single">Uma manchete · compacto</option><option value="dual">Duas manchetes lado a lado</option></select></label><label>Cor do GC<select value={config.gcColor||'#1676eb'} onChange={e=>changeConfig({gcColor:e.target.value})}>{GC_COLORS.map(c=><option value={c.value} key={c.value}>{c.label}</option>)}{!GC_COLORS.some(c=>c.value===config.gcColor)&&<option value={config.gcColor}>Personalizada</option>}</select></label><label>Cor personalizada<input type="color" value={normalizeGCColor(config.gcColor)} onChange={e=>changeConfig({gcColor:e.target.value})}/></label><label>Alternar manchete<select value={config.interval} onChange={e=>changeConfig({interval:Number(e.target.value)})}><option value={10}>A cada 10 segundos</option><option value={15}>A cada 15 segundos</option><option value={20}>A cada 20 segundos</option><option value={30}>A cada 30 segundos</option><option value={45}>A cada 45 segundos</option><option value={60}>A cada 60 segundos</option></select></label><label>Velocidade da rolagem<select value={config.socialSpeed||34} onChange={e=>changeConfig({socialSpeed:Number(e.target.value)})}><option value={24}>Rápida · 24 s</option><option value={34}>Normal · 34 s</option><option value={48}>Lenta · 48 s</option><option value={64}>Bem lenta · 64 s</option></select></label><span className="news-template-note">TREND Wall · GC responsivo</span></div>
+      <label><input type="checkbox" checked={config.socialOutsideStudio===true} onChange={e=>changeConfig({socialOutsideStudio:e.target.checked})}/> Manter tweets no modo normal em canais de live (padrão desligado)</label><div className="news-settings-row"><label>Formato do GC<select value={config.gcLayout||'single'} onChange={e=>changeConfig({gcLayout:e.target.value})}><option value="single">Uma manchete · compacto</option><option value="dual">Duas manchetes lado a lado</option></select></label><label>Cor do GC<select value={config.gcColor||'#1676eb'} onChange={e=>changeConfig({gcColor:e.target.value})}>{GC_COLORS.map(c=><option value={c.value} key={c.value}>{c.label}</option>)}{!GC_COLORS.some(c=>c.value===config.gcColor)&&<option value={config.gcColor}>Personalizada</option>}</select></label><label>Cor personalizada<input type="color" value={normalizeGCColor(config.gcColor)} onChange={e=>changeConfig({gcColor:e.target.value})}/></label><label>Alternar manchete<select value={config.interval} onChange={e=>changeConfig({interval:Number(e.target.value)})}><option value={10}>A cada 10 segundos</option><option value={15}>A cada 15 segundos</option><option value={20}>A cada 20 segundos</option><option value={30}>A cada 30 segundos</option><option value={45}>A cada 45 segundos</option><option value={60}>A cada 60 segundos</option></select></label><label>Velocidade da rolagem<select value={config.socialSpeed||34} onChange={e=>changeConfig({socialSpeed:Number(e.target.value)})}><option value={24}>Rápida · 24 s</option><option value={34}>Normal · 34 s</option><option value={48}>Lenta · 48 s</option><option value={64}>Bem lenta · 64 s</option></select></label><span className="news-template-note">TREND Wall · GC responsivo</span></div>
     </fieldset>
     <fieldset className="news-controls" disabled={loading||busy||loadFailed||feedBusy}><legend>Live padrão do canal · preencher horários sem programação</legend><label>URL da live<input value={defaultLiveUrl} onChange={e=>{setDefaultLiveUrl(e.target.value);setDirty(true)}} placeholder="https://youtube.com/live/…"/></label><label>Canal para encontrar próximas lives (opcional)<input value={defaultLiveChannel} onChange={e=>{setDefaultLiveChannel(e.target.value);setDirty(true)}} placeholder="@handle ou UC…"/></label><p className="muted">Usada somente quando não existe programa agendado. Clique em Publicar na TV para aplicar; deixe vazia para desativar.</p></fieldset>
     <fieldset className="news-controls" disabled={loading||busy||loadFailed||feedBusy}><legend>Importação simples e automática</legend>
       <div className="news-form-grid"><label>Nome da fonte<input value={sourceName} onChange={e=>setSourceName(e.target.value)} placeholder="Nome do veículo ou perfil"/></label><label>Conteúdo<select value={sourceKind} onChange={e=>setSourceKind(e.target.value)}><option value="news">Notícias</option><option value="tweet">Tweets</option><option value="topic">Trending topics</option></select></label><label className="news-field-wide">Link RSS / JSON<input type="url" value={sourceURL} onChange={e=>setSourceURL(e.target.value)} placeholder="https://…/rss ou https://…/posts.json"/></label></div>
       <button onClick={()=>{try{const url=new URL(sourceURL);if(url.protocol!=='https:')throw new Error();if(feedSources.length>=5){setFeedStatus('Cadastre até 5 fontes.');return}if(feedSources.some(s=>s.url===url.href)){setFeedStatus('Fonte já cadastrada.');return}setFeedSources(list=>[...list,{name:sourceName.trim()||url.hostname,url:url.href,kind:sourceKind}]);setSourceURL('');setSourceName('');setDirty(true)}catch{setFeedStatus('Informe uma URL HTTPS válida de RSS/JSON.')}}}>Adicionar fonte</button>
-      {feedSources.map((source,index)=><p key={source.url}>{source.name} · {source.kind} <button onClick={()=>{setFeedSources(list=>list.filter((_,i)=>i!==index));setDirty(true)}}>Remover</button></p>)}
+      {feedSources.map((source,index)=><p key={source.url||source.snapshotId}>{source.name} · {source.kind} <button onClick={()=>{setFeedSources(list=>list.filter((_,i)=>i!==index));setDirty(true)}}>Remover</button></p>)}
       <label><input type="checkbox" checked={automationEnabled} onChange={e=>{setAutomationEnabled(e.target.checked);setDirty(true)}}/> Atualizar as fontes a cada 5 minutos</label>
       <label><input type="checkbox" checked={automaticPublish} onChange={e=>{setAutomaticPublish(e.target.checked);setDirty(true)}}/> Publicar automaticamente o conteúdo destas fontes</label>
       <button disabled={!feedSources.length} onClick={importSavedFeeds}>Importar fontes agora</button>
       <p className="muted">Sem publicação automática, os itens entram para revisão. Com o painel fechado, use o importador contínuo incluído no projeto. Salve para aplicar suas fontes ao importador.</p>
       <label>Importar um tweet pelo link<input type="url" value={tweetURL} onChange={e=>setTweetURL(e.target.value)} placeholder="https://x.com/perfil/status/…"/></label><button disabled={!tweetURL} onClick={addTweetLink}>Importar tweet</button><p className="muted">Posts públicos, quando o X disponibiliza o texto. Para atualização contínua de tweets, forneça um feed RSS/JSON de um provedor autorizado.</p>
+      <details><summary>Bright Data · importar coleta de tweets</summary><label>ID do snapshot<input value={brightSnapshot} onChange={e=>setBrightSnapshot(e.target.value)} placeholder="s_…"/></label><button onClick={()=>{if(!/^s_[a-z0-9]{6,100}$/i.test(brightSnapshot)){setFeedStatus('Informe um snapshot s_… válido.');return}if(feedSources.length>=5){setFeedStatus('Limite de 5 fontes.');return}if(feedSources.some(s=>s.snapshotId===brightSnapshot)){setFeedStatus('Snapshot já cadastrado.');return}setFeedSources(list=>[...list,{provider:'brightdata',snapshotId:brightSnapshot,name:'Bright Data · '+brightSnapshot,kind:'tweet'}]);setBrightSnapshot('');setDirty(true)}}>Conectar snapshot à fila</button><p className="muted">Configure BRIGHTDATA_API_TOKEN na Vercel. A coleta é criada na Bright Data; aqui importamos até 100 posts do snapshot, com deduplicação e revisão. Não são iniciadas coletas cobradas pelo site.</p></details>
       <details><summary>Fontes antigas configuradas no servidor</summary><button onClick={async()=>{try{const data=await adminRequest('/api/editorial-feed');setSources(data.sources||[]);setSourceId(data.sources?.[0]?.id||'')}catch(e){setFeedStatus(e.message)}}}>Carregar fontes</button><select value={sourceId} onChange={e=>setSourceId(e.target.value)}><option value="">Selecione</option>{sources.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select><button disabled={!sourceId} onClick={refreshFeed}>Importar</button></details>
       {feedStatus&&<p role="status">{feedStatus}</p>}
     </fieldset>

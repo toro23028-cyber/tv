@@ -2,7 +2,7 @@ import {useEffect,useState,useRef} from 'react';
 import {broadcastTime,broadcastDate} from './clock';
 import './editorial-wall.css';
 import {db,doc,onSnapshot} from './firebase';
-import {DEFAULT_NEWS_CONFIG,publishableItems,normalizeGCColor,selectGCHeadlines} from './news';
+import {DEFAULT_NEWS_CONFIG,publishableItems,socialVisible,normalizeGCColor,selectGCHeadlines} from './news';
 
 export default function NewsOverlay({channel,hidden=false,preview,studio=false,program}){
   const socialWindow=useRef(null),socialTrack=useRef(null);
@@ -13,7 +13,7 @@ export default function NewsOverlay({channel,hidden=false,preview,studio=false,p
   },[channel?.id,channel?.newsEnabled,!!preview]);
   useEffect(()=>{const timer=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(timer);},[]);
   const data=preview||published,config={...DEFAULT_NEWS_CONFIG,...data?.config};
-  useEffect(()=>{const view=socialWindow.current,track=socialTrack.current;if(!view||!track)return;const measure=()=>{const distance=Math.max(0,track.scrollHeight-view.clientHeight);track.style.setProperty('--wall-travel',`${-distance}px`);track.style.animationPlayState=distance>0?'running':'paused';};measure();if(typeof ResizeObserver==='undefined'){window.addEventListener('resize',measure);return()=>window.removeEventListener('resize',measure);}const observer=new ResizeObserver(measure);observer.observe(view);observer.observe(track);return()=>observer.disconnect();},[data,hidden,config.enabled]);
+  useEffect(()=>{const view=socialWindow.current,track=socialTrack.current;if(!view||!track)return;const measure=()=>{const distance=Math.max(0,track.scrollHeight-view.clientHeight);track.style.setProperty('--wall-travel',`${-distance}px`);track.style.animationPlayState=distance>0?'running':'paused';};measure();if(typeof ResizeObserver==='undefined'){window.addEventListener('resize',measure);return()=>window.removeEventListener('resize',measure);}const observer=new ResizeObserver(measure);observer.observe(view);observer.observe(track);return()=>observer.disconnect();},[data,hidden,config.enabled,studio,config.socialOutsideStudio]);
   if(hidden||!data||!config.enabled)return null;
   const items=publishableItems(data.items||[],now),news=items.filter(p=>p.kind==='news'),socialItems=items.filter(p=>p.kind==='tweet'||p.kind==='topic');
   const interval=Math.min(120,Math.max(10,Number(config.interval)||20))*1000;
@@ -21,7 +21,8 @@ export default function NewsOverlay({channel,hidden=false,preview,studio=false,p
   const gcHeadlines=selectGCHeadlines(news,index,config.gcLayout==='dual'&&studio);
   if(!gcHeadlines.length&&studio)gcHeadlines.push(null);
   const scrollSeconds=Math.max(24,Math.min(90,Number(config.socialSpeed)||34));
-  const fullTemplate=(studio||!!preview)&&!!config.gc&&!!headline&&!!config.ticker&&news.length>0&&!!config.social&&socialItems.length>0;
+  const showSocial=socialVisible(config,studio,channel);
+  const fullTemplate=(studio||!!preview)&&!!config.gc&&!!headline&&!!config.ticker&&news.length>0&&showSocial&&socialItems.length>0;
   return <div className={`news-overlays ${studio?'studio':''} ${preview?'preview':''} ${fullTemplate?'full-template':''}`} style={{'--gc-accent':normalizeGCColor(config.gcColor)}} aria-label={studio?'Pacote gráfico do modo estúdio':'Informações do canal'}>
     
     {config.gc&&gcHeadlines.map((headline,slot)=><section key={headline?.id||'channel'} className={`news-gc ${slot===1?'gc-secondary':''} ${gcHeadlines.length>1?'gc-dual':''} ${headline?.urgent?'urgent':''} ${headline?.imageUrl?'has-image':''}`} aria-live="polite">
@@ -29,7 +30,7 @@ export default function NewsOverlay({channel,hidden=false,preview,studio=false,p
       {headline?.imageUrl&&<img className="news-gc-thumb" src={headline.imageUrl} alt="" onError={e=>{e.currentTarget.style.visibility='hidden';}}/>}
       <strong>{headline?.title||program?.nome||channel?.nome||'TREND TV'}</strong>{headline?.subtitle&&<p>{headline.subtitle}</p>}
     </section>)}
-    {config.social&&<aside className="social-wall" aria-label="Mensagens e trending topics">
+    {showSocial&&<aside className="social-wall" aria-label="Mensagens e trending topics">
       <header><span>NA CONVERSA</span><b>{socialItems.length} mensagens</b></header>
       {socialItems.length>0?<div className="social-wall-window" ref={socialWindow}><div className="social-wall-track" ref={socialTrack} style={{animationDuration:`${scrollSeconds}s`,animationPlayState:socialItems.length>1?'running':'paused'}}>
         {[0].map(copy=><div className="social-wall-copy" key={copy}>{socialItems.map((item,i)=><article className={`social-card ${item.kind==='topic'?'topic-card':''} ${item.urgent?'urgent':''}`} key={`${item.id}-${copy}`}>

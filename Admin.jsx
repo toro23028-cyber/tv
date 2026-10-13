@@ -1,4 +1,4 @@
-import {hlsURL,autoPlaylistPool} from './automatic-schedule';
+import {hlsURL,autoPlaylistPool,effectiveAutoMode} from './automatic-schedule';
 import {adminRequest} from './editorial-client';
 import Icon from './Icons';
 import {filterPrograms,scheduleWarnings,makeBackup,prepareRestore} from './admin-tools';
@@ -842,7 +842,7 @@ function ChannelEditor({channels,programs,onAdd,onDelete}){
   const [overlayCorner,setOLC]=useState("tr");
   const [overlaySize,setOLS]=useState(64);
 
-  const startEdit=(ch)=>{setAutoConfig({autoMode:ch.autoMode||'off',autoPlaylistIds:ch.autoPlaylistIds||[],autoBlockMinutes:ch.autoBlockMinutes||60,autoShuffle:ch.autoShuffle!==false,autoLiveChannel:ch.autoLiveChannel||ch.defaultLiveChannel||'',autoLiveUrl:ch.autoLiveUrl||ch.defaultLiveUrl||'',autoHlsUrl:ch.autoHlsUrl||''});setStudioEnabled(ch.studioEnabled===true||(ch.studioEnabled===undefined&&ch.newsEnabled===true));setEditing(ch.id);setNome(ch.nome);setLogo(ch.logo);setLT(ch.logoType||"emoji");setLU(ch.logoUrl||null);setCor(ch.cor);setNumber(ch.numero||0);setGcAlways(ch.gcAlways||false);setIsMusic(ch.isMusic||false);setEternity(ch.eternity||false);setEternityDays(ch.eternityDays||1);setOLU(ch.overlayLogoUrl||"");setOLC(ch.overlayCorner||"tr");setOLS(ch.overlaySize||64)};
+  const startEdit=(ch)=>{setAutoConfig({autoMode:effectiveAutoMode(ch),autoPlaylistIds:ch.autoPlaylistIds||autoPlaylistPool(programs,ch).map(p=>p.id),autoBlockMinutes:ch.autoBlockMinutes||60,autoShuffle:ch.autoShuffle!==false,autoLiveChannel:ch.autoLiveChannel||ch.defaultLiveChannel||'',autoLiveUrl:ch.autoLiveUrl||ch.defaultLiveUrl||'',autoHlsUrl:ch.autoHlsUrl||''});setStudioEnabled(ch.studioEnabled===true||(ch.studioEnabled===undefined&&ch.newsEnabled===true));setEditing(ch.id);setNome(ch.nome);setLogo(ch.logo);setLT(ch.logoType||"emoji");setLU(ch.logoUrl||null);setCor(ch.cor);setNumber(ch.numero||0);setGcAlways(ch.gcAlways||false);setIsMusic(ch.isMusic||false);setEternity(ch.eternity||false);setEternityDays(ch.eternityDays||1);setOLU(ch.overlayLogoUrl||"");setOLC(ch.overlayCorner||"tr");setOLS(ch.overlaySize||64)};
   const save=async()=>{
     setSaving(true);
     try {
@@ -863,6 +863,8 @@ function ChannelEditor({channels,programs,onAdd,onDelete}){
 
   return <div style={{display:"flex",flexDirection:"column",gap:8}}>
     {channels.map(ch=><div key={ch.id} style={{padding:16,borderRadius:8,background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.06)"}}>
+      <p style={{fontSize:12,color:'#a9bfd8'}}>Programação: {effectiveAutoMode(ch)==='off'?'manual, reserva desligada':effectiveAutoMode(ch)==='live'?'live + reserva':'reserva automática'} · {autoPlaylistPool(programs,ch).length} fontes aproveitáveis</p>
+      {effectiveAutoMode(ch)==='off'&&<button onClick={async()=>{try{const pool=autoPlaylistPool(programs,{...ch,autoPlaylistIds:[]});if(!pool.length)throw new Error('Este canal precisa de ao menos um programa/playlist com vídeo.');await saveChannelNumber(ch.id,{nome:ch.nome,numero:ch.numero,autoMode:'playlists',autoPlaylistIds:pool.map(p=>p.id),autoShuffle:true,autoBlockMinutes:60},channels)}catch(e){alert(e.message)}}}>Ativar reserva usando o acervo deste canal</button>}
       {editing===ch.id?<div style={{display:"flex",flexDirection:"column",gap:14}}>
         <div style={{display:"flex",gap:12}}>
           <div style={{flex:1}}><label style={lS}>NOME</label><input value={nome} onChange={e=>setNome(e.target.value)} style={{...iS,width:"100%"}}/></div>

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {buildGuideSchedule,getCurProg} from '../schedule.js';
 import {normalizeGCColor} from '../news.js';
-const channel={id:'c',nome:'Notícias',defaultLiveUrl:'https://youtube.com/live/abcdefghijk'};
+const channel={id:'c',autoMode:'off',nome:'Notícias',defaultLiveUrl:'https://youtube.com/live/abcdefghijk'};
 test('live padrão cobre lacunas hoje e amanhã sem alterar o programa agendado',()=>{
  const scheduled={id:'p',canalId:'c',data:'2026-10-12',nome:'Playlist',horarioInicio:3600,duracao:3600,youtubeId:'12345678901'};
  const guide=buildGuideSchedule([scheduled],'c',channel,'2026-10-12');
