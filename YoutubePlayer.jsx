@@ -49,6 +49,7 @@ export default function YoutubePlayer({videoId,identity,position,muted,isLive=fa
         playerVars:{autoplay:1,mute:1,controls:0,disablekb:1,rel:0,playsinline:1,fs:0,start:latest.current.isLive?0:Math.floor(latest.current.position()),origin:window.location.origin},
         events:{
           onReady:event=>{if(cancelled)return;const p=event.target;if(!latest.current.isLive)p.seekTo(latest.current.position(),true);latest.current.muted?p.mute():p.unMute();p.playVideo();latest.current.onLowLatencyStatus?.(latest.current.lowLatency?'checking':'off');latest.current.onPlaybackIssue?.('');},
+          onStateChange:event=>{if(event.data===0){try{event.target.setPlaybackRate(1)}catch{}latest.current.onLowLatencyStatus?.('off')}},
           onPlaybackRateChange:event=>{if(!cancelled&&latest.current.isLive&&latest.current.lowLatency)latest.current.onLowLatencyStatus?.(event.data===2?'catching_up':'synced');},
           onAutoplayBlocked:()=>latest.current.onPlaybackIssue?.('Toque em Reproduzir para iniciar o vídeo.'),
           onError:event=>{

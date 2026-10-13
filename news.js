@@ -1,4 +1,4 @@
-export const DEFAULT_NEWS_CONFIG={enabled:false,ticker:true,gc:true,social:true,interval:20,socialSpeed:34,corner:'tr',template:'trend-wall-v2',gcColor:'#1676eb'};
+export const DEFAULT_NEWS_CONFIG={enabled:false,ticker:true,gc:true,social:true,interval:20,socialSpeed:34,corner:'tr',template:'trend-wall-v2',gcColor:'#1676eb',gcLayout:'single'};
 export const NEWS_WORD_LIMIT=12;
 export const NEWS_LIMITS={headline:78,subtitle:130,tweet:160,topic:54,source:48,category:28};
 export const countWords=value=>String(value||'').trim().split(/\s+/).filter(Boolean).length;
@@ -60,3 +60,9 @@ export function mergeEditorial(current,incoming){return dedupeEditorial([...curr
 
 export const GC_COLORS=[{label:'Azul',value:'#1676eb'},{label:'Vermelho',value:'#c6283e'},{label:'Verde',value:'#087f62'},{label:'Roxo',value:'#7643c7'},{label:'Laranja',value:'#b85b08'}];
 export const normalizeGCColor=value=>/^#[0-9a-f]{6}$/i.test(String(value||''))?value:'#1676eb';
+
+export function selectGCHeadlines(news,index,dual=false){
+ if(!news.length)return [];
+ const first=news[index%news.length];
+ return dual&&news.length>1?[first,news[(index+1)%news.length]]:[first];
+}

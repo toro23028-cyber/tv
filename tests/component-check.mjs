@@ -30,6 +30,10 @@ try{
  assert.equal((studioHTML.match(/class="social-card/g)||[]).length,1);checks++;
  const emptyHTML=render(h(NewsOverlay,{studio:true,channel,program:{nome:'Live padrão'},preview:{items:[],config:{enabled:true,gc:true}}}));assert.match(emptyHTML,/Live padrão/);assert.match(emptyHTML,/news-gc-clock/);checks++;
  const disabledHTML=render(h(NewsOverlay,{studio:true,preview:{...preview,config:{enabled:true,gc:false,social:false,ticker:false}}}));assert.doesNotMatch(disabledHTML,/news-gc-clock/);checks++;
+ const dualPreview={items:[...items,{...items[0],id:'n2',title:'Segunda manchete'}],config:{...preview.config,gcLayout:'dual'}};
+ const dualHTML=render(h(NewsOverlay,{preview:dualPreview,studio:true}));assert.match(dualHTML,/gc-secondary/);assert.equal((dualHTML.match(/news-gc-clock/g)||[]).length,1);assert.match(dualHTML,/Segunda manchete/);checks++;
+ const {default:NewsEditor}=await server.ssrLoadModule('/NewsEditor.jsx');const editorHTML=render(h(NewsEditor,{channels:[channel],notify(){}}));assert.match(editorHTML,/Importar um tweet pelo link/);assert.match(editorHTML,/Publicar automaticamente/);assert.match(editorHTML,/Duas manchetes lado a lado/);checks++;
+ const {default:HlsPlayer}=await server.ssrLoadModule('/HlsPlayer.jsx');const hlsHTML=render(h(HlsPlayer,{url:'https://example.com/live.m3u8',muted:true}));assert.match(hlsHTML,/<video/);assert.doesNotMatch(hlsHTML,/iframe/);checks++;
  const data=await server.ssrLoadModule('/admin-data.js'),mock=await server.ssrLoadModule('/tests/fixtures/firebase.js');
  Object.defineProperty(globalThis,'navigator',{value:{onLine:false},configurable:true});
  await assert.rejects(data.commitPrograms([{id:'p',nome:'teste'}]),/Sem conexão/);assert.equal(mock.state.writes,0);checks++;

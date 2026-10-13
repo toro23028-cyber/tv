@@ -26,6 +26,7 @@ service cloud.firestore {
         && request.resource.data.horarioInicio >= 0 && request.resource.data.horarioInicio < 86400;
       allow delete: if isAdmin();
     }
+    match /editorialAutomation/{id} { allow read, write: if isAdmin(); }
     match /newsDrafts/{id} { allow read, write: if isAdmin(); }
     match /newsPublished/{id} { allow read: if true; allow write: if isAdmin(); }
     match /{document=**} { allow read, write: if false; }

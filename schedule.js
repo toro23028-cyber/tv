@@ -1,3 +1,4 @@
+import {fillAutomaticSchedule} from './automatic-schedule.js';
 import {getToday,getNow,dateSecondsToAbsolute,absoluteToDateSeconds,fmtHM} from './clock.js';
 import {extractYouTubeId} from './youtube-id.js';
 export const DAY = 86400;
@@ -102,16 +103,18 @@ export function getVideoPlaybackInfo(prog,now=getNow()) {
   }
 }
 export function getTodayPrograms(programs,channels,date=getToday()) {
-  return Object.fromEntries(channels.filter(c=>!c.isInfo).map(c=>[c.id,buildSchedule(programs,c.id,c,date).filter(p=>!p.isPlaceholder)]));
+  return Object.fromEntries(channels.filter(c=>!c.isInfo).map(c=>[c.id,buildGuideSchedule(programs,c.id,c,date).filter(p=>!p.isPlaceholder&&p.horarioInicio<DAY)]));
 }
 export const guideTime = seconds => `${seconds>=DAY?'Amanhã · ':''}${fmtHM(mod(seconds,DAY))}`;
 // Keep daily playback semantics, but expose a continuous two-day guide timeline.
 export function buildGuideSchedule(programs,channelId,channel,date=getToday()) {
   const tomorrow=absoluteToDateSeconds(dateSecondsToAbsolute(date)+DAY).date;
-  return applyChannelLiveFallback([date,tomorrow].flatMap((day,index)=>buildSchedule(programs,channelId,channel,day).map(p=>({
+  const guide=[date,tomorrow].flatMap((day,index)=>buildSchedule(programs,channelId,channel,day).map(p=>({
     ...p,horarioInicio:p.horarioInicio+index*DAY,horarioFim:p.horarioFim+index*DAY,
     horarioTexto:guideTime(p.horarioInicio+index*DAY),horarioFimTexto:guideTime(p.horarioFim+index*DAY),
-  }))),channel);
+  })));
+  const automatic=fillAutomaticSchedule(guide,programs,channel,date);
+  return (channel?.autoMode&&channel.autoMode!=='off'?automatic:applyChannelLiveFallback(automatic,channel)).map(p=>({...p,horarioTexto:guideTime(p.horarioInicio),horarioFimTexto:guideTime(p.horarioFim)}));
 }
 export function thumbnailForProgram(p) {
   if(!p || p.isPlaceholder) return null;
@@ -120,7 +123,7 @@ export function thumbnailForProgram(p) {
   return id?`https://i.ytimg.com/vi/${id}/hqdefault.jpg`:null;
 }
 export function getThumbnailForChannel(programs,channels,id) {
-  const ch=channels.find(c=>c.id===id); return ch?thumbnailForProgram(getCurProg(buildSchedule(programs,id,ch))):null;
+  const ch=channels.find(c=>c.id===id); return ch?thumbnailForProgram(getCurProg(buildGuideSchedule(programs,id,ch))):null;
 }
 export function buildScheduleAdmin(programs,id,ch,date){
   const day=dateSecondsToAbsolute(date);

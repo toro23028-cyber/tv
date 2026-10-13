@@ -2,7 +2,7 @@ import {useEffect,useState,useRef} from 'react';
 import {broadcastTime,broadcastDate} from './clock';
 import './editorial-wall.css';
 import {db,doc,onSnapshot} from './firebase';
-import {DEFAULT_NEWS_CONFIG,publishableItems,normalizeGCColor} from './news';
+import {DEFAULT_NEWS_CONFIG,publishableItems,normalizeGCColor,selectGCHeadlines} from './news';
 
 export default function NewsOverlay({channel,hidden=false,preview,studio=false,program}){
   const socialWindow=useRef(null),socialTrack=useRef(null);
@@ -18,15 +18,17 @@ export default function NewsOverlay({channel,hidden=false,preview,studio=false,p
   const items=publishableItems(data.items||[],now),news=items.filter(p=>p.kind==='news'),socialItems=items.filter(p=>p.kind==='tweet'||p.kind==='topic');
   const interval=Math.min(120,Math.max(10,Number(config.interval)||20))*1000;
   const index=Math.floor(now/interval),headline=news[index%Math.max(1,news.length)];
+  const gcHeadlines=selectGCHeadlines(news,index,config.gcLayout==='dual'&&studio);
+  if(!gcHeadlines.length&&studio)gcHeadlines.push(null);
   const scrollSeconds=Math.max(24,Math.min(90,Number(config.socialSpeed)||34));
   const fullTemplate=(studio||!!preview)&&!!config.gc&&!!headline&&!!config.ticker&&news.length>0&&!!config.social&&socialItems.length>0;
   return <div className={`news-overlays ${studio?'studio':''} ${preview?'preview':''} ${fullTemplate?'full-template':''}`} style={{'--gc-accent':normalizeGCColor(config.gcColor)}} aria-label={studio?'Pacote gráfico do modo estúdio':'Informações do canal'}>
     
-    {(config.gc&&(headline||studio))&&<section key={headline?.id||'channel'} className={`news-gc ${headline?.urgent?'urgent':''} ${headline?.imageUrl?'has-image':''}`} aria-live="polite">
-      <span className="news-gc-label"><b>{headline?.urgent?'URGENTE':headline?.category||'EM PAUTA'}</b><i>{headline?.source||channel?.nome}</i></span>{studio&&<div className="news-gc-clock"><time>{broadcastTime(new Date(now))}</time><small>{broadcastDate(new Date(now),{day:'2-digit',month:'2-digit'})} · {program?.isLive?'AO VIVO':'TREND TV'}</small></div>}
+    {config.gc&&gcHeadlines.map((headline,slot)=><section key={headline?.id||'channel'} className={`news-gc ${slot===1?'gc-secondary':''} ${gcHeadlines.length>1?'gc-dual':''} ${headline?.urgent?'urgent':''} ${headline?.imageUrl?'has-image':''}`} aria-live="polite">
+      <span className="news-gc-label"><b>{headline?.urgent?'URGENTE':headline?.category||'EM PAUTA'}</b><i>{headline?.source||channel?.nome}</i></span>{studio&&slot===0&&<div className="news-gc-clock"><time>{broadcastTime(new Date(now))}</time><small>{broadcastDate(new Date(now),{day:'2-digit',month:'2-digit'})} · {program?.isLive?'AO VIVO':'TREND TV'}</small></div>}
       {headline?.imageUrl&&<img className="news-gc-thumb" src={headline.imageUrl} alt="" onError={e=>{e.currentTarget.style.visibility='hidden';}}/>}
       <strong>{headline?.title||program?.nome||channel?.nome||'TREND TV'}</strong>{headline?.subtitle&&<p>{headline.subtitle}</p>}
-    </section>}
+    </section>)}
     {config.social&&<aside className="social-wall" aria-label="Mensagens e trending topics">
       <header><span>NA CONVERSA</span><b>{socialItems.length} mensagens</b></header>
       {socialItems.length>0?<div className="social-wall-window" ref={socialWindow}><div className="social-wall-track" ref={socialTrack} style={{animationDuration:`${scrollSeconds}s`,animationPlayState:socialItems.length>1?'running':'paused'}}>

@@ -1,3 +1,4 @@
+import {hlsURL,autoPlaylistPool} from './automatic-schedule';
 import {adminRequest} from './editorial-client';
 import Icon from './Icons';
 import {filterPrograms,scheduleWarnings,makeBackup,prepareRestore} from './admin-tools';
@@ -384,6 +385,8 @@ export function ProgramModal({mode,program,channels,selectedChannel,selectedDate
   const [customS,setCS]=useState(Number(program?.duracao||0)%60);
   const [videos,setVideos]=useState(program?.videos||[{youtubeUrl:program?.youtubeId||"",titulo:""}]);
   const [isLive,setIsLive]=useState(!!program?.isLive);
+  const [hlsUrl,setHlsUrl]=useState(program?.hlsUrl||'');
+  const [playlistSourceUrl,setPlaylistSourceUrl]=useState(program?.playlistSourceUrl||''),[playlistAutoSync,setPlaylistAutoSync]=useState(!!program?.playlistAutoSync);
   const [liveUrl,setLiveUrl]=useState(program?.liveUrl||""),[liveResolving,setLiveResolving]=useState(false);
   const [liveChannel,setLiveChannel]=useState(program?.liveChannel||program?.liveChannelId||"");
   useEffect(()=>{const id=extractYouTubeId(liveUrl);if(!isLive||!id)return;let active=true;const controller=new AbortController();const timer=setTimeout(async()=>{setLiveResolving(true);try{const meta=await adminRequest(`/api/youtube-source?video=${encodeURIComponent(id)}`,{signal:controller.signal});if(active){setLiveChannel(v=>v||meta.channelId||'');setNome(v=>v||meta.title||'');md();if(!meta.embeddable)setError('Esta live não permite incorporação.');}}catch(e){if(active&&e.name!=='AbortError')setError(e.message)}finally{if(active)setLiveResolving(false)}},800);return()=>{active=false;clearTimeout(timer);controller.abort();setLiveResolving(false);};},[isLive,liveUrl]);
@@ -415,7 +418,7 @@ export function ProgramModal({mode,program,channels,selectedChannel,selectedDate
   // Modelos são privados do canal e nunca participam da grade de transmissão.
   const templates=existingPrograms.filter(p=>p.isTemplate&&!p.isJingle&&p.canalId===canalId).sort((a,b)=>a.nome.localeCompare(b.nome));
   const applyTemplate=(t)=>{
-    setNome(t.nome);setIsLive(!!t.isLive);setLiveUrl(t.liveUrl||"");setLiveChannel(t.liveChannel||t.liveChannelId||"");
+    setHlsUrl(t.hlsUrl||'');setPlaylistSourceUrl(t.playlistSourceUrl||'');setPlaylistAutoSync(!!t.playlistAutoSync);setNome(t.nome);setIsLive(!!t.isLive);setLiveUrl(t.liveUrl||"");setLiveChannel(t.liveChannel||t.liveChannelId||"");
     setClassificacao(t.classificacao||"L");
     setTags(t.tags||["HD"]);
     setSinopse(t.sinopse||randomProgramDescription());
@@ -441,7 +444,7 @@ export function ProgramModal({mode,program,channels,selectedChannel,selectedDate
   const horIn=isTemplate?0:startMode==='custom'?Number(startH)*3600+Number(startM)*60+(isEdit?Number(program.horarioInicio)%60:0):autoStart;
   const horFim=horIn+dur;
   const hasOverlap=!isTemplate&&findConflicts(existingPrograms,{id:program?.id,canalId,data:selectedDate,horarioInicio:horIn,duracao:dur,isJingle},selectedCh).length>0;
-  const signature=JSON.stringify({nome,canalId,classificacao,tags,sinopse,durationPreset,customH,customM,customS,videos,isLive,liveChannel,liveUrl,thumbnailType,thumbnailUrl,gcAlways,gcNever,maratona,blocoDuracao,isTemplate,isJingle,jingleType,overlayLogoUrl,overlayCorner,overlaySize,startMode,startH,startM});
+  const signature=JSON.stringify({hlsUrl,playlistSourceUrl,playlistAutoSync,nome,canalId,classificacao,tags,sinopse,durationPreset,customH,customM,customS,videos,isLive,liveChannel,liveUrl,thumbnailType,thumbnailUrl,gcAlways,gcNever,maratona,blocoDuracao,isTemplate,isJingle,jingleType,overlayLogoUrl,overlayCorner,overlaySize,startMode,startH,startM});
   const initialSignature=useRef(signature);
   const hasChanges=dirty||signature!==initialSignature.current;
   useEffect(()=>{const handler=e=>{if(hasChanges){e.preventDefault();e.returnValue='';}};window.addEventListener('beforeunload',handler);return()=>window.removeEventListener('beforeunload',handler);},[hasChanges]);
@@ -456,8 +459,10 @@ export function ProgramModal({mode,program,channels,selectedChannel,selectedDate
     if(!canalId){setError('Selecione um canal.');return;}
     if(!Number.isInteger(horIn)||horIn<0||horIn>=86400){setError('Este dia já terminou. Selecione o dia seguinte ou ajuste o horário.');return;}
     if(hasOverlap){setError("Conflito de horário!");return}
+    if(!isLive&&playlistAutoSync&&!extractPlaylistId(playlistSourceUrl)){setError('Informe uma URL de playlist válida para sincronização.');return}
     const resolvedLiveChannel=normalizeYouTubeChannel(liveChannel);
-    if(isLive&&!extractYouTubeId(liveUrl)&&!resolvedLiveChannel){setError('Informe o ID do canal, uma URL /channel/UC... ou o link/@handle do canal.');return;}
+    if(isLive&&!hlsURL(hlsUrl)&&!extractYouTubeId(liveUrl)&&!resolvedLiveChannel){setError('Informe o ID do canal, uma URL /channel/UC... ou o link/@handle do canal.');return;}
+    if(isLive&&hlsUrl.trim()&&!hlsURL(hlsUrl)){setError('URL HLS inválida. Use HTTPS.');return}
     if(isLive&&liveUrl.trim()&&!extractYouTubeId(liveUrl)){setError('URL da live inválida. Use o link de um vídeo/live do YouTube.');return;}
     if(!isLive&&!isTemplate&&!videos.length){setError('Adicione um vídeo ou playlist.');return;}
     if(!isLive&&!isTemplate&&!videos.some(v=>v.youtubeUrl?.trim())){setError('Adicione um vídeo ou playlist.');return;}
@@ -477,7 +482,7 @@ export function ProgramModal({mode,program,channels,selectedChannel,selectedDate
     
     setSaving(true);
     try {
-      await onSave({id:isEdit?program.id:`prog_${crypto.randomUUID()}`,nome,canalId,classificacao,tags,sinopse:finalSinopse,data:selectedDate,duracao:dur,horarioInicio:horIn,horarioFim:horFim,youtubeId:isLive?"":videos.find(v=>v.youtubeUrl?.trim())?.youtubeUrl||"",videos:isLive?[]:videos.filter(v=>v.youtubeUrl?.trim()),isLive,liveUrl:isLive?liveUrl.trim():"",liveChannel:isLive?resolvedLiveChannel||"":"",thumbnailType,thumbnailUrl,gcAlways,maratona,blocoDuracao:Number(blocoDuracao)||BLOCO_PADRAO,isTemplate,gcNever,isJingle,jingleType:isJingle?jingleType:"",overlayLogoUrl:overlayLogoUrl.trim()||null,overlayCorner:overlayCorner||"",overlaySize:overlaySize||null});
+      await onSave({id:isEdit?program.id:`prog_${crypto.randomUUID()}`,nome,canalId,classificacao,tags,sinopse:finalSinopse,data:selectedDate,duracao:dur,horarioInicio:horIn,horarioFim:horFim,playlistSourceUrl:isLive?"":playlistSourceUrl.trim(),playlistAutoSync:!isLive&&playlistAutoSync,youtubeId:isLive?"":videos.find(v=>v.youtubeUrl?.trim())?.youtubeUrl||"",hlsUrl:isLive?hlsUrl.trim():'',sourceType:isLive&&hlsUrl.trim()?'hls':'youtube',videos:isLive?[]:videos.filter(v=>v.youtubeUrl?.trim()),isLive,liveUrl:isLive?liveUrl.trim():"",liveChannel:isLive?resolvedLiveChannel||"":"",thumbnailType,thumbnailUrl,gcAlways,maratona,blocoDuracao:Number(blocoDuracao)||BLOCO_PADRAO,isTemplate,gcNever,isJingle,jingleType:isJingle?jingleType:"",overlayLogoUrl:overlayLogoUrl.trim()||null,overlayCorner:overlayCorner||"",overlaySize:overlaySize||null});
       setSaving(false);
     } catch(err) {
       console.error("Erro ao salvar:",err);
@@ -517,12 +522,17 @@ export function ProgramModal({mode,program,channels,selectedChannel,selectedDate
         {/* Fonte do programa: playlists seguem o player e o sincronismo normais; lives são descobertas pelo canal. */}
         <div style={{padding:14,border:"1px solid rgba(255,255,255,.1)",borderRadius:8,background:"rgba(255,255,255,.025)"}}>
           <label style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer",fontSize:13,fontWeight:700,color:isLive?"#ff6b70":"#d5dfed"}}><input type="checkbox" checked={isLive} onChange={e=>{setIsLive(e.target.checked);md()}}/> ESTE PROGRAMA É UMA LIVE DO YOUTUBE</label>
+          {isLive&&<label style={{display:'grid',gap:6,marginTop:12}}>Transmissão HLS / m3u8 (opcional, tem prioridade)<input type="url" value={hlsUrl} onChange={e=>{setHlsUrl(e.target.value);md()}} placeholder="https://…/live.m3u8" style={iS}/></label>}
           {isLive&&<div style={{marginTop:12}}><label style={lS}>URL DA LIVE · REPRODUÇÃO IMEDIATA</label><input value={liveUrl} onChange={e=>{setLiveUrl(e.target.value);setLiveChannel("");md()}} placeholder="https://youtube.com/live/… ou https://youtu.be/…" style={{...iS,width:'100%'}}/><small>{liveResolving?"Identificando o canal… ":""}Esse link toca imediatamente. O canal abaixo é opcional e permite descobrir a próxima live automaticamente.</small></div>}
           {isLive&&<div style={{marginTop:12}}><label style={lS}>CANAL DO YOUTUBE PARA BUSCA AUTOMÁTICA</label><input value={liveChannel} onChange={e=>{setLiveChannel(e.target.value);md()}} placeholder="ID UC..., link do canal ou @handle" style={{...iS,width:"100%"}}/><small style={{display:"block",marginTop:6,color:"#99a9bd",lineHeight:1.5}}>A TV procura transmissões públicas ativas desse canal e troca o vídeo automaticamente. A consulta ao YouTube é atualizada em ciclos de aproximadamente 15 minutos. Na Vercel, permita o ID UC do canal; você o encontra no YouTube Studio → Configurações → Canal → Configurações avançadas. Cole o ID UC..., a URL /channel/UC... ou o link/@handle do canal, não o link de uma live específica.</small></div>}
         </div>
 
         {/* Videos */}
         {!isLive&&<div>
+          <label style={lS}>PLAYLIST ORIGINAL · SINCRONIZAÇÃO DIÁRIA ÀS 22H</label><input style={{...iS,width:'100%'}} value={playlistSourceUrl} onChange={e=>{setPlaylistSourceUrl(e.target.value);md()}} placeholder="https://youtube.com/playlist?list=…"/>
+          <label style={{display:'flex',gap:8,margin:'10px 0'}}><input type="checkbox" checked={playlistAutoSync} onChange={e=>{setPlaylistAutoSync(e.target.checked);md()}}/> Atualizar automaticamente a partir desta playlist</label><small>Requer o importador contínuo configurado com a chave do YouTube. Mantém a duração e os horários da grade; a TV preserva a playlist já em reprodução até o próximo bloco.</small>
+          <button type="button" onClick={async()=>{const id=extractPlaylistId(playlistSourceUrl);if(!id){setError('Cole uma URL de playlist válida.');return}const imported=await fetchYouTubePlaylistItems(id);if(!imported.length){setError(window.__ytLastError||'Playlist vazia.');return}setVideos(imported);md()}}>Buscar e importar playlist agora</button>
+
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8,flexWrap:"wrap",gap:6}}>
             <label style={{...lS,marginBottom:0}}>VÍDEOS / PLAYLIST</label>
             <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
@@ -813,7 +823,7 @@ export function ProgramModal({mode,program,channels,selectedChannel,selectedDate
 // ============================================
 // CHANNEL EDITOR
 // ============================================
-function ChannelEditor({channels,onAdd,onDelete}){
+function ChannelEditor({channels,programs,onAdd,onDelete}){
   const [editing,setEditing]=useState(null);
   const [nome,setNome]=useState("");
   const [numero,setNumber]=useState(0);
@@ -825,16 +835,23 @@ function ChannelEditor({channels,onAdd,onDelete}){
   const [isMusic,setIsMusic]=useState(false);
   const [eternity,setEternity]=useState(false);
   const [eternityDays,setEternityDays]=useState(1);
+  const [autoConfig,setAutoConfig]=useState({autoMode:'off',autoPlaylistIds:[],autoBlockMinutes:60,autoShuffle:true,autoLiveChannel:'',autoLiveUrl:'',autoHlsUrl:''});
+  const [studioEnabled,setStudioEnabled]=useState(false);
   const [saving,setSaving]=useState(false);
   const [overlayLogoUrl,setOLU]=useState("");
   const [overlayCorner,setOLC]=useState("tr");
   const [overlaySize,setOLS]=useState(64);
 
-  const startEdit=(ch)=>{setEditing(ch.id);setNome(ch.nome);setLogo(ch.logo);setLT(ch.logoType||"emoji");setLU(ch.logoUrl||null);setCor(ch.cor);setNumber(ch.numero||0);setGcAlways(ch.gcAlways||false);setIsMusic(ch.isMusic||false);setEternity(ch.eternity||false);setEternityDays(ch.eternityDays||1);setOLU(ch.overlayLogoUrl||"");setOLC(ch.overlayCorner||"tr");setOLS(ch.overlaySize||64)};
+  const startEdit=(ch)=>{setAutoConfig({autoMode:ch.autoMode||'off',autoPlaylistIds:ch.autoPlaylistIds||[],autoBlockMinutes:ch.autoBlockMinutes||60,autoShuffle:ch.autoShuffle!==false,autoLiveChannel:ch.autoLiveChannel||ch.defaultLiveChannel||'',autoLiveUrl:ch.autoLiveUrl||ch.defaultLiveUrl||'',autoHlsUrl:ch.autoHlsUrl||''});setStudioEnabled(ch.studioEnabled===true||(ch.studioEnabled===undefined&&ch.newsEnabled===true));setEditing(ch.id);setNome(ch.nome);setLogo(ch.logo);setLT(ch.logoType||"emoji");setLU(ch.logoUrl||null);setCor(ch.cor);setNumber(ch.numero||0);setGcAlways(ch.gcAlways||false);setIsMusic(ch.isMusic||false);setEternity(ch.eternity||false);setEternityDays(ch.eternityDays||1);setOLU(ch.overlayLogoUrl||"");setOLC(ch.overlayCorner||"tr");setOLS(ch.overlaySize||64)};
   const save=async()=>{
     setSaving(true);
     try {
-      const updated = {nome,numero,logo,logoType,logoUrl,cor,gcAlways,isMusic,eternity,eternityDays:Number(eternityDays)||1,overlayLogoUrl:overlayLogoUrl.trim()||null,overlayCorner:overlayCorner||"tr",overlaySize:Number(overlaySize)||64};
+      if(autoConfig.autoMode!=='off'&&!autoPlaylistPool(programs,autoConfig).length)throw new Error('Selecione ao menos uma playlist/programa de reserva.');
+      if(autoConfig.autoMode==='live'&&!autoConfig.autoHlsUrl&&!autoConfig.autoLiveUrl&&!autoConfig.autoLiveChannel)throw new Error('Informe a fonte de live do canal.');
+      if(autoConfig.autoHlsUrl&&!hlsURL(autoConfig.autoHlsUrl))throw new Error('Informe uma URL HTTPS de stream HLS.');
+      if(autoConfig.autoLiveUrl&&!extractYouTubeId(autoConfig.autoLiveUrl))throw new Error('URL da live do YouTube inválida.');
+      if(autoConfig.autoLiveChannel&&!normalizeYouTubeChannel(autoConfig.autoLiveChannel))throw new Error('Canal do YouTube inválido.');
+      const updated = {...autoConfig,autoLiveChannel:normalizeYouTubeChannel(autoConfig.autoLiveChannel)||'',autoLiveCheckedAt:0,autoLiveStatus:'unknown',autoHlsStatus:'unknown',autoLiveVideoId:'',autoLiveTitle:'',studioEnabled,nome,numero,logo,logoType,logoUrl,cor,gcAlways,isMusic,eternity,eternityDays:Number(eternityDays)||1,overlayLogoUrl:overlayLogoUrl.trim()||null,overlayCorner:overlayCorner||"tr",overlaySize:Number(overlaySize)||64};
       await saveChannelNumber(editing,updated,channels);
       setEditing(null);
     } catch(err) {
@@ -875,6 +892,16 @@ function ChannelEditor({channels,onAdd,onDelete}){
               <div><div style={{fontSize:13,fontWeight:600,color:gcAlways?"#ce93d8":"#ccc"}}>♪ GC sempre ativo neste canal</div>
               <div style={{fontSize:11,color:"#777"}}>Escolha manual: o GC fica fixo na tela em todos os programas (canais comuns não têm GC automático)</div></div>
             </label>
+            <fieldset style={{border:'1px solid #38506d',padding:16,borderRadius:10}}><legend>Programação automática · preencher lacunas</legend>
+              <label>Tipo<select value={autoConfig.autoMode} onChange={e=>setAutoConfig(c=>({...c,autoMode:e.target.value}))}><option value="off">Somente grade manual</option><option value="playlists">Playlists aleatórias</option><option value="live">Live + playlists de reserva</option></select></label>
+              <label>Duração de cada bloco<select value={autoConfig.autoBlockMinutes} onChange={e=>setAutoConfig(c=>({...c,autoBlockMinutes:Number(e.target.value)}))}>{[15,30,60,120,180].map(n=><option key={n} value={n}>{n} minutos</option>)}</select></label>
+              <label><input type="checkbox" checked={autoConfig.autoShuffle} onChange={e=>setAutoConfig(c=>({...c,autoShuffle:e.target.checked}))}/> Embaralhar vídeos dentro de cada bloco</label>
+              {autoConfig.autoMode==='live'&&<><label>Canal do YouTube para lives<input value={autoConfig.autoLiveChannel} onChange={e=>setAutoConfig(c=>({...c,autoLiveChannel:e.target.value}))} placeholder="@handle ou UC…"/></label><label>URL inicial da live<input value={autoConfig.autoLiveUrl} onChange={e=>setAutoConfig(c=>({...c,autoLiveUrl:e.target.value}))} placeholder="https://youtube.com/live/…"/></label><label>Ou transmissão HLS / m3u8<input type="url" value={autoConfig.autoHlsUrl} onChange={e=>setAutoConfig(c=>({...c,autoHlsUrl:e.target.value}))} placeholder="https://…/live.m3u8"/></label></>}
+              <p>Base de reserva: selecione programas/modelos de músicas, documentários ou programas com vídeos válidos. A grade manual sempre tem prioridade.</p>
+              <div style={{maxHeight:240,overflowY:'auto'}}>{programs.filter(p=>!p.isLive&&!p.isJingle&&(p.videos?.length||p.youtubeId)).map(p=><label key={p.id} style={{display:'flex',gap:8,margin:6}}><input type="checkbox" checked={autoConfig.autoPlaylistIds.includes(p.id)} onChange={e=>setAutoConfig(c=>({...c,autoPlaylistIds:e.target.checked?[...c.autoPlaylistIds,p.id]:c.autoPlaylistIds.filter(id=>id!==p.id)}))}/>{p.nome} {p.isTemplate?'· modelo':''}</label>)}</div>
+              <small>Selecione reservas também nos canais de live. Novas lives são pesquisadas pelo importador contínuo; a TV também consulta enquanto o canal está aberto.</small>
+            </fieldset>
+            <label style={{display:"flex",gap:10,alignItems:"center"}}><input type="checkbox" checked={studioEnabled} onChange={e=>setStudioEnabled(e.target.checked)}/> Permitir modo estúdio neste canal (padrão ao abrir)</label>
             <label style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:eternity?"rgba(0,188,212,0.10)":"rgba(255,255,255,0.02)",border:eternity?"1px solid rgba(0,188,212,0.4)":"1px solid rgba(255,255,255,0.06)",borderRadius:6,cursor:"pointer"}}>
               <input type="checkbox" checked={eternity} onChange={e=>setEternity(e.target.checked)} style={{width:16,height:16,accentColor:"#00bcd4",cursor:"pointer"}}/>
               <div style={{flex:1}}><div style={{fontSize:13,fontWeight:600,color:eternity?"#4dd0e1":"#ccc"}}>∞ Modo Eternity</div>
@@ -1445,7 +1472,7 @@ Deseja continuar?`))return;
 
       {tab==='news'&&<NewsEditor channels={channels} notify={notify} onDirty={setNewsDirty}/>}
       {tab==='jingles'&&<JinglesTab programs={programs} channels={channels} selCh={selCh} setSelCh={setSelCh} dates={dates} selDate={selDate} setSelDate={setSelDate} notify={notify}/>}
-      {tab==="channels"&&<ChannelEditor channels={channels} onAdd={addChannel} onDelete={delChannel}/>} 
+      {tab==="channels"&&<ChannelEditor channels={channels} programs={programs} onAdd={addChannel} onDelete={delChannel}/>} 
 
     </div>
 

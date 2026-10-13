@@ -1,7 +1,10 @@
+import {studioAllowed,channelDisplayMode,toggleFullscreen} from './player-policy';
 import Icon from './Icons';
 import {useSearchParams,useNavigate} from 'react-router-dom';
 import {useCatalog} from './Catalog';
 import {useFavorites,readPreference,writePreference,shareChannel} from './preferences';
+import {lazy,Suspense} from 'react';
+const HlsPlayer=lazy(()=>import('./HlsPlayer'));
 import YoutubePlayer from './YoutubePlayer';
 import NewsOverlay from './NewsOverlay';
 import {fetchActiveChannelLive} from './youtube-live-client.js';
@@ -670,17 +673,11 @@ export default function TVWeb(){
   const [settings, setSettings] = useState(()=>{
     const value=readPreference("tvweb_settings",{});return value&&typeof value==="object"&&!Array.isArray(value)?value:{};
   });
-  const [displayMode,setDisplayMode]=useState(()=>readPreference("tvweb_settings",{})?.displayMode||"studio");
+  const [displayMode,setDisplayMode]=useState(()=>channelDisplayMode(channels.find(c=>c.id===params.get('canal')||String(c.numero)===params.get('canal'))||channels[0],settings));
   const saveSettings = (s) => {
-    const next={...settings,...s};setSettings(next);setDisplayMode(next.displayMode||"studio");
+    const next={...settings,...s};if(s.displayMode){next.channelModes={...settings.channelModes,[ch.id]:studioAllowed(ch)?s.displayMode:'cinema'};delete next.displayMode;setDisplayMode(next.channelModes[ch.id]);}setSettings(next);
     try{ localStorage.setItem("tvweb_settings", JSON.stringify(next)) }catch{}
   };
-  useEffect(()=>{
-    const minutes=Number(settings.autoLayoutMinutes);
-    if(!Number.isFinite(minutes)||minutes<=0)return;
-    const timer=setInterval(()=>setDisplayMode(mode=>mode==="studio"?"cinema":"studio"),minutes*60_000);
-    return()=>clearInterval(timer);
-  },[settings.autoLayoutMinutes]);
   // Tick: 1s para transições suaves de vídeo na playlist
   const [tick, setTick] = useState(0);
   useEffect(()=>{const i=setInterval(()=>setTick(t=>t+1),1000);return()=>clearInterval(i)},[]);
@@ -703,16 +700,27 @@ export default function TVWeb(){
   // ========== DERIVED STATE (recalcs every tick) ==========
   const CHANNELS=channels;
   const ch=CHANNELS.find(c=>c.id===curCh)||CHANNELS[0];
+  useEffect(()=>setDisplayMode(channelDisplayMode(ch,settings)),[ch?.id,ch?.studioEnabled,ch?.newsEnabled,settings.channelModes]);
+  useEffect(()=>{
+    const minutes=Number(settings.autoLayoutMinutes);
+    if(!Number.isFinite(minutes)||minutes<=0||!studioAllowed(ch))return;
+    const timer=setInterval(()=>setDisplayMode(mode=>mode==="studio"?"cinema":"studio"),minutes*60_000);
+    return()=>clearInterval(timer);
+  },[settings.autoLayoutMinutes,ch?.id,ch?.studioEnabled]);
   const today=getToday();
   const schedule=useMemo(()=>ch?buildGuideSchedule(allPrograms,ch.id,ch,today):[],[allPrograms,ch,today]);
-  const cp=getCurProg(schedule);
+  const scheduledProgram=getCurProg(schedule);
+  const mediaCache=useRef(null);
+  const mediaKey=`${ch?.id}:${scheduledProgram?.id}`;
+  if(!scheduledProgram?.isLive&&mediaCache.current?.key!==mediaKey)mediaCache.current={key:mediaKey,videos:scheduledProgram?.videos,youtubeId:scheduledProgram?.youtubeId};
+  const cp=scheduledProgram&&!scheduledProgram.isLive?{...scheduledProgram,videos:mediaCache.current?.videos,youtubeId:mediaCache.current?.youtubeId}:scheduledProgram;
   const ci=schedule.findIndex(p=>p.id===cp?.id);
   const np=ci>=0?schedule[ci+1]:null;
-  const activeProgramKey=`${ch?.id||''}:${cp?.srcProgId||cp?.id||''}:${cp?.liveChannel||cp?.liveChannelId||''}:${cp?.liveUrl||''}`;
+  const activeProgramKey=`${ch?.id||''}:${cp?.srcProgId||cp?.id||''}:${cp?.liveChannel||cp?.liveChannelId||''}:${cp?.liveUrl||''}:${cp?.hlsUrl||''}`;
   const [liveLookup,setLiveLookup]=useState(null);
   useEffect(()=>{
     const liveChannel=cp?.liveChannel||cp?.liveChannelId;
-    if(!cp?.isLive||!liveChannel){setLiveLookup(null);setLatencyStatus('off');return;}
+    if(!cp?.isLive||cp?.hlsUrl||cp?.isAutomatic&&Date.now()-Number(ch?.autoLiveCheckedAt||0)<15*60000||!liveChannel){setLiveLookup(null);setLatencyStatus('off');return;}
     let stopped=false;
     const controller=new AbortController();
     setLiveLookup(prev=>prev?.programKey===activeProgramKey?{...prev,status:prev.videoId?'live':'checking'}:{programKey:activeProgramKey,status:'checking',videoId:null});
@@ -726,19 +734,31 @@ export default function TVWeb(){
     };
     const first=setTimeout(refresh,cp?.liveUrl?2*60_000:0);const timer=setInterval(refresh,5*60_000);
     return()=>{stopped=true;controller.abort();clearTimeout(first);clearInterval(timer);};
-  },[activeProgramKey,cp?.isLive,cp?.liveChannel,cp?.liveChannelId]);
+  },[activeProgramKey,cp?.isLive,cp?.liveChannel,cp?.liveChannelId,ch?.autoLiveCheckedAt]);
   const directLiveId=extractYTId(cp?.liveUrl||cp?.youtubeId||cp?.videos?.[0]?.youtubeUrl||'');
   const activeLive=liveLookup?.programKey===activeProgramKey?liveLookup:null;
 
   const info=getVideoPlaybackInfo(cp);
   const blockedId=cp?.isLive?activeLive?.videoId||directLiveId:info?.videoId;
   const unavailable=!!((!cp?.isLive&&info?.blocked)||Number(blockedVideos[blockedId])>Date.now());
-  const ytVideoId=cp?.isLive?(!unavailable?activeLive?.videoId||directLiveId||null:null):(!unavailable?info?.videoId:null);
+  const ytVideoId=cp?.hlsUrl?null:cp?.isLive?(!unavailable?activeLive?.videoId||directLiveId||null:null):(!unavailable?info?.videoId:null);
   const playbackIdentity=cp?.isLive?`${activeProgramKey}:${activeLive?.videoId||directLiveId||'live-pending'}`:`${ch?.id}:${cp?.contKey||cp?.id}:${info?.videoIndex}:${info?.cycleIndex}`;
   useEffect(()=>{setPlayerIssue('');setLatencyStatus(cp?.isLive?'checking':'off');},[playbackIdentity,cp?.isLive]);
+  const [hlsLive,setHlsLive]=useState(false);
+  useEffect(()=>setHlsLive(false),[cp?.hlsUrl]);
+  const [liveVerification,setLiveVerification]=useState(null),[latencyEnabled,setLatencyEnabled]=useState(true);
+  useEffect(()=>{setLatencyEnabled(true)},[ch?.id]);
+  useEffect(()=>{
+    if(!cp?.isLive||!ytVideoId){setLiveVerification(null);return}
+    let active=true;const controller=new AbortController();setLiveVerification(null);
+    const verify=async()=>{try{const response=await fetch(`/api/youtube-state?video=${encodeURIComponent(ytVideoId)}`,{signal:controller.signal});if(!response.ok)throw new Error();const data=await response.json();if(active)setLiveVerification({id:ytVideoId,live:data.live===true})}catch{if(active)setLiveVerification({id:ytVideoId,live:false})}};
+    verify();const timer=setInterval(verify,30000);return()=>{active=false;controller.abort();clearInterval(timer)};
+  },[ytVideoId,cp?.isLive]);
+  const confirmedLive=!!cp?.isLive&&liveVerification?.id===ytVideoId&&liveVerification.live===true;
+  const livePending=!!cp?.isLive&&liveVerification?.id!==ytVideoId;
   const currentPosition=()=>getVideoPlaybackInfo(cp)?.position||0;
   const fullscreen=useCallback(async()=>{
-    try{if(document.fullscreenElement)await document.exitFullscreen();else if(cRef.current?.requestFullscreen){setDisplayMode('cinema');await cRef.current.requestFullscreen();}else showNotice('Use a opção de tela cheia do seu navegador.');}
+    try{await toggleFullscreen(cRef.current,document);}
     catch{showNotice('Este navegador não permitiu abrir em tela cheia.');}
   },[showNotice]);
   // ========== OSD VISIBILITY (20 seconds) ==========
@@ -838,8 +858,8 @@ export default function TVWeb(){
 
     {/* ===== YOUTUBE PLAYER (completely isolated) ===== */}
     <div className="tv-video-stage" style={{position:"absolute",inset:0,zIndex:1,opacity:fade?0:1,transition:"opacity 0.5s"}}>
-      {ytVideoId && !cp?.isPlaceholder ? (
-        <YoutubePlayer videoId={ytVideoId} identity={playbackIdentity} position={currentPosition} muted={muted} isLive={!!cp?.isLive} lowLatency={!!(cp?.isLive&&settings.lowLatency)} onLowLatencyStatus={setLatencyStatus} onBlocked={blockVideo} onPlaybackIssue={setPlayerIssue}/>
+      {cp?.hlsUrl&&!cp?.isPlaceholder?<Suspense fallback={<div className="page-message">Carregando transmissão HLS…</div>}><HlsPlayer url={cp.hlsUrl} muted={muted} onPlaybackIssue={setPlayerIssue} onLiveState={setHlsLive}/></Suspense>:ytVideoId && !cp?.isPlaceholder ? (
+        <YoutubePlayer videoId={ytVideoId} identity={playbackIdentity} position={currentPosition} muted={muted} isLive={confirmedLive||livePending} lowLatency={confirmedLive&&latencyEnabled} onLowLatencyStatus={setLatencyStatus} onBlocked={blockVideo} onPlaybackIssue={setPlayerIssue}/>
       ) : (
         <div style={{width:"100%",height:"100%",background:`radial-gradient(ellipse at center,${ch.cor||"#1a73e8"}15,#0a0c12 70%)`,display:"flex",alignItems:"center",justifyContent:"center"}}>
           {cp?.isLive?(
@@ -895,11 +915,12 @@ export default function TVWeb(){
       <p>Ative o pacote na área <strong>Redação</strong> do Admin para exibir manchetes, ticker inferior e tweets neste canal.</p>
       <small>{ch.nome} · {cp?.nome||"Programação"}{np&&` · A seguir: ${np.nome}`}</small>
     </aside>}
-    <NewsOverlay channel={ch} program={cp} studio={displayMode==="studio"} hidden={showOSD||showEPG||showFull||!!selProg||showSettings||!!cp?.isJingle}/>
+    <NewsOverlay channel={ch} program={cp?{...cp,isLive:confirmedLive||hlsLive}:cp} studio={displayMode==="studio"} hidden={showOSD||showEPG||showFull||!!selProg||showSettings||!!cp?.isJingle}/>
     {(notice||catalogError)&&<div role="status" className="tv-notice">{notice||catalogError}</div>}
+    {confirmedLive&&latencyEnabled&&['checking','requesting','catching_up'].includes(latencyStatus)&&<div className="live-delay-notice" role="status"><span className="delay-spinner"/><div><b>Reduzindo o atraso da live</b><p>{latencyStatus==='catching_up'?'Reprodução em 2× até se aproximar do ao vivo.':'Verificando a aceleração disponível…'} Isso pode levar alguns segundos.</p></div></div>}
     {playerIssue&&<div className="playback-issue" role="alert"><p>{playerIssue}</p><button onClick={()=>{setMuted(false);window.dispatchEvent(new Event('trendtv-play'));}}>Reproduzir</button></div>}
     {/* ===== MENU DE CONFIGURAÇÕES ===== */}
-    {showSettings&&<SettingsMenu settings={settings} onSave={saveSettings} onClose={()=>setShowSettings(false)}/>}
+    {showSettings&&<SettingsMenu settings={{...settings,displayMode}} onSave={saveSettings} onClose={()=>setShowSettings(false)}/>}
 
     {/* ===== OSD HEADER (TV-style, 20s) ===== */}
     <OSDHeader channel={ch} program={cp} visible={showOSD&&!showEPG&&!showFull}/>
@@ -907,8 +928,8 @@ export default function TVWeb(){
     {/* ===== OSD FOOTER (TV-style, 20s) ===== */}
     <OSDFooter channel={ch} muted={muted} onMute={()=>setMuted(v=>!v)} favorite={favorites.includes(ch.id)} onFavorite={()=>toggleFavorite(ch.id)} onShare={async()=>{const message=await shareChannel(ch,cp);if(message)showNotice(message);}} program={cp} nextProgram={np} visible={showOSD&&!showEPG&&!showFull}
       onOpenEPG={()=>setEPG(true)} onOpenFull={()=>setFull(true)} onOpenSettings={()=>setShowSettings(true)} onFullscreen={fullscreen}
-      displayMode={displayMode} onToggleDisplayMode={()=>saveSettings({...settings,displayMode:displayMode==="studio"?"cinema":"studio"})}
-      isLive={!!cp?.isLive} lowLatency={!!(cp?.isLive&&settings.lowLatency)} latencyStatus={latencyStatus} onToggleLowLatency={()=>saveSettings({...settings,lowLatency:!settings.lowLatency})}/>
+      displayMode={displayMode} onToggleDisplayMode={()=>{if(!studioAllowed(ch)){showNotice("O modo estúdio está desativado para este canal no Admin.");return}saveSettings({...settings,displayMode:displayMode==="studio"?"cinema":"studio"})}}
+      isLive={confirmedLive} lowLatency={confirmedLive&&latencyEnabled} latencyStatus={latencyStatus} onToggleLowLatency={()=>setLatencyEnabled(v=>!v)}/>
 
 
     {/* ===== EPG / FULL / MODAL (above everything) ===== */}
