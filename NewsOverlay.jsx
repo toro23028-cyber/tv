@@ -1,8 +1,10 @@
 import {useEffect,useState,useRef} from 'react';
+import {broadcastTime,broadcastDate} from './clock';
+import './editorial-wall.css';
 import {db,doc,onSnapshot} from './firebase';
-import {DEFAULT_NEWS_CONFIG,publishableItems} from './news';
+import {DEFAULT_NEWS_CONFIG,publishableItems,normalizeGCColor} from './news';
 
-export default function NewsOverlay({channel,hidden=false,preview,studio=false}){
+export default function NewsOverlay({channel,hidden=false,preview,studio=false,program}){
   const socialWindow=useRef(null),socialTrack=useRef(null);
   const [published,setPublished]=useState(null),[now,setNow]=useState(Date.now());
   useEffect(()=>{
@@ -18,12 +20,12 @@ export default function NewsOverlay({channel,hidden=false,preview,studio=false})
   const index=Math.floor(now/interval),headline=news[index%Math.max(1,news.length)];
   const scrollSeconds=Math.max(24,Math.min(90,Number(config.socialSpeed)||34));
   const fullTemplate=(studio||!!preview)&&!!config.gc&&!!headline&&!!config.ticker&&news.length>0&&!!config.social&&socialItems.length>0;
-  return <div className={`news-overlays ${studio?'studio':''} ${preview?'preview':''} ${fullTemplate?'full-template':''}`} aria-label={studio?'Pacote gráfico do modo estúdio':'Informações do canal'}>
-    {fullTemplate&&<img className="news-wall-base" src="/news-wall-base.png" alt="" aria-hidden="true"/>}
-    {config.gc&&headline&&<section key={headline.id} className={`news-gc ${headline.urgent?'urgent':''} ${headline.imageUrl?'has-image':''}`} aria-live="polite">
-      <span className="news-gc-label"><b>{headline.urgent?'URGENTE':headline.category||'EM PAUTA'}</b><i>{headline.source}</i></span>
-      {headline.imageUrl&&<img className="news-gc-thumb" src={headline.imageUrl} alt="" onError={e=>{e.currentTarget.style.visibility='hidden';}}/>}
-      <strong>{headline.title}</strong>{headline.subtitle&&<p>{headline.subtitle}</p>}
+  return <div className={`news-overlays ${studio?'studio':''} ${preview?'preview':''} ${fullTemplate?'full-template':''}`} style={{'--gc-accent':normalizeGCColor(config.gcColor)}} aria-label={studio?'Pacote gráfico do modo estúdio':'Informações do canal'}>
+    
+    {(config.gc&&(headline||studio))&&<section key={headline?.id||'channel'} className={`news-gc ${headline?.urgent?'urgent':''} ${headline?.imageUrl?'has-image':''}`} aria-live="polite">
+      <span className="news-gc-label"><b>{headline?.urgent?'URGENTE':headline?.category||'EM PAUTA'}</b><i>{headline?.source||channel?.nome}</i></span>{studio&&<div className="news-gc-clock"><time>{broadcastTime(new Date(now))}</time><small>{broadcastDate(new Date(now),{day:'2-digit',month:'2-digit'})} · {program?.isLive?'AO VIVO':'TREND TV'}</small></div>}
+      {headline?.imageUrl&&<img className="news-gc-thumb" src={headline.imageUrl} alt="" onError={e=>{e.currentTarget.style.visibility='hidden';}}/>}
+      <strong>{headline?.title||program?.nome||channel?.nome||'TREND TV'}</strong>{headline?.subtitle&&<p>{headline.subtitle}</p>}
     </section>}
     {config.social&&<aside className="social-wall" aria-label="Mensagens e trending topics">
       <header><span>NA CONVERSA</span><b>{socialItems.length} mensagens</b></header>

@@ -727,7 +727,7 @@ export default function TVWeb(){
     const first=setTimeout(refresh,cp?.liveUrl?2*60_000:0);const timer=setInterval(refresh,5*60_000);
     return()=>{stopped=true;controller.abort();clearTimeout(first);clearInterval(timer);};
   },[activeProgramKey,cp?.isLive,cp?.liveChannel,cp?.liveChannelId]);
-  const directLiveId=extractYTId(cp?.liveUrl||'');
+  const directLiveId=extractYTId(cp?.liveUrl||cp?.youtubeId||cp?.videos?.[0]?.youtubeUrl||'');
   const activeLive=liveLookup?.programKey===activeProgramKey?liveLookup:null;
 
   const info=getVideoPlaybackInfo(cp);
@@ -863,7 +863,7 @@ export default function TVWeb(){
     <div onClick={handleVideoClick} style={{position:"absolute",inset:0,zIndex:2}} />
 
     {/* ===== WATERMARK ===== */}
-    <div style={{position:"absolute",top:16,right:20,fontSize:14,fontWeight:700,color:"rgba(255,255,255,0.12)",letterSpacing:2,zIndex:3,pointerEvents:"none"}}>TVWEB</div>
+    <div className="tv-watermark" style={{position:"absolute",top:16,right:20,fontSize:14,fontWeight:700,color:"rgba(255,255,255,0.12)",letterSpacing:2,zIndex:3,pointerEvents:"none"}}>TVWEB</div>
 
     {/* ===== LOGO OVERLAY (PNG do canal ou programa) ===== */}
     <ChannelLogoOverlay channel={ch} program={cp} showOSD={showOSD} fade={fade}/>
@@ -884,10 +884,10 @@ export default function TVWeb(){
     {!showEPG&&!showFull&&!unavailable&&!cp?.isJingle&&!ch.newsEnabled&&<GCBar channel={ch} program={cp} nextProgram={np}/>}
 
     {/* ===== RELÓGIO PERSISTENTE (apenas quando OSD está oculto, pois OSDHeader já tem relógio) ===== */}
-    {!showOSD&&!showEPG&&!showFull&&settings.clockMode&&settings.clockMode!=="off"&&<PersistentClock channel={ch} clockMode={settings.clockMode} clockPosition={settings.clockPosition||"tr"}/>}
+    {displayMode!=="studio"&&!showOSD&&!showEPG&&!showFull&&settings.clockMode&&settings.clockMode!=="off"&&<PersistentClock channel={ch} clockMode={settings.clockMode} clockPosition={settings.clockPosition||"tr"}/>}
 
     {/* ===== PRÓXIMO PROGRAMA ("Em X minutos...") — só quando OSD está oculto ===== */}
-    {!showOSD&&!showEPG&&!showFull&&np&&settings.nextUpMode&&settings.nextUpMode!=="off"&&<NextUpOverlay nextProgram={np} clockPosition={settings.clockPosition||"tr"} clockMode={settings.clockMode||"off"} nextUpMode={settings.nextUpMode}/>}
+    {displayMode!=="studio"&&!showOSD&&!showEPG&&!showFull&&np&&settings.nextUpMode&&settings.nextUpMode!=="off"&&<NextUpOverlay nextProgram={np} clockPosition={settings.clockPosition||"tr"} clockMode={settings.clockMode||"off"} nextUpMode={settings.nextUpMode}/>}
 
     {!ch.newsEnabled&&displayMode==="studio"&&<aside className="studio-setup-card" aria-live="polite">
       <span>ESTÚDIO · PACOTE GRÁFICO</span><b className="studio-package-status">DESATIVADO</b>
@@ -895,7 +895,7 @@ export default function TVWeb(){
       <p>Ative o pacote na área <strong>Redação</strong> do Admin para exibir manchetes, ticker inferior e tweets neste canal.</p>
       <small>{ch.nome} · {cp?.nome||"Programação"}{np&&` · A seguir: ${np.nome}`}</small>
     </aside>}
-    <NewsOverlay channel={ch} studio={displayMode==="studio"} hidden={(displayMode!=="studio"&&showOSD)||showEPG||showFull||!!selProg||showSettings||!!cp?.isJingle}/>
+    <NewsOverlay channel={ch} program={cp} studio={displayMode==="studio"} hidden={showOSD||showEPG||showFull||!!selProg||showSettings||!!cp?.isJingle}/>
     {(notice||catalogError)&&<div role="status" className="tv-notice">{notice||catalogError}</div>}
     {playerIssue&&<div className="playback-issue" role="alert"><p>{playerIssue}</p><button onClick={()=>{setMuted(false);window.dispatchEvent(new Event('trendtv-play'));}}>Reproduzir</button></div>}
     {/* ===== MENU DE CONFIGURAÇÕES ===== */}

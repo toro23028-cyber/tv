@@ -1,0 +1,113 @@
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> trendtv@1.1.0 check
+> npm test && npm run test:components && npm run build
+
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> trendtv@1.1.0 test
+> node tests/run.mjs
+
+✔ busca ignora acentos e filtra live/playlist (1.588219ms)
+✔ backup pode ser restaurado, ignora IDs existentes por padrão e aceita atualização explícita (2.413275ms)
+✔ restauração rejeita conflitos, canais ausentes, duplicação de IDs e formato inválido (2.776435ms)
+✔ pendências identificam ausência de programação e fonte de live (2.030256ms)
+✔ restauração recusa listas malformadas antes de gravar (2.568276ms)
+✔ publicação deduplica conteúdo mesmo com IDs diferentes (1.462844ms)
+✔ links twitter e x com tracking não geram duas publicações (0.800099ms)
+✔ merge repetido é idempotente e preserva aprovação existente (1.801456ms)
+✔ itens rejeitados não escondem cópia válida durante deduplicação (1.612756ms)
+✔ importação JSON de tweets mantém até 160 caracteres e revisão obrigatória (3.187596ms)
+✔ live por URL preserva fonte e gera thumbnail sem playlist (1.419549ms)
+✔ feed bloqueia acesso sem autenticação antes de consultar qualquer fonte (3.556904ms)
+✔ feed autenticado aceita apenas fonte configurada e deixa URL remota fora da resposta (8.518947ms)
+✔ guia inclui amanhã e preserva reprodução na passagem da meia-noite (2.877474ms)
+✔ eternity projeta as próximas 24 horas sem repetir antes da âncora (1.658073ms)
+✔ guia vazio não inventa programação e cruza ano corretamente (1.99905ms)
+✔ programas modelo nunca entram na TV nem no ciclo eternity (0.192726ms)
+✔ duração editorial permanece estável e começa na publicação (0.325443ms)
+✔ normaliza categorias novas e migra cards sociais antigos para tweets (0.311203ms)
+✔ aplica limites de manchete, subtítulo, tweet e etiquetas (0.305114ms)
+✔ conta palavras sem erro com espaços e linhas múltiplas (0.11474ms)
+✔ aceita apenas URLs HTTP(S) para fonte, imagem e publicação (0.329209ms)
+✔ publicação mantém o subtítulo e permite trending topic aprovado (0.335909ms)
+✔ conteúdo publicado sem validade não ganha nova expiração a cada atualização (1.431607ms)
+✔ rejeita datas inexistentes em vez de avançar silenciosamente o calendário (0.24874ms)
+✔ modelo não gera conflito contra a programação real nem entra no ar (0.396159ms)
+✔ validação exige canal, nome, data e segundos inteiros (0.254017ms)
+✔ rejeita conflito da edição visual com programa no dia seguinte (0.261138ms)
+✔ programação corrompida não cria segmentos negativos ou loop (0.137074ms)
+✔ ciclo de sete dias cobre todas as viradas e a janela futura de 12h (4.280879ms)
+✔ limpeza preserva configuração live e remove dados de projeção (9.533653ms)
+✔ data e hora de Brasília permanecem no mesmo dia depois das 21h (0.603767ms)
+✔ conversão absoluta preserva segundos e virada de dia (1.037071ms)
+✔ calendário do painel cruza mês e ano sem depender do fuso local (0.14128ms)
+✔ grade expirada não volta ao ar fora de eternity (1.582286ms)
+✔ duração inválida não causa loop no fallback legado (0.244233ms)
+✔ programa após meia-noite preserva offset de mídia (0.252084ms)
+✔ blocos de maratona mantêm a identidade e o tempo contínuo (0.125216ms)
+✔ normaliza ID, URL de canal e handle do YouTube para live automática (0.58587ms)
+✔ grade preserva a configuração de live para resolução durante a exibição (0.166948ms)
+✔ playlist troca no segundo exato sem cortar ou acrescentar buffer (0.183743ms)
+✔ eternity preserva a âncora antiga no Admin e na TV (0.253116ms)
+✔ eternity não repete programas antes da âncora (0.109303ms)
+✔ vinheta interrompe e retoma a mídia no horário absoluto (0.408757ms)
+✔ programação nunca contém intervalos sobrepostos (0.147529ms)
+✔ conflitos atravessando meia-noite são detectados (0.096814ms)
+✔ vinheta não é conflito com programa normal (0.079317ms)
+✔ URLs variadas do YouTube são aceitas e domínios falsos recusados (0.540773ms)
+✔ duração ISO inclui dias e segundos (0.277643ms)
+✔ importação de notícias nunca aprova conteúdo automaticamente (0.203021ms)
+✔ notícias expiradas, sem fonte ou sem aprovação não são publicadas (0.403209ms)
+✔ live padrão cobre lacunas hoje e amanhã sem alterar o programa agendado (0.314658ms)
+✔ live padrão vazia ou inválida não inventa transmissão (0.185636ms)
+✔ live longa não vira maratona nem reinicia por blocos (0.267808ms)
+✔ cor personalizada aceita somente hexadecimal válido (0.124314ms)
+✔ metadados usam somente a chave do servidor e não devolvem segredo (0.880659ms)
+✔ playlist mantém paginação pela função autenticada (0.351102ms)
+✔ consultas arbitrárias e lote acima de 50 não gastam cota (0.528395ms)
+✔ chave ausente e cota excedida têm erro claro sem exposição (0.528285ms)
+✔ metadados recusam acesso sem login (0.118837ms)
+✔ a rota permite somente os canais configurados e devolve a live ativa com cache (1.024962ms)
+✔ a rota rejeita parâmetros extras que poderiam contornar o cache (0.298674ms)
+✔ handle não autorizado é recusado antes de gastar uma consulta no YouTube (0.249391ms)
+ℹ tests 63
+ℹ suites 0
+ℹ pass 63
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 83.481882
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> trendtv@1.1.0 test:components
+> node tests/component-check.mjs
+
+14 verificações de renderização e gravação simulada passaram; nenhuma conexão ao Firebase.
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> trendtv@1.1.0 build
+> vite build
+
+vite v8.2.2 building client environment for production...
+transforming...
+✓ 62 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                               1.19 kB │ gzip:   0.54 kB
+dist/assets/NewsOverlay-BZgMEWA2.css          6.12 kB │ gzip:   1.64 kB
+dist/assets/index-Bs6mMmw5.css               42.95 kB │ gzip:  10.13 kB
+dist/assets/firebase-core-CLPjRdKE.js         0.07 kB │ gzip:   0.09 kB
+dist/assets/rolldown-runtime-CbXtAM7H.js      0.58 kB │ gzip:   0.36 kB
+dist/assets/NewsOverlay-CzHenxYf.js           8.21 kB │ gzip:   3.39 kB
+dist/assets/schedule-DQZ1O2qd.js              9.80 kB │ gzip:   4.18 kB
+dist/assets/Home-CY-YIiNF.js                 10.04 kB │ gzip:   3.51 kB
+dist/assets/index-Ca7k3SeI.js                48.91 kB │ gzip:  17.77 kB
+dist/assets/TV-Bhy8DpJE.js                   53.81 kB │ gzip:  15.21 kB
+dist/assets/firebase-auth-BLjmQG-7.js       104.38 kB │ gzip:  31.25 kB
+dist/assets/Admin-DreQQgOm.js               133.68 kB │ gzip:  35.63 kB
+dist/assets/react-vendor-CPYPbbnH.js        189.59 kB │ gzip:  59.61 kB
+dist/assets/firebase-firestore-DFsk8kt7.js  515.58 kB │ gzip: 151.31 kB
+
+✓ built in 414ms

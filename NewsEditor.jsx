@@ -1,8 +1,9 @@
 import {adminRequest,importEditorialSource} from './editorial-client';
 import {useEffect,useState,useRef} from 'react';
 import {db,doc,getDoc,setDoc,writeBatch} from './firebase';
-import {DEFAULT_NEWS_CONFIG,NEWS_DURATION_OPTIONS,NEWS_LIMITS,NEWS_WORD_LIMIT,countWords,newsDuration,prepareNewsPublication,normalizeNewsItem,parseNewsImport,publishableItems,safeSourceURL,dedupeEditorial,mergeEditorial} from './news';
+import {DEFAULT_NEWS_CONFIG,GC_COLORS,normalizeGCColor,NEWS_DURATION_OPTIONS,NEWS_LIMITS,NEWS_WORD_LIMIT,countWords,newsDuration,prepareNewsPublication,normalizeNewsItem,parseNewsImport,publishableItems,safeSourceURL,dedupeEditorial,mergeEditorial} from './news';
 import {assertDocumentSize} from './admin-data';
+import {extractYouTubeId,normalizeYouTubeChannel} from './youtube-id';
 import NewsOverlay from './NewsOverlay';
 
 async function confirmWrite(promise){
@@ -16,15 +17,17 @@ export default function NewsEditor({channels,notify,onDirty}){
   const [channelId,setChannelId]=useState(''),[items,setItems]=useState([]),[config,setConfig]=useState(DEFAULT_NEWS_CONFIG),[busy,setBusy]=useState(false),[loading,setLoading]=useState(false),[error,setError]=useState(''),[dirty,setDirty]=useState(false),[preview,setPreview]=useState(false);
   const operationLock=useRef(false),addLock=useRef({}),feedLock=useRef(false),liveState=useRef(null);
   const [sources,setSources]=useState([]),[sourceId,setSourceId]=useState(''),[autoImport,setAutoImport]=useState(false),[feedBusy,setFeedBusy]=useState(false),[feedStatus,setFeedStatus]=useState('');
+  const [defaultLiveUrl,setDefaultLiveUrl]=useState(''),[defaultLiveChannel,setDefaultLiveChannel]=useState('');
   const [previewDevice,setPreviewDevice]=useState('desktop');
   const channel=channels.find(c=>c.id===channelId),input=useRef(null),[loadFailed,setLoadFailed]=useState(false);
+  useEffect(()=>{setDefaultLiveUrl(channel?.defaultLiveUrl||'');setDefaultLiveChannel(channel?.defaultLiveChannel||'');},[channelId,channel?.defaultLiveUrl,channel?.defaultLiveChannel]);
   liveState.current={channelId,items,loading,loadFailed};
   useEffect(()=>{onDirty?.(dirty);},[dirty,onDirty]);
   useEffect(()=>{if(!channelId&&channels.length)setChannelId(channels[0].id);},[channels,channelId]);
   useEffect(()=>{
     let active=true;if(!channelId)return;
     setLoading(true);setLoadFailed(false);setItems([]);setConfig(DEFAULT_NEWS_CONFIG);setDirty(false);setError('');
-    getDoc(doc(db,'newsDrafts',channelId)).then(snap=>{if(active&&snap.exists()){setItems((Array.isArray(snap.data().items)?snap.data().items:[]).map(p=>normalizeNewsItem(p)));setConfig({...DEFAULT_NEWS_CONFIG,...snap.data().config});}}).catch(()=>{if(active){setLoadFailed(true);setError('Não foi possível carregar os rascunhos. Reabra esta aba antes de editar.');}}).finally(()=>{if(active)setLoading(false);});
+    getDoc(doc(db,'newsDrafts',channelId)).then(snap=>{if(active&&snap.exists()){setItems((Array.isArray(snap.data().items)?snap.data().items:[]).map(p=>normalizeNewsItem(p)));setConfig({...DEFAULT_NEWS_CONFIG,...snap.data().config});if(typeof snap.data().defaultLiveUrl==='string')setDefaultLiveUrl(snap.data().defaultLiveUrl);if(typeof snap.data().defaultLiveChannel==='string')setDefaultLiveChannel(snap.data().defaultLiveChannel);}}).catch(()=>{if(active){setLoadFailed(true);setError('Não foi possível carregar os rascunhos. Reabra esta aba antes de editar.');}}).finally(()=>{if(active)setLoading(false);});
     return()=>{active=false;};
   },[channelId]);
   useEffect(()=>{const h=e=>{if(dirty){e.preventDefault();e.returnValue='';}};window.addEventListener('beforeunload',h);return()=>window.removeEventListener('beforeunload',h);},[dirty]);
@@ -41,6 +44,8 @@ export default function NewsEditor({channels,notify,onDirty}){
     if(!channelId||loading||operationLock.current||feedLock.current||loadFailed)return;operationLock.current=true;setBusy(true);setError('');
     try{
       if(!navigator.onLine)throw new Error('Sem conexão. Reconecte antes de salvar ou publicar.');
+      if(defaultLiveUrl.trim()&&!extractYouTubeId(defaultLiveUrl))throw new Error('Informe uma URL válida de vídeo/live do YouTube para a live padrão.');
+      if(defaultLiveChannel.trim()&&!normalizeYouTubeChannel(defaultLiveChannel))throw new Error('Canal automático inválido. Use @handle ou ID UC.');
       const approvedInput=items.filter(p=>publish&&p.approved);
       if(publish&&config.enabled&&approvedInput.length>50)throw new Error('Libere até 50 itens por publicação. Desmarque os demais antes de publicar.');
       if(items.some(p=>p.kind==='news'&&(countWords(p.title)>NEWS_WORD_LIMIT||p.title.length>NEWS_LIMITS.headline||p.subtitle.length>NEWS_LIMITS.subtitle)))throw new Error('Ajuste as manchetes aos limites de caracteres e palavras exibidos nos campos.');
@@ -48,11 +53,11 @@ export default function NewsEditor({channels,notify,onDirty}){
       if(approvedInput.some(p=>!p.title.trim()))throw new Error('Preencha o texto dos itens aprovados.');
       if(approvedInput.some(p=>!p.source.trim()&&p.kind!=='topic'))throw new Error('Informe a fonte, perfil ou autoria de cada item aprovado.');
       const unique=dedupeEditorial(items);const savedItems=publish?prepareNewsPublication(unique):unique;
-      const draft={items:savedItems,config};assertDocumentSize(draft);
+      const draft={items:savedItems,config,defaultLiveUrl:defaultLiveUrl.trim(),defaultLiveChannel:defaultLiveChannel.trim()};assertDocumentSize(draft);
       if(publish){
         const approved=publishableItems(savedItems);
         if(config.enabled&&approvedInput.length&&!approved.length)throw new Error('Os itens aprovados não podem ser publicados. Revise o texto e a fonte.');
-        const batch=writeBatch(db);batch.set(doc(db,'newsDrafts',channelId),draft);batch.set(doc(db,'newsPublished',channelId),{items:approved,config,updatedAt:Date.now()});batch.update(doc(db,'channels',channelId),{newsEnabled:!!config.enabled});await confirmWrite(batch.commit());notify(config.enabled?`${approved.length} itens publicados no canal.`:'Pacote gráfico desativado neste canal.');
+        const batch=writeBatch(db);batch.set(doc(db,'newsDrafts',channelId),draft);batch.set(doc(db,'newsPublished',channelId),{items:approved,config,updatedAt:Date.now()});batch.update(doc(db,'channels',channelId),{newsEnabled:!!config.enabled,defaultLiveUrl:defaultLiveUrl.trim(),defaultLiveChannel:normalizeYouTubeChannel(defaultLiveChannel)||''});await confirmWrite(batch.commit());notify(config.enabled?`${approved.length} itens publicados no canal.`:'Pacote gráfico desativado neste canal.');
       }else{await confirmWrite(setDoc(doc(db,'newsDrafts',channelId),draft));notify('Rascunho salvo.');}
       setItems(savedItems);setDirty(false);
     }catch(e){const message=e.message||'Não foi possível salvar.';setError(message);notify(message);}finally{operationLock.current=false;setBusy(false);}
@@ -81,8 +86,9 @@ export default function NewsEditor({channels,notify,onDirty}){
     {loading&&<p>Carregando redação…</p>}{error&&<p className="news-error" role="alert">{error}</p>}
     <fieldset className="news-controls" disabled={loading||busy||!channel||loadFailed||feedBusy}><legend>Exibição na TV</legend>
       <div className="news-feature-toggles">{[['enabled','Ativar pacote gráfico'],['gc','Manchete + subtítulo'],['ticker','Ticker inferior'],['social','Painel de mensagens']].map(([key,label])=><label key={key}><input type="checkbox" checked={!!config[key]} onChange={e=>changeConfig({[key]:e.target.checked})}/><span>{label}</span></label>)}</div>
-      <div className="news-settings-row"><label>Alternar manchete<select value={config.interval} onChange={e=>changeConfig({interval:Number(e.target.value)})}><option value={10}>A cada 10 segundos</option><option value={15}>A cada 15 segundos</option><option value={20}>A cada 20 segundos</option><option value={30}>A cada 30 segundos</option><option value={45}>A cada 45 segundos</option><option value={60}>A cada 60 segundos</option></select></label><label>Velocidade da rolagem<select value={config.socialSpeed||34} onChange={e=>changeConfig({socialSpeed:Number(e.target.value)})}><option value={24}>Rápida · 24 s</option><option value={34}>Normal · 34 s</option><option value={48}>Lenta · 48 s</option><option value={64}>Bem lenta · 64 s</option></select></label><span className="news-template-note">Modelo PNG · TREND Wall 16:9</span></div>
+      <div className="news-settings-row"><label>Cor do GC<select value={config.gcColor||'#1676eb'} onChange={e=>changeConfig({gcColor:e.target.value})}>{GC_COLORS.map(c=><option value={c.value} key={c.value}>{c.label}</option>)}{!GC_COLORS.some(c=>c.value===config.gcColor)&&<option value={config.gcColor}>Personalizada</option>}</select></label><label>Cor personalizada<input type="color" value={normalizeGCColor(config.gcColor)} onChange={e=>changeConfig({gcColor:e.target.value})}/></label><label>Alternar manchete<select value={config.interval} onChange={e=>changeConfig({interval:Number(e.target.value)})}><option value={10}>A cada 10 segundos</option><option value={15}>A cada 15 segundos</option><option value={20}>A cada 20 segundos</option><option value={30}>A cada 30 segundos</option><option value={45}>A cada 45 segundos</option><option value={60}>A cada 60 segundos</option></select></label><label>Velocidade da rolagem<select value={config.socialSpeed||34} onChange={e=>changeConfig({socialSpeed:Number(e.target.value)})}><option value={24}>Rápida · 24 s</option><option value={34}>Normal · 34 s</option><option value={48}>Lenta · 48 s</option><option value={64}>Bem lenta · 64 s</option></select></label><span className="news-template-note">TREND Wall · GC responsivo</span></div>
     </fieldset>
+    <fieldset className="news-controls" disabled={loading||busy||loadFailed||feedBusy}><legend>Live padrão do canal · preencher horários sem programação</legend><label>URL da live<input value={defaultLiveUrl} onChange={e=>{setDefaultLiveUrl(e.target.value);setDirty(true)}} placeholder="https://youtube.com/live/…"/></label><label>Canal para encontrar próximas lives (opcional)<input value={defaultLiveChannel} onChange={e=>{setDefaultLiveChannel(e.target.value);setDirty(true)}} placeholder="@handle ou UC…"/></label><p className="muted">Usada somente quando não existe programa agendado. Clique em Publicar na TV para aplicar; deixe vazia para desativar.</p></fieldset>
     <fieldset className="news-controls" disabled={loading||busy||loadFailed||feedBusy}><legend>Importação automática · RSS / JSON</legend><button onClick={async()=>{try{const data=await adminRequest('/api/editorial-feed');setSources(data.sources||[]);setSourceId(data.sources?.[0]?.id||'')}catch(e){setFeedStatus(e.message)}}}>Carregar fontes configuradas</button><label>Fonte<select value={sourceId} onChange={e=>setSourceId(e.target.value)}><option value="">Selecione</option>{sources.map(s=><option key={s.id} value={s.id}>{s.name} · {s.kind}</option>)}</select></label><label><input type="checkbox" checked={autoImport} onChange={e=>setAutoImport(e.target.checked)}/> Atualizar a cada 5 minutos enquanto esta Redação estiver aberta</label><button disabled={!sourceId} onClick={refreshFeed}>Importar agora</button><p className="muted">Notícias e tweets entram para revisão, sem aprovação automática. Configure fontes RSS/JSON no servidor. Esta opção não coleta trending topics diretamente do X.</p>{feedStatus&&<p role="status">{feedStatus}</p>}</fieldset>
     <fieldset className="news-content-fields" disabled={loading||busy||!channel||loadFailed||feedBusy}>
     <div className="news-add-bar"><div><strong>Adicionar à fila</strong><small>Os textos entram como rascunho; marque “Liberar na TV” para publicar.</small></div><button onClick={()=>addItem('news')}>＋ Manchete</button><button onClick={()=>addItem('tweet')}>＋ Tweet</button><button onClick={()=>addItem('topic')}>＋ Trending topic</button><button className="news-import-button" onClick={()=>input.current?.click()}>Importar RSS/JSON</button><input ref={input} hidden type="file" accept=".json,.xml,.rss,.atom" onChange={e=>importFile(e.target.files[0])}/></div>

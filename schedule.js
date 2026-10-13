@@ -41,7 +41,7 @@ export function projectInstances(programs, channelId, channel, date = getToday()
 }
 function asBlock(inst,start,end,day,blockIndex,totalBlocks) {
   const sourceStart=inst.absStart, s=start-day,e=end-day;
-  const maratona=!inst.isJingle && (inst.maratona===true || inst.duracao>21600);
+  const maratona=!inst.isLive && !inst.isJingle && (inst.maratona===true || inst.duracao>21600);
   const endReal=sourceStart+inst.duracao-day;
   return {...inst,id:`${inst.id}@${sourceStart}:${s}`,srcProgId:inst.id,
     contKey:`${inst.id}@${sourceStart}`,horarioInicio:s,horarioFim:e,duracao:e-s,
@@ -69,7 +69,7 @@ export function buildSchedule(programs,channelId,channel,date=getToday()) {
   const output=[];
   for(const {inst,start,end} of segments){
     if(!inst){output.push({...placeholder,id:`_gap_${date}_${start}`,canalId:channelId,horarioInicio:start-day,horarioFim:end-day,duracao:end-start,horarioTexto:fmtHM(start-day),horarioFimTexto:fmtHM(end-day)});continue;}
-    const split=!inst.isJingle && (inst.maratona===true || inst.duracao>21600);
+    const split=!inst.isLive && !inst.isJingle && (inst.maratona===true || inst.duracao>21600);
     const block=Math.max(1800,Number(inst.blocoDuracao)||10800);
     let total=split?Math.ceil(inst.duracao/block):1;
     if(total>1 && inst.duracao-(total-1)*block<900) total--;
@@ -108,10 +108,10 @@ export const guideTime = seconds => `${seconds>=DAY?'Amanhã · ':''}${fmtHM(mod
 // Keep daily playback semantics, but expose a continuous two-day guide timeline.
 export function buildGuideSchedule(programs,channelId,channel,date=getToday()) {
   const tomorrow=absoluteToDateSeconds(dateSecondsToAbsolute(date)+DAY).date;
-  return [date,tomorrow].flatMap((day,index)=>buildSchedule(programs,channelId,channel,day).map(p=>({
+  return applyChannelLiveFallback([date,tomorrow].flatMap((day,index)=>buildSchedule(programs,channelId,channel,day).map(p=>({
     ...p,horarioInicio:p.horarioInicio+index*DAY,horarioFim:p.horarioFim+index*DAY,
     horarioTexto:guideTime(p.horarioInicio+index*DAY),horarioFimTexto:guideTime(p.horarioFim+index*DAY),
-  })));
+  }))),channel);
 }
 export function thumbnailForProgram(p) {
   if(!p || p.isPlaceholder) return null;
@@ -144,4 +144,12 @@ export function findConflicts(programs,candidate,channel){
     }
   }
   return [...matches.values()];
+}
+
+// Live padrão é explícita e cobre somente lacunas, sem mudar a grade agendada.
+export function applyChannelLiveFallback(schedule,channel){
+  if(!extractYouTubeId(channel?.defaultLiveUrl))return schedule;
+  return schedule.map(p=>p.isPlaceholder?{...p,isPlaceholder:false,isLive:true,isFallbackLive:true,
+    nome:`${channel.nome||'Canal'} · Ao vivo`,sinopse:'Transmissão padrão do canal',
+    liveUrl:channel.defaultLiveUrl,liveChannel:channel.defaultLiveChannel||'',srcProgId:`live-default-${channel.id}`,contKey:`live-default-${channel.id}`} :p);
 }

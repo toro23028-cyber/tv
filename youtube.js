@@ -1,16 +1,12 @@
 import {extractYouTubeId,parseDurationISO} from './youtube-id.js';
-const API_KEY=import.meta.env?.VITE_YOUTUBE_API_KEY || '';
+import {adminRequest} from './editorial-client';
 const memory=new Map();
 async function api(resource,params){
-  if(!API_KEY)throw new Error('Configure a chave do YouTube para buscar metadados. A reprodução continua disponível sem ela.');
-  const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),15000);
-  try{
-    const url=new URL(`https://www.googleapis.com/youtube/v3/${resource}`);
-    for(const [k,v] of Object.entries({...params,key:API_KEY}))url.searchParams.set(k,v);
-    const res=await fetch(url,{signal:controller.signal});const data=await res.json();
-    if(!res.ok)throw new Error(data.error?.errors?.[0]?.reason==='quotaExceeded'?'A cota de consultas do YouTube acabou por hoje.':data.error?.message||'Não foi possível consultar o YouTube.');
-    return data;
-  }finally{clearTimeout(timeout);}
+  const query=new URLSearchParams({resource});
+  for(const key of ['id','playlistId','pageToken'])if(params[key])query.set(key,params[key]);
+  const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),20000);
+  try{return await adminRequest(`/api/youtube-data?${query}`,{signal:controller.signal});}
+  finally{clearTimeout(timeout);}
 }
 export async function enrichVideos(videos){
   const unique=[...new Set(videos.map(v=>extractYouTubeId(v.youtubeUrl)).filter(Boolean))];

@@ -41,7 +41,7 @@ Canais antigos com número zero continuam acessíveis pelo link antigo, mas prec
 
 ## Metadados do YouTube
 
-Crie `.env.local` com base em `.env.example` e preencha `VITE_YOUTUBE_API_KEY` para buscar títulos, durações e importar playlists do YouTube. Ative a YouTube Data API v3 para essa chave. Restrinja-a aos domínios autorizados e a essa API no Google Cloud.
+Configure `YOUTUBE_API_KEY` no servidor da Vercel para buscar títulos, durações, identificar lives e importar playlists do YouTube. O painel consulta funções autenticadas; a chave não é enviada ao navegador. Ative a YouTube Data API v3 e use restrições compatíveis com consultas do servidor (restrição por HTTP referrer não serve para estas chamadas). Para testar localmente, crie `.env.local` com base em `.env.example` e use `vercel dev`; `npm run dev` sozinho não executa as funções da API.
 
 Para programas Live, o Admin aceita ID do canal, URL `/channel/UC...` ou endereço `@handle`. A TV procura a transmissão pública ativa desse canal automaticamente, sem substituir nem embaralhar playlists normais. Na Vercel, configure `YOUTUBE_API_KEY` como variável secreta do servidor e `YOUTUBE_LIVE_CHANNEL_IDS` com os IDs UC permitidos, separados por vírgula. Para usar `@handle`, configure também `YOUTUBE_LIVE_HANDLES` com os handles autorizados (separados por vírgula); o ID UC correspondente continua obrigatório na lista de IDs permitidos. A função `/api/youtube-live` usa cache compartilhado de 15 minutos; a busca em uma live nova pode levar até esse intervalo para aparecer. A API do YouTube permite por padrão até 100 chamadas `search.list` por dia, então use um canal e mantenha o cache. Para testar a rota localmente, use `vercel dev`; `npm run dev` não executa a função da Vercel.
 

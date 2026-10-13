@@ -1,4 +1,4 @@
-export const DEFAULT_NEWS_CONFIG={enabled:false,ticker:true,gc:true,social:true,interval:20,socialSpeed:34,corner:'tr',template:'trend-wall-v1'};
+export const DEFAULT_NEWS_CONFIG={enabled:false,ticker:true,gc:true,social:true,interval:20,socialSpeed:34,corner:'tr',template:'trend-wall-v2',gcColor:'#1676eb'};
 export const NEWS_WORD_LIMIT=12;
 export const NEWS_LIMITS={headline:78,subtitle:130,tweet:160,topic:54,source:48,category:28};
 export const countWords=value=>String(value||'').trim().split(/\s+/).filter(Boolean).length;
@@ -57,3 +57,6 @@ export function dedupeEditorial(items){
  });
 }
 export function mergeEditorial(current,incoming){return dedupeEditorial([...current,...incoming]).slice(0,100);}
+
+export const GC_COLORS=[{label:'Azul',value:'#1676eb'},{label:'Vermelho',value:'#c6283e'},{label:'Verde',value:'#087f62'},{label:'Roxo',value:'#7643c7'},{label:'Laranja',value:'#b85b08'}];
+export const normalizeGCColor=value=>/^#[0-9a-f]{6}$/i.test(String(value||''))?value:'#1676eb';

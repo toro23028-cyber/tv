@@ -25,6 +25,11 @@ try{
  const preview={items,config:{enabled:true,gc:true,ticker:true,social:true}};
  assert.match(render(h(NewsOverlay,{preview,studio:true})),/full-template/);checks++;
  assert.match(render(h(NewsOverlay,{preview})),/Manchete de teste/);checks++;
+ const studioHTML=render(h(NewsOverlay,{preview:{...preview,config:{...preview.config,gcColor:'#c6283e'}},studio:true,program:{isLive:true}}));
+ assert.match(studioHTML,/--gc-accent:#c6283e/);assert.match(studioHTML,/news-gc-clock/);assert.match(studioHTML,/AO VIVO/);assert.doesNotMatch(studioHTML,/news-wall-base/);checks++;
+ assert.equal((studioHTML.match(/class="social-card/g)||[]).length,1);checks++;
+ const emptyHTML=render(h(NewsOverlay,{studio:true,channel,program:{nome:'Live padrão'},preview:{items:[],config:{enabled:true,gc:true}}}));assert.match(emptyHTML,/Live padrão/);assert.match(emptyHTML,/news-gc-clock/);checks++;
+ const disabledHTML=render(h(NewsOverlay,{studio:true,preview:{...preview,config:{enabled:true,gc:false,social:false,ticker:false}}}));assert.doesNotMatch(disabledHTML,/news-gc-clock/);checks++;
  const data=await server.ssrLoadModule('/admin-data.js'),mock=await server.ssrLoadModule('/tests/fixtures/firebase.js');
  Object.defineProperty(globalThis,'navigator',{value:{onLine:false},configurable:true});
  await assert.rejects(data.commitPrograms([{id:'p',nome:'teste'}]),/Sem conexão/);assert.equal(mock.state.writes,0);checks++;
