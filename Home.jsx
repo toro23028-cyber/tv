@@ -1,3 +1,4 @@
+import Icon from './Icons';
 import {useState,useEffect,useMemo,useRef} from 'react';
 import {Link,useNavigate} from 'react-router-dom';
 import {useCatalog} from './Catalog';
@@ -42,7 +43,7 @@ export default function Home(){
   const rows=[...sorted].sort((a,b)=>Number(b.id===channel?.id)-Number(a.id===channel?.id)).map(ch=>({ch,items:(schedule[ch.id]||[]).filter(p=>p.horarioFim>now&&p.horarioInicio<now+43200&&(!query||normalize(`${ch.nome} ${p.nome} ${p.sinopse}`).includes(query)))})).filter(row=>!query||row.items.length);
   if(loading)return <div className="page-message">Carregando TREND TV…</div>;
   return <main className="home-page">
-    <header className="home-header"><Link className="brand" to="/">TREND TV</Link><nav><Link className="primary" to="/tv">▶ Assistir</Link><Link to="/admin">Admin</Link></nav></header>
+    <header className="home-header"><Link className="brand" to="/">TREND TV</Link><nav><Link className="primary" to="/tv"><Icon name="play" size={18}/> Assistir</Link><Link to="/admin">Admin</Link></nav></header>
     {channel?<section className="home-hero" style={{'--channel-color':channel.cor||'#19b8ef'}} onFocusCapture={()=>setPaused(true)} onBlurCapture={e=>{if(!e.currentTarget.contains(e.relatedTarget))setPaused(false);}}>
       {visible.map((ch,i)=>{
         const cur=getCurProg(schedule[ch.id],now);
@@ -55,7 +56,7 @@ export default function Home(){
         <p className="hero-synopsis">{current?.sinopse||'Explore os canais e encontre algo para assistir.'}</p>
         <p className="hero-meta">{current?`${fmtHM(current.horarioInicio)} – ${fmtHM(current.horarioFim)}`:'Sem programa neste horário'}{next&&` · A seguir: ${next.nome}`}</p>
         <Progress program={current} now={now} color={channel.cor}/>
-        <div className="hero-actions"><Link className="primary light" to={route(channel)}>▶ Assistir</Link>{current&&<button onClick={()=>setDetail({program:current,channel})}>Informações</button>}<button aria-pressed={favorites.includes(channel.id)} onClick={()=>toggleFavorite(channel.id)}>{favorites.includes(channel.id)?'★ Favorito':'☆ Favoritar'}</button></div>
+        <div className="hero-actions"><Link className="primary light" to={route(channel)}><Icon name="play" size={18}/> Assistir</Link>{current&&<button onClick={()=>setDetail({program:current,channel})}>Informações</button>}<button aria-pressed={favorites.includes(channel.id)} onClick={()=>toggleFavorite(channel.id)}>{favorites.includes(channel.id)?'★ Favorito':'☆ Favoritar'}</button></div>
       </div>
       {visible.length>1&&<div className="hero-navigation"><button aria-label="Canal anterior" onClick={()=>setActiveId(visible[(index-1+visible.length)%visible.length].id)}>‹</button><span>{index+1} / {visible.length}</span><button aria-label="Próximo canal" onClick={()=>setActiveId(visible[(index+1)%visible.length].id)}>›</button><button aria-pressed={paused} onClick={()=>setPaused(v=>!v)}>{paused?'Alternar capas':'Pausar capas'}</button></div>}
     </section>:<section className="page-message"><h1>Seus canais aparecem aqui</h1><p>Cadastre o primeiro canal no painel para começar.</p><Link to="/admin">Abrir painel</Link></section>}
@@ -63,7 +64,7 @@ export default function Home(){
     <section className="home-section"><div className="section-title"><h2>Canais ao vivo</h2><span>{visible.length} canais{favorites.length?' · favoritos primeiro':''}</span><div><button aria-label="Rolar canais para a esquerda" onClick={()=>slider.current?.scrollBy({left:-500,behavior:'smooth'})}>‹</button><button aria-label="Rolar canais para a direita" onClick={()=>slider.current?.scrollBy({left:500,behavior:'smooth'})}>›</button></div></div>
       <div className="channel-slider" ref={slider}>{sorted.map(ch=>{const cur=getCurProg(schedule[ch.id],now);return <article className={`channel-card ${channel?.id===ch.id?'selected':''}`} key={ch.id} style={{'--channel-color':ch.cor}}>
         <button className="card-select" aria-label={`Ver ${ch.nome}`} onClick={()=>setActiveId(ch.id)}><div className="card-image"><Poster src={thumbnailForProgram(cur)}/><span className="card-placeholder"><Logo channel={ch}/></span>{cur&&<span className="live-label">AO VIVO</span>}<Progress program={cur} now={now} color={ch.cor}/></div><div className="card-copy"><span>{ch.numero} · {ch.nome}</span><strong>{cur?.nome||'Sem programação agora'}</strong><small>{cur?`${fmtHM(cur.horarioInicio)} – ${fmtHM(cur.horarioFim)}`:'Veja a programação do canal'}</small></div></button>
-        <div className="card-actions"><Link to={route(ch)}>Assistir ↗</Link><button aria-label={`Favoritar ${ch.nome}`} aria-pressed={favorites.includes(ch.id)} onClick={()=>toggleFavorite(ch.id)}>{favorites.includes(ch.id)?'★':'☆'}</button></div>
+        <div className="card-actions"><Link to={route(ch)}>Assistir ↗</Link><button aria-label={`Favoritar ${ch.nome}`} aria-pressed={favorites.includes(ch.id)} onClick={()=>toggleFavorite(ch.id)}><Icon name="star" filled={favorites.includes(ch.id)}/></button></div>
       </article>;})}</div>
     </section>
     <section className="home-section" id="guia"><div className="section-title"><h2>Guia ao vivo</h2><span>Agora e próximas 12 horas</span></div>

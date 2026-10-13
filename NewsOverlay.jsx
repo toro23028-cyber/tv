@@ -1,8 +1,9 @@
-import {useEffect,useState} from 'react';
+import {useEffect,useState,useRef} from 'react';
 import {db,doc,onSnapshot} from './firebase';
 import {DEFAULT_NEWS_CONFIG,publishableItems} from './news';
 
 export default function NewsOverlay({channel,hidden=false,preview,studio=false}){
+  const socialWindow=useRef(null),socialTrack=useRef(null);
   const [published,setPublished]=useState(null),[now,setNow]=useState(Date.now());
   useEffect(()=>{
     setPublished(null);if(preview||!channel?.newsEnabled)return;
@@ -10,6 +11,7 @@ export default function NewsOverlay({channel,hidden=false,preview,studio=false})
   },[channel?.id,channel?.newsEnabled,!!preview]);
   useEffect(()=>{const timer=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(timer);},[]);
   const data=preview||published,config={...DEFAULT_NEWS_CONFIG,...data?.config};
+  useEffect(()=>{const view=socialWindow.current,track=socialTrack.current;if(!view||!track)return;const measure=()=>{const distance=Math.max(0,track.scrollHeight-view.clientHeight);track.style.setProperty('--wall-travel',`${-distance}px`);track.style.animationPlayState=distance>0?'running':'paused';};measure();if(typeof ResizeObserver==='undefined'){window.addEventListener('resize',measure);return()=>window.removeEventListener('resize',measure);}const observer=new ResizeObserver(measure);observer.observe(view);observer.observe(track);return()=>observer.disconnect();},[data,hidden,config.enabled]);
   if(hidden||!data||!config.enabled)return null;
   const items=publishableItems(data.items||[],now),news=items.filter(p=>p.kind==='news'),socialItems=items.filter(p=>p.kind==='tweet'||p.kind==='topic');
   const interval=Math.min(120,Math.max(10,Number(config.interval)||20))*1000;
@@ -25,8 +27,8 @@ export default function NewsOverlay({channel,hidden=false,preview,studio=false})
     </section>}
     {config.social&&<aside className="social-wall" aria-label="Mensagens e trending topics">
       <header><span>NA CONVERSA</span><b>{socialItems.length} mensagens</b></header>
-      {socialItems.length>0?<div className="social-wall-window"><div className="social-wall-track" style={{animationDuration:`${scrollSeconds}s`,animationPlayState:socialItems.length>1?'running':'paused'}}>
-        {[0,1].map(copy=><div className="social-wall-copy" key={copy} aria-hidden={copy===1}>{socialItems.map((item,i)=><article className={`social-card ${item.kind==='topic'?'topic-card':''} ${item.urgent?'urgent':''}`} key={`${item.id}-${copy}`}>
+      {socialItems.length>0?<div className="social-wall-window" ref={socialWindow}><div className="social-wall-track" ref={socialTrack} style={{animationDuration:`${scrollSeconds}s`,animationPlayState:socialItems.length>1?'running':'paused'}}>
+        {[0].map(copy=><div className="social-wall-copy" key={copy}>{socialItems.map((item,i)=><article className={`social-card ${item.kind==='topic'?'topic-card':''} ${item.urgent?'urgent':''}`} key={`${item.id}-${copy}`}>
           <div><span>{item.kind==='topic'?'TRENDING TOPIC':'POST NA CONVERSA'}</span><small>{item.category||item.source}</small></div>
           <p>{item.title}</p>
           {item.kind==='tweet'&&<footer>{item.source}{item.url&&<a href={item.url} target="_blank" rel="noreferrer">Abrir publicação ↗</a>}</footer>}

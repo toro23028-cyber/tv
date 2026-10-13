@@ -116,7 +116,7 @@ export function buildGuideSchedule(programs,channelId,channel,date=getToday()) {
 export function thumbnailForProgram(p) {
   if(!p || p.isPlaceholder) return null;
   if(p.thumbnailType==='custom' && p.thumbnailUrl) return p.thumbnailUrl;
-  const id=extractYouTubeId(p.videos?.[0]?.youtubeUrl||p.youtubeId);
+  const id=extractYouTubeId(p.videos?.[0]?.youtubeUrl||p.youtubeId||p.liveUrl);
   return id?`https://i.ytimg.com/vi/${id}/hqdefault.jpg`:null;
 }
 export function getThumbnailForChannel(programs,channels,id) {

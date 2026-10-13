@@ -25,11 +25,11 @@ export function normalizeNewsItem(item,now=Date.now()){
     expiresAt:Number.isFinite(Number(item.expiresAt))&&Number(item.expiresAt)>0?Number(item.expiresAt):now+1800000};
 }
 export function publishableItems(items,now=Date.now()){
-  return (Array.isArray(items)?items:[]).filter(p=>p&&typeof p==='object'&&Number.isFinite(Number(p.expiresAt))&&Number(p.expiresAt)>now).map(p=>normalizeNewsItem(p,now))
+  return dedupeEditorial((Array.isArray(items)?items:[]).filter(p=>p&&typeof p==='object'&&Number.isFinite(Number(p.expiresAt))&&Number(p.expiresAt)>now).map(p=>normalizeNewsItem(p,now))
     .filter(p=>p.approved===true&&p.title.trim()&&(p.kind==='topic'||p.source.trim())&&Number(p.expiresAt)>now)
-    .slice(0,50);
+    ).slice(0,50);
 }
-export function parseNewsImport(text){
+export function parseNewsImport(text,defaultKind='news'){
   let input;
   if(text.trim().startsWith('<')){
     const xml=new DOMParser().parseFromString(text,'application/xml');
@@ -40,5 +40,20 @@ export function parseNewsImport(text){
   }else{const json=JSON.parse(text);input=Array.isArray(json)?json:json.items;}
   if(!Array.isArray(input))throw new Error('Use um RSS ou JSON com uma lista de notícias.');
   if(input.length>100)throw new Error('Importe até 100 notícias por vez.');
-  const seen=new Set();return input.filter(p=>p&&typeof p==='object').map(p=>normalizeNewsItem({...p,id:crypto.randomUUID(),approved:false})).filter(p=>{const key=p.url||p.title;if(!p.title||seen.has(key))return false;seen.add(key);return true;});
+  const seen=new Set();return input.filter(p=>p&&typeof p==='object').map(p=>normalizeNewsItem({...p,kind:p.kind||defaultKind,id:crypto.randomUUID(),approved:false})).filter(p=>{const key=p.url||p.title;if(!p.title||seen.has(key))return false;seen.add(key);return true;});
 }
+
+export function editorialKey(item){
+ const kind=item.kind==='social'?'tweet':item.kind||'news';
+ const url=safeSourceURL(item.url||item.link);
+ if(url){const u=new URL(url);u.hash='';for(const key of [...u.searchParams.keys()])if(/^utm_/i.test(key)||['ref','s','si'].includes(key))u.searchParams.delete(key);u.hostname=u.hostname.replace(/^www\./,'').replace(/^twitter\.com$/,'x.com');return `${kind}:url:${u.href.replace(/\/$/,'')}`;}
+ const norm=v=>String(v||'').trim().replace(/\s+/g,' ').toLocaleLowerCase('pt-BR');
+ return `${kind}:text:${norm(item.title||item.text)}:${norm(item.source||item.author)}`;
+}
+export function dedupeEditorial(items){
+ const keys=new Set(),ids=new Set();return (Array.isArray(items)?items:[]).filter(p=>p&&typeof p==='object').filter(p=>{
+  const key=editorialKey(p);if((p.id&&ids.has(p.id))||(String(p.title||'').trim()&&keys.has(key)))return false;
+  if(p.id)ids.add(p.id);if(String(p.title||'').trim())keys.add(key);return true;
+ });
+}
+export function mergeEditorial(current,incoming){return dedupeEditorial([...current,...incoming]).slice(0,100);}

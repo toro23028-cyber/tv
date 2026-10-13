@@ -1,3 +1,6 @@
+import {adminRequest} from './editorial-client';
+import Icon from './Icons';
+import {filterPrograms,scheduleWarnings,makeBackup,prepareRestore} from './admin-tools';
 import {useCatalog} from './Catalog';
 import {assertDocumentSize,cleanProgram,commitPrograms,commitEternityWeek,assertNoConflicts,saveChannelNumber} from './admin-data';
 import NewsEditor from './NewsEditor';
@@ -257,6 +260,7 @@ function TimelineView({programs,channels,selectedChannel,onEdit,onDelete,onReord
   // programs já vem filtrado por data+canal via dayProgs (inclui projeções do eternity)
   const filtered=programs.filter(p=>p.canalId===selectedChannel).sort((a,b)=>Number(a.horarioInicio)-Number(b.horarioInicio));
   const hasProjected = filtered.some(p=>p._isProjected);
+  const isFiltered=programs.some(p=>p._filterLocked);
   const [dragIdx,setDragIdx]=useState(null);
   const [overIdx,setOverIdx]=useState(null);
 
@@ -264,7 +268,7 @@ function TimelineView({programs,channels,selectedChannel,onEdit,onDelete,onReord
   const handleDragOver=(e,i)=>{e.preventDefault();setOverIdx(i)};
   const handleDrop=(e,i)=>{
     e.preventDefault();
-    if(hasProjected)return;
+    if(hasProjected||isFiltered)return;
     if(dragIdx!==null&&dragIdx!==i){
       const items=[...filtered];
       const [moved]=items.splice(dragIdx,1);
@@ -286,6 +290,7 @@ function TimelineView({programs,channels,selectedChannel,onEdit,onDelete,onReord
   if(Number(filtered[filtered.length-1].horarioFim)<86400) gaps.push({start:Number(filtered[filtered.length-1].horarioFim),end:86400});
 
   return <div style={{display:"flex",flexDirection:"column",gap:4}}>
+    {isFiltered&&<p className="muted">Limpe os filtros para reordenar a grade completa.</p>}
     {hasProjected&&<div style={{padding:"10px 14px",marginBottom:8,background:"rgba(0,188,212,0.08)",border:"1px solid rgba(0,188,212,0.25)",borderRadius:8,fontSize:12,color:"#4dd0e1",display:"flex",alignItems:"center",gap:8}}>
       <span style={{fontSize:16}}>∞</span>
       <span><b>Modo Eternity ativo:</b> programas exibidos são projetados do ciclo original. Clique em ✏️ para editar o programa na data em que foi cadastrado. Para adicionar programas neste dia, desative o Eternity primeiro.</span>
@@ -300,7 +305,7 @@ function TimelineView({programs,channels,selectedChannel,onEdit,onDelete,onReord
       const blocos=isMaratona&&dur>Math.max(1800,Number(prog.blocoDuracao)||BLOCO_PADRAO)?computeBlocos(prog.horarioInicio,dur,prog.blocoDuracao):null;
       const isProj=!!prog._isProjected; // projeção do eternity — não permite drag
       return <div key={prog.id+"-"+i} style={{display:"flex",flexDirection:"column",gap:0}}>
-      <div draggable={!isProj} onDragStart={isProj?undefined:e=>handleDragStart(e,i)} onDragOver={isProj?undefined:e=>handleDragOver(e,i)} onDrop={isProj?undefined:e=>handleDrop(e,i)} onDragEnd={isProj?undefined:()=>{setDragIdx(null);setOverIdx(null)}}
+      <div draggable={!isProj&&!isFiltered} onDragStart={isProj?undefined:e=>handleDragStart(e,i)} onDragOver={isProj?undefined:e=>handleDragOver(e,i)} onDrop={isProj?undefined:e=>handleDrop(e,i)} onDragEnd={isProj?undefined:()=>{setDragIdx(null);setOverIdx(null)}}
         style={{
           display:"flex",alignItems:"center",gap:12,padding:"12px 14px",
           background:isProj?"rgba(0,188,212,0.05)":isDragOver?"rgba(26,115,232,0.15)":"rgba(255,255,255,0.03)",borderRadius:blocos?"6px 6px 0 0":6,
@@ -379,7 +384,9 @@ export function ProgramModal({mode,program,channels,selectedChannel,selectedDate
   const [customS,setCS]=useState(Number(program?.duracao||0)%60);
   const [videos,setVideos]=useState(program?.videos||[{youtubeUrl:program?.youtubeId||"",titulo:""}]);
   const [isLive,setIsLive]=useState(!!program?.isLive);
+  const [liveUrl,setLiveUrl]=useState(program?.liveUrl||""),[liveResolving,setLiveResolving]=useState(false);
   const [liveChannel,setLiveChannel]=useState(program?.liveChannel||program?.liveChannelId||"");
+  useEffect(()=>{const id=extractYouTubeId(liveUrl);if(!isLive||!id)return;let active=true;const controller=new AbortController();const timer=setTimeout(async()=>{setLiveResolving(true);try{const meta=await adminRequest(`/api/youtube-source?video=${encodeURIComponent(id)}`,{signal:controller.signal});if(active){setLiveChannel(v=>v||meta.channelId||'');setNome(v=>v||meta.title||'');md();if(!meta.embeddable)setError('Esta live não permite incorporação.');}}catch(e){if(active&&e.name!=='AbortError')setError(e.message)}finally{if(active)setLiveResolving(false)}},800);return()=>{active=false;clearTimeout(timer);controller.abort();setLiveResolving(false);};},[isLive,liveUrl]);
   const [selectedVideos,setSelectedVideos]=useState(new Set());
   useEffect(()=>setSelectedVideos(new Set()),[videos]);
   const [showBulkPaste,setShowBulkPaste]=useState(false);
@@ -408,7 +415,7 @@ export function ProgramModal({mode,program,channels,selectedChannel,selectedDate
   // Modelos são privados do canal e nunca participam da grade de transmissão.
   const templates=existingPrograms.filter(p=>p.isTemplate&&!p.isJingle&&p.canalId===canalId).sort((a,b)=>a.nome.localeCompare(b.nome));
   const applyTemplate=(t)=>{
-    setNome(t.nome);setIsLive(!!t.isLive);setLiveChannel(t.liveChannel||t.liveChannelId||"");
+    setNome(t.nome);setIsLive(!!t.isLive);setLiveUrl(t.liveUrl||"");setLiveChannel(t.liveChannel||t.liveChannelId||"");
     setClassificacao(t.classificacao||"L");
     setTags(t.tags||["HD"]);
     setSinopse(t.sinopse||randomProgramDescription());
@@ -434,11 +441,11 @@ export function ProgramModal({mode,program,channels,selectedChannel,selectedDate
   const horIn=isTemplate?0:startMode==='custom'?Number(startH)*3600+Number(startM)*60+(isEdit?Number(program.horarioInicio)%60:0):autoStart;
   const horFim=horIn+dur;
   const hasOverlap=!isTemplate&&findConflicts(existingPrograms,{id:program?.id,canalId,data:selectedDate,horarioInicio:horIn,duracao:dur,isJingle},selectedCh).length>0;
-  const signature=JSON.stringify({nome,canalId,classificacao,tags,sinopse,durationPreset,customH,customM,customS,videos,isLive,liveChannel,thumbnailType,thumbnailUrl,gcAlways,gcNever,maratona,blocoDuracao,isTemplate,isJingle,jingleType,overlayLogoUrl,overlayCorner,overlaySize,startMode,startH,startM});
+  const signature=JSON.stringify({nome,canalId,classificacao,tags,sinopse,durationPreset,customH,customM,customS,videos,isLive,liveChannel,liveUrl,thumbnailType,thumbnailUrl,gcAlways,gcNever,maratona,blocoDuracao,isTemplate,isJingle,jingleType,overlayLogoUrl,overlayCorner,overlaySize,startMode,startH,startM});
   const initialSignature=useRef(signature);
   const hasChanges=dirty||signature!==initialSignature.current;
   useEffect(()=>{const handler=e=>{if(hasChanges){e.preventDefault();e.returnValue='';}};window.addEventListener('beforeunload',handler);return()=>window.removeEventListener('beforeunload',handler);},[hasChanges]);
-  const yt=ytThumb(videos[0]?.youtubeUrl);
+  const yt=ytThumb(isLive?liveUrl:videos[0]?.youtubeUrl);
   const dispThumb=thumbnailType==="custom"&&thumbnailUrl?thumbnailUrl:yt;
 
   const save=async()=>{
@@ -450,7 +457,8 @@ export function ProgramModal({mode,program,channels,selectedChannel,selectedDate
     if(!Number.isInteger(horIn)||horIn<0||horIn>=86400){setError('Este dia já terminou. Selecione o dia seguinte ou ajuste o horário.');return;}
     if(hasOverlap){setError("Conflito de horário!");return}
     const resolvedLiveChannel=normalizeYouTubeChannel(liveChannel);
-    if(isLive&&!resolvedLiveChannel){setError('Informe o ID do canal, uma URL /channel/UC... ou o link/@handle do canal.');return;}
+    if(isLive&&!extractYouTubeId(liveUrl)&&!resolvedLiveChannel){setError('Informe o ID do canal, uma URL /channel/UC... ou o link/@handle do canal.');return;}
+    if(isLive&&liveUrl.trim()&&!extractYouTubeId(liveUrl)){setError('URL da live inválida. Use o link de um vídeo/live do YouTube.');return;}
     if(!isLive&&!isTemplate&&!videos.length){setError('Adicione um vídeo ou playlist.');return;}
     if(!isLive&&!isTemplate&&!videos.some(v=>v.youtubeUrl?.trim())){setError('Adicione um vídeo ou playlist.');return;}
     if(!isLive&&!isTemplate&&videos.some(v=>v.youtubeUrl?.trim()&&!extractYouTubeId(v.youtubeUrl))){setError('Há um link inválido. Importe a playlist ou use links de vídeos.');return;}
@@ -469,7 +477,7 @@ export function ProgramModal({mode,program,channels,selectedChannel,selectedDate
     
     setSaving(true);
     try {
-      await onSave({id:isEdit?program.id:`prog_${crypto.randomUUID()}`,nome,canalId,classificacao,tags,sinopse:finalSinopse,data:selectedDate,duracao:dur,horarioInicio:horIn,horarioFim:horFim,youtubeId:isLive?"":videos.find(v=>v.youtubeUrl?.trim())?.youtubeUrl||"",videos:isLive?[]:videos.filter(v=>v.youtubeUrl?.trim()),isLive,liveChannel:isLive?resolvedLiveChannel:"",thumbnailType,thumbnailUrl,gcAlways,maratona,blocoDuracao:Number(blocoDuracao)||BLOCO_PADRAO,isTemplate,gcNever,isJingle,jingleType:isJingle?jingleType:"",overlayLogoUrl:overlayLogoUrl.trim()||null,overlayCorner:overlayCorner||"",overlaySize:overlaySize||null});
+      await onSave({id:isEdit?program.id:`prog_${crypto.randomUUID()}`,nome,canalId,classificacao,tags,sinopse:finalSinopse,data:selectedDate,duracao:dur,horarioInicio:horIn,horarioFim:horFim,youtubeId:isLive?"":videos.find(v=>v.youtubeUrl?.trim())?.youtubeUrl||"",videos:isLive?[]:videos.filter(v=>v.youtubeUrl?.trim()),isLive,liveUrl:isLive?liveUrl.trim():"",liveChannel:isLive?resolvedLiveChannel||"":"",thumbnailType,thumbnailUrl,gcAlways,maratona,blocoDuracao:Number(blocoDuracao)||BLOCO_PADRAO,isTemplate,gcNever,isJingle,jingleType:isJingle?jingleType:"",overlayLogoUrl:overlayLogoUrl.trim()||null,overlayCorner:overlayCorner||"",overlaySize:overlaySize||null});
       setSaving(false);
     } catch(err) {
       console.error("Erro ao salvar:",err);
@@ -509,6 +517,7 @@ export function ProgramModal({mode,program,channels,selectedChannel,selectedDate
         {/* Fonte do programa: playlists seguem o player e o sincronismo normais; lives são descobertas pelo canal. */}
         <div style={{padding:14,border:"1px solid rgba(255,255,255,.1)",borderRadius:8,background:"rgba(255,255,255,.025)"}}>
           <label style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer",fontSize:13,fontWeight:700,color:isLive?"#ff6b70":"#d5dfed"}}><input type="checkbox" checked={isLive} onChange={e=>{setIsLive(e.target.checked);md()}}/> ESTE PROGRAMA É UMA LIVE DO YOUTUBE</label>
+          {isLive&&<div style={{marginTop:12}}><label style={lS}>URL DA LIVE · REPRODUÇÃO IMEDIATA</label><input value={liveUrl} onChange={e=>{setLiveUrl(e.target.value);setLiveChannel("");md()}} placeholder="https://youtube.com/live/… ou https://youtu.be/…" style={{...iS,width:'100%'}}/><small>{liveResolving?"Identificando o canal… ":""}Esse link toca imediatamente. O canal abaixo é opcional e permite descobrir a próxima live automaticamente.</small></div>}
           {isLive&&<div style={{marginTop:12}}><label style={lS}>CANAL DO YOUTUBE PARA BUSCA AUTOMÁTICA</label><input value={liveChannel} onChange={e=>{setLiveChannel(e.target.value);md()}} placeholder="ID UC..., link do canal ou @handle" style={{...iS,width:"100%"}}/><small style={{display:"block",marginTop:6,color:"#99a9bd",lineHeight:1.5}}>A TV procura transmissões públicas ativas desse canal e troca o vídeo automaticamente. A consulta ao YouTube é atualizada em ciclos de aproximadamente 15 minutos. Na Vercel, permita o ID UC do canal; você o encontra no YouTube Studio → Configurações → Canal → Configurações avançadas. Cole o ID UC..., a URL /channel/UC... ou o link/@handle do canal, não o link de uma live específica.</small></div>}
         </div>
 
@@ -1126,6 +1135,8 @@ export default function AdminPanel({onLogout}){
   const dates=[...new Set([...catalog.programs.map(p=>p.data).filter(Boolean),...genDates(),selDate])].sort();
   const effectiveSelDate=selDate;
   const [selCh,setSelCh]=useState(null);
+  const [searchQuery,setSearchQuery]=useState(""),[programType,setProgramType]=useState("all"),[restoreText,setRestoreText]=useState(null),[restoreReplace,setRestoreReplace]=useState(false),[restoreBusy,setRestoreBusy]=useState(false);
+  const backupInput=useRef(null);
   const [viewMode,setViewMode]=useState("lista"); // "lista" | "grade"
   const [channels,setCh]=useState([]);
   const [programs,setProgs]=useState([]);
@@ -1255,7 +1266,7 @@ export default function AdminPanel({onLogout}){
   };
 
   // Clear selected programs when channel or date changes
-  useEffect(()=>{setSelectedProgs(new Set());setCloneMenuProgs([]);setShowCloneModal(false)},[selCh,selDate,tab]);
+  useEffect(()=>{setSelectedProgs(new Set());setCloneMenuProgs([]);setShowCloneModal(false)},[selCh,selDate,tab,searchQuery,programType]);
 
   // Para compatibilidade, manter dayProgs (filtra só o dia selecionado)
   // Com eternity: usa buildScheduleAdmin que projeta os programas do ciclo
@@ -1263,6 +1274,10 @@ export default function AdminPanel({onLogout}){
   const dayProgs = selCh && selDate
     ? buildScheduleAdmin(programs, selCh, selChObj, effectiveSelDate)
     : programs.filter(p => p.data === effectiveSelDate);
+  const filteredDay=filterPrograms(dayProgs,searchQuery,programType).map(p=>({...p,_filterLocked:!!searchQuery.trim()||programType!=="all"}));
+  const warnings=scheduleWarnings(programs,channels,effectiveSelDate);
+  let restorePreview=null,restoreError="";
+  if(restoreText!==null){try{restorePreview=prepareRestore(restoreText,programs,channels,restoreReplace)}catch(e){restoreError=e.message}}
   const totalSch=(()=>{let total=0,end=0;for(const p of dayProgs){const start=Math.max(end,Number(p.horarioInicio));total+=Math.max(0,Number(p.horarioFim)-start);end=Math.max(end,Number(p.horarioFim));}return total;})();
 
   return <div className="admin-page" style={{width:"100%",minHeight:"100vh",background:"#0a0c12",fontFamily:"'Segoe UI','Roboto',-apple-system,sans-serif",color:"#fff"}}>
@@ -1280,12 +1295,16 @@ export default function AdminPanel({onLogout}){
     <div className="admin-shell" style={{maxWidth:1180,margin:"0 auto",padding:20}}>
       {/* Tabs */}
       <div className="admin-nav" role="tablist" aria-label="Áreas do painel">
-        {[{id:"schedule",label:"Programação",icon:"▤"},{id:"channels",label:"Canais",icon:"◉"},{id:"jingles",label:"Vinhetas",icon:"◌"},{id:"news",label:"Redação",icon:"▰"}].map(t=>
-          <button role="tab" aria-selected={tab===t.id} key={t.id} onClick={()=>{if(newsDirty&&!confirm("Sair da redação sem salvar?"))return;setNewsDirty(false);setTab(t.id);}} className={tab===t.id?"active":""}><span aria-hidden="true">{t.icon}</span>{t.label}</button>)}
+        {[{id:"schedule",label:"Programação",icon:"list"},{id:"channels",label:"Canais",icon:"screen"},{id:"jingles",label:"Vinhetas",icon:"play"},{id:"news",label:"Redação",icon:"news"}].map(t=>
+          <button role="tab" aria-selected={tab===t.id} key={t.id} onClick={()=>{if(newsDirty&&!confirm("Sair da redação sem salvar?"))return;setNewsDirty(false);setTab(t.id);}} className={tab===t.id?"active":""}><Icon name={t.icon}/>{t.label}</button>)}
       </div>
       <header className="admin-section-heading"><div><span>ÁREA DE TRABALHO</span><h1>{selectedTabMeta.title}</h1><p>{selectedTabMeta.description}</p></div>{tab==="schedule"&&<button className="admin-add-button" onClick={()=>{setEP(null);setSM(true)}}>＋ Novo programa</button>}</header>
 
+      <div className="admin-backup-tools"><button onClick={()=>{const blob=new Blob([JSON.stringify(makeBackup(programs,channels),null,2)],{type:'application/json'}),url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`trendtv-backup-${getToday()}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}}>Exportar backup</button><button onClick={()=>backupInput.current?.click()}>Restaurar programação</button><input hidden ref={backupInput} type="file" accept=".json" onChange={async e=>{const file=e.target.files?.[0];if(!file)return;if(file.size>5*1024*1024){notify('Backup máximo de 5 MB.');e.target.value='';return;}try{setRestoreText(await file.text());setRestoreReplace(false)}catch{notify('Não foi possível abrir o backup.')}e.target.value='';}}/><span>Grade, modelos e configurações de canais no arquivo; restauração da programação nos canais existentes.</span></div>
+      {restoreText!==null&&<div className="modal-backdrop"><section className="restore-card" role="dialog" aria-modal="true" aria-label="Restaurar backup"><h2>Revisar restauração</h2><p>A programação será restaurada nos canais existentes. Canais não serão criados ou apagados.</p><label><input type="checkbox" checked={restoreReplace} disabled={restoreBusy} onChange={e=>setRestoreReplace(e.target.checked)}/> Atualizar programas com IDs já existentes</label>{restoreError?<p role="alert">{restoreError}</p>:<><p>{restorePreview.changes.length} alterações · {restorePreview.skipped} existentes ignorados</p><ul>{restorePreview.changes.slice(0,8).map(p=><li key={p.id}>{p.nome} · {p.data}</li>)}</ul></>}<div className="hero-actions"><button disabled={restoreBusy||!!restoreError||!restorePreview?.changes.length} className="primary" onClick={async()=>{setRestoreBusy(true);try{const checked=prepareRestore(restoreText,programs,channels,restoreReplace);await commitPrograms(checked.changes);setRestoreText(null);notify('Programação restaurada.')}catch(e){notify(e.message)}finally{setRestoreBusy(false)}}}>{restoreBusy?'Restaurando…':'Restaurar'}</button><button disabled={restoreBusy} onClick={()=>setRestoreText(null)}>Cancelar</button></div></section></div>}
       {tab==="schedule"&&<>
+        <details className="admin-warnings"><summary>Pendências do dia · {warnings.length}</summary>{warnings.length?<ul>{warnings.map((w,i)=><li key={i}><strong>{w.channel}</strong> · {w.text}</li>)}</ul>:<p>Nenhuma pendência de grade ou fonte de live neste dia.</p>}</details>
+        <div className="admin-search"><label>Buscar programa<input type="search" value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} placeholder="Nome, descrição ou etiqueta"/></label><label>Tipo<select value={programType} onChange={e=>setProgramType(e.target.value)}><option value="all">Todos</option><option value="live">Lives</option><option value="playlist">Playlists</option><option value="jingle">Vinhetas</option></select></label><span>{filteredDay.length} de {dayProgs.length} programas</span></div>
         {/* Date */}
         <div style={{marginBottom:20}}>
           <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,flexWrap:"wrap"}}>
@@ -1337,7 +1356,7 @@ export default function AdminPanel({onLogout}){
         <div style={{display:"flex",gap:16,padding:"12px 16px",marginBottom:16,background:"rgba(255,255,255,0.03)",borderRadius:8,fontSize:12,color:"#888",flexWrap:"wrap",alignItems:"center"}}>
           {/* Checkbox selecionar todos */}
           {selCh&&dayProgs.filter(p=>p.canalId===selCh&&!p._isProjected).length>0&&(()=>{
-            const selectableProgs=dayProgs.filter(p=>p.canalId===selCh&&!p._isProjected);
+            const selectableProgs=filteredDay.filter(p=>p.canalId===selCh&&!p._isProjected);
             const allSelected=selectableProgs.length>0&&selectableProgs.every(p=>selectedProgs.has(p.id));
             const someSelected=selectableProgs.some(p=>selectedProgs.has(p.id));
             return <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",userSelect:"none"}} title={allSelected?"Desmarcar todos":"Selecionar todos"}>
@@ -1410,9 +1429,9 @@ Deseja continuar?`))return;
         </div>
 
         {viewMode==="lista"
-          ? <TimelineView programs={dayProgs} channels={channels} selectedChannel={selCh}
+          ? <TimelineView programs={filteredDay} channels={channels} selectedChannel={selCh}
               onEdit={p=>{setEP(programs.find(x=>x.id===p.id)||p);setSM(true)}} onDelete={handleDel} onReorder={handleReorder} onToggleSelect={toggleProgSelect} selectedProgs={selectedProgs}/>
-          : <GradeVisual programs={dayProgs} allPrograms={programs} channels={channels} selectedChannel={selCh} selDate={effectiveSelDate}
+          : <GradeVisual programs={filteredDay} allPrograms={programs} channels={channels} selectedChannel={selCh} selDate={effectiveSelDate}
               onEdit={p=>{setEP(programs.find(x=>x.id===p.id)||p);setSM(true)}} notify={notify}/>}
 
         <button className="admin-add-button admin-add-button-bottom" onClick={()=>{setEP(null);setSM(true)}}>＋ Adicionar programa</button>

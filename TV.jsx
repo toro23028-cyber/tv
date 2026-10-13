@@ -1,3 +1,4 @@
+import Icon from './Icons';
 import {useSearchParams,useNavigate} from 'react-router-dom';
 import {useCatalog} from './Catalog';
 import {useFavorites,readPreference,writePreference,shareChannel} from './preferences';
@@ -205,14 +206,14 @@ function OSDFooter({channel,muted,onMute,favorite,onFavorite,onShare,program,nex
         {nextProgram && <span style={{fontSize:13,color:"#777"}}>A seguir: <span style={{color:"#bbb",fontWeight:600}}>{nextProgram.nome}</span> · {nextProgram.horarioTexto}</span>}
       </div>
       <div className="osd-actions" style={{display:"flex",gap:10}}>
-        <button onClick={e=>{e.stopPropagation();window.location.href="/"}} style={{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.12)",color:"#ccc",padding:"10px 16px",borderRadius:6,cursor:"pointer",fontSize:14}} title="Ir para Home">🏠</button>
-        <button onClick={e=>{e.stopPropagation();onMute()}} aria-label={muted?'Ativar som':'Silenciar'} title="Som (M)">{muted?'🔇':'🔊'}</button>
-        <button onClick={e=>{e.stopPropagation();onFavorite()}} aria-pressed={favorite} aria-label={favorite?'Remover favorito':'Favoritar canal'} title="Favorito">{favorite?'★':'☆'}</button>
-        <button onClick={e=>{e.stopPropagation();onShare()}} title="Compartilhar canal" aria-label="Compartilhar canal">↗</button>
+        <button onClick={e=>{e.stopPropagation();window.location.href="/"}} style={{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.12)",color:"#ccc",padding:"10px 16px",borderRadius:6,cursor:"pointer",fontSize:14}} title="Ir para Home" aria-label="Início"><Icon name="home"/></button>
+        <button onClick={e=>{e.stopPropagation();onMute()}} aria-label={muted?'Ativar som':'Silenciar'} title="Som (M)"><Icon name={muted?"muted":"volume"}/></button>
+        <button onClick={e=>{e.stopPropagation();onFavorite()}} aria-pressed={favorite} aria-label={favorite?'Remover favorito':'Favoritar canal'} title="Favorito"><Icon name="star" filled={favorite}/></button>
+        <button onClick={e=>{e.stopPropagation();onShare()}} title="Compartilhar canal" aria-label="Compartilhar canal"><Icon name="share"/></button>
         <button onClick={e=>{e.stopPropagation();onToggleDisplayMode()}} aria-label={displayMode==="studio"?"Mudar para player normal":"Mudar para modo estúdio"} title="Alternar entre Estúdio e Player ampliado">{displayMode==="studio"?"▣ Estúdio":"▣ Player normal"}</button>
         {isLive&&<button onClick={e=>{e.stopPropagation();onToggleLowLatency()}} aria-pressed={lowLatency} title={latencyStatus==="unsupported"?"Esta live não oferece reprodução em 2×; ela continuará no modo normal.":"Acelera somente esta live até chegar perto do ao vivo. Playlists não usam esta opção."}>{!lowLatency?"🚀 Reduzir atraso":latencyStatus==="catching_up"?"⏩ Recuperando · 2×":latencyStatus==="unsupported"?"⚠️ 2× indisponível":latencyStatus==="synced"?"✓ Ao vivo":latencyStatus==="requesting"?"⏳ Testando 2×":"⏳ Verificando 2×"}</button>}
         <button onClick={e=>{e.stopPropagation();onOpenEPG()}} style={{background:"rgba(255,255,255,0.1)",border:"1px solid rgba(255,255,255,0.15)",color:"#ccc",padding:"10px 22px",borderRadius:6,cursor:"pointer",fontSize:14,fontWeight:600}}>▲ Guia Rápido</button>
-        <button onClick={e=>{e.stopPropagation();onOpenSettings()}} style={{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.12)",color:"#ccc",padding:"10px 16px",borderRadius:6,cursor:"pointer",fontSize:14}}>⚙️</button>
+        <button onClick={e=>{e.stopPropagation();onOpenSettings()}} style={{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.12)",color:"#ccc",padding:"10px 16px",borderRadius:6,cursor:"pointer",fontSize:14}} aria-label="Configurações"><Icon name="settings"/></button>
         <button onClick={e=>{e.stopPropagation();onFullscreen()}} style={{background:"rgba(255,255,255,0.1)",border:"1px solid rgba(255,255,255,0.15)",color:"#ccc",padding:"10px 22px",borderRadius:6,cursor:"pointer",fontSize:14,fontWeight:600}}>{isFullscreen?"↙ Sair":"⛶ Tela Cheia"}</button>
       </div>
     </div>
@@ -707,7 +708,7 @@ export default function TVWeb(){
   const cp=getCurProg(schedule);
   const ci=schedule.findIndex(p=>p.id===cp?.id);
   const np=ci>=0?schedule[ci+1]:null;
-  const activeProgramKey=`${ch?.id||''}:${cp?.srcProgId||cp?.id||''}:${cp?.liveChannel||cp?.liveChannelId||''}`;
+  const activeProgramKey=`${ch?.id||''}:${cp?.srcProgId||cp?.id||''}:${cp?.liveChannel||cp?.liveChannelId||''}:${cp?.liveUrl||''}`;
   const [liveLookup,setLiveLookup]=useState(null);
   useEffect(()=>{
     const liveChannel=cp?.liveChannel||cp?.liveChannelId;
@@ -723,16 +724,17 @@ export default function TVWeb(){
         if(!stopped&&error.name!=='AbortError')setLiveLookup(prev=>prev?.programKey===activeProgramKey?{...prev,status:'error',errorMessage:error.message}:{programKey:activeProgramKey,status:'error',errorMessage:error.message,videoId:null});
       }
     };
-    refresh();const timer=setInterval(refresh,5*60_000);
-    return()=>{stopped=true;controller.abort();clearInterval(timer);};
+    const first=setTimeout(refresh,cp?.liveUrl?2*60_000:0);const timer=setInterval(refresh,5*60_000);
+    return()=>{stopped=true;controller.abort();clearTimeout(first);clearInterval(timer);};
   },[activeProgramKey,cp?.isLive,cp?.liveChannel,cp?.liveChannelId]);
+  const directLiveId=extractYTId(cp?.liveUrl||'');
   const activeLive=liveLookup?.programKey===activeProgramKey?liveLookup:null;
 
   const info=getVideoPlaybackInfo(cp);
-  const blockedId=cp?.isLive?activeLive?.videoId:info?.videoId;
+  const blockedId=cp?.isLive?activeLive?.videoId||directLiveId:info?.videoId;
   const unavailable=!!((!cp?.isLive&&info?.blocked)||Number(blockedVideos[blockedId])>Date.now());
-  const ytVideoId=cp?.isLive?(!unavailable?activeLive?.videoId||null:null):(!unavailable?info?.videoId:null);
-  const playbackIdentity=cp?.isLive?`${activeProgramKey}:${activeLive?.videoId||'live-pending'}`:`${ch?.id}:${cp?.contKey||cp?.id}:${info?.videoIndex}:${info?.cycleIndex}`;
+  const ytVideoId=cp?.isLive?(!unavailable?activeLive?.videoId||directLiveId||null:null):(!unavailable?info?.videoId:null);
+  const playbackIdentity=cp?.isLive?`${activeProgramKey}:${activeLive?.videoId||directLiveId||'live-pending'}`:`${ch?.id}:${cp?.contKey||cp?.id}:${info?.videoIndex}:${info?.cycleIndex}`;
   useEffect(()=>{setPlayerIssue('');setLatencyStatus(cp?.isLive?'checking':'off');},[playbackIdentity,cp?.isLive]);
   const currentPosition=()=>getVideoPlaybackInfo(cp)?.position||0;
   const fullscreen=useCallback(async()=>{

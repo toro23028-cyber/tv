@@ -1,0 +1,103 @@
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> trendtv@1.1.0 check
+> npm test && npm run test:components && npm run build
+
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> trendtv@1.1.0 test
+> node tests/run.mjs
+
+✔ busca ignora acentos e filtra live/playlist (1.924018ms)
+✔ backup pode ser restaurado, ignora IDs existentes por padrão e aceita atualização explícita (3.283267ms)
+✔ restauração rejeita conflitos, canais ausentes, duplicação de IDs e formato inválido (3.799233ms)
+✔ pendências identificam ausência de programação e fonte de live (1.875546ms)
+✔ restauração recusa listas malformadas antes de gravar (2.911575ms)
+✔ publicação deduplica conteúdo mesmo com IDs diferentes (0.94894ms)
+✔ links twitter e x com tracking não geram duas publicações (0.905445ms)
+✔ merge repetido é idempotente e preserva aprovação existente (1.808316ms)
+✔ itens rejeitados não escondem cópia válida durante deduplicação (1.363876ms)
+✔ importação JSON de tweets mantém até 160 caracteres e revisão obrigatória (3.588871ms)
+✔ live por URL preserva fonte e gera thumbnail sem playlist (0.796103ms)
+✔ feed bloqueia acesso sem autenticação antes de consultar qualquer fonte (3.572767ms)
+✔ feed autenticado aceita apenas fonte configurada e deixa URL remota fora da resposta (7.35826ms)
+✔ guia inclui amanhã e preserva reprodução na passagem da meia-noite (1.229877ms)
+✔ eternity projeta as próximas 24 horas sem repetir antes da âncora (0.991073ms)
+✔ guia vazio não inventa programação e cruza ano corretamente (0.565239ms)
+✔ programas modelo nunca entram na TV nem no ciclo eternity (0.502456ms)
+✔ duração editorial permanece estável e começa na publicação (0.475506ms)
+✔ normaliza categorias novas e migra cards sociais antigos para tweets (0.238084ms)
+✔ aplica limites de manchete, subtítulo, tweet e etiquetas (0.429238ms)
+✔ conta palavras sem erro com espaços e linhas múltiplas (0.175811ms)
+✔ aceita apenas URLs HTTP(S) para fonte, imagem e publicação (2.1949ms)
+✔ publicação mantém o subtítulo e permite trending topic aprovado (0.204103ms)
+✔ conteúdo publicado sem validade não ganha nova expiração a cada atualização (0.777275ms)
+✔ rejeita datas inexistentes em vez de avançar silenciosamente o calendário (0.13452ms)
+✔ modelo não gera conflito contra a programação real nem entra no ar (0.33641ms)
+✔ validação exige canal, nome, data e segundos inteiros (0.280537ms)
+✔ rejeita conflito da edição visual com programa no dia seguinte (0.192576ms)
+✔ programação corrompida não cria segmentos negativos ou loop (0.209872ms)
+✔ ciclo de sete dias cobre todas as viradas e a janela futura de 12h (4.499013ms)
+✔ limpeza preserva configuração live e remove dados de projeção (9.952653ms)
+✔ data e hora de Brasília permanecem no mesmo dia depois das 21h (0.391892ms)
+✔ conversão absoluta preserva segundos e virada de dia (0.233857ms)
+✔ calendário do painel cruza mês e ano sem depender do fuso local (0.10074ms)
+✔ grade expirada não volta ao ar fora de eternity (0.22916ms)
+✔ duração inválida não causa loop no fallback legado (0.189692ms)
+✔ programa após meia-noite preserva offset de mídia (0.369589ms)
+✔ blocos de maratona mantêm a identidade e o tempo contínuo (0.295559ms)
+✔ normaliza ID, URL de canal e handle do YouTube para live automática (0.600122ms)
+✔ grade preserva a configuração de live para resolução durante a exibição (0.204544ms)
+✔ playlist troca no segundo exato sem cortar ou acrescentar buffer (0.218414ms)
+✔ eternity preserva a âncora antiga no Admin e na TV (0.637647ms)
+✔ eternity não repete programas antes da âncora (0.11468ms)
+✔ vinheta interrompe e retoma a mídia no horário absoluto (0.277743ms)
+✔ programação nunca contém intervalos sobrepostos (0.177584ms)
+✔ conflitos atravessando meia-noite são detectados (0.102192ms)
+✔ vinheta não é conflito com programa normal (0.154069ms)
+✔ URLs variadas do YouTube são aceitas e domínios falsos recusados (1.250878ms)
+✔ duração ISO inclui dias e segundos (0.266937ms)
+✔ importação de notícias nunca aprova conteúdo automaticamente (0.204344ms)
+✔ notícias expiradas, sem fonte ou sem aprovação não são publicadas (0.53206ms)
+✔ a rota permite somente os canais configurados e devolve a live ativa com cache (1.379308ms)
+✔ a rota rejeita parâmetros extras que poderiam contornar o cache (0.115321ms)
+✔ handle não autorizado é recusado antes de gastar uma consulta no YouTube (0.165115ms)
+ℹ tests 54
+ℹ suites 0
+ℹ pass 54
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 82.02029
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> trendtv@1.1.0 test:components
+> node tests/component-check.mjs
+
+10 verificações de renderização e gravação simulada passaram; nenhuma conexão ao Firebase.
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> trendtv@1.1.0 build
+> vite build
+
+vite v8.2.2 building client environment for production...
+transforming...
+✓ 61 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                               1.19 kB │ gzip:   0.54 kB
+dist/assets/index-Bs6mMmw5.css               42.95 kB │ gzip:  10.13 kB
+dist/assets/firebase-core-CLPjRdKE.js         0.07 kB │ gzip:   0.09 kB
+dist/assets/rolldown-runtime-CbXtAM7H.js      0.58 kB │ gzip:   0.36 kB
+dist/assets/NewsOverlay-yUC4brZZ.js           7.68 kB │ gzip:   3.12 kB
+dist/assets/schedule-DBGBeh1E.js              9.43 kB │ gzip:   4.04 kB
+dist/assets/Home-roeTO_E6.js                 10.04 kB │ gzip:   3.50 kB
+dist/assets/index-BCMMkyiG.js                48.88 kB │ gzip:  17.75 kB
+dist/assets/TV-CdoKx5ft.js                   53.72 kB │ gzip:  15.18 kB
+dist/assets/firebase-auth-BLjmQG-7.js       104.38 kB │ gzip:  31.25 kB
+dist/assets/Admin-CLBXtp7I.js               131.71 kB │ gzip:  35.21 kB
+dist/assets/react-vendor-CPYPbbnH.js        189.59 kB │ gzip:  59.61 kB
+dist/assets/firebase-firestore-DFsk8kt7.js  515.58 kB │ gzip: 151.31 kB
+
+✓ built in 621ms
