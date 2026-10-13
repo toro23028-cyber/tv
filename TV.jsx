@@ -3,6 +3,7 @@ import {useCatalog} from './Catalog';
 import {useFavorites,readPreference,writePreference,shareChannel} from './preferences';
 import YoutubePlayer from './YoutubePlayer';
 import NewsOverlay from './NewsOverlay';
+import {fetchActiveChannelLive} from './youtube-live-client.js';
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { getNow, getToday, fmtHM, getAbsoluteNow, broadcastTime, broadcastDate } from './clock.js';
 import { buildGuideSchedule, guideTime, buildSchedule, getCurProg, getElapsed, getVideoPlaybackInfo, thumbnailForProgram } from './schedule.js';
@@ -15,7 +16,7 @@ const CC={L:"#0f0","10":"#00bfff","12":"#ff0","14":"#f80","16":"#f00","18":"#000
 function fD(s){const h=Math.floor(Number(s)/3600),m=Math.floor(Number(s)%3600/60);return `${h?h+'h ':''}${m}min`;}
 function ChLogo({ch, size=28}) {
   if (ch.logoType==="custom" && ch.logoUrl) return <img src={ch.logoUrl} alt="" style={{width:size,height:size,borderRadius:4,objectFit:"cover"}} />;
-  return <span style={{fontSize:size*0.85}}>{ch.logo || "📺"}</span>;
+  return <span className="channel-logo-fallback" style={{width:size,height:size,fontSize:size*0.34}} aria-hidden="true">{ch.logo || "TV"}</span>;
 }
 
 // ============================================
@@ -83,7 +84,7 @@ function GCBar({channel,program,nextProgram}){
     ? (nextTitle ? `A seguir: ${nextTitle}` : null)
     : ((program.videos?.[0]?.titulo && program.videos[0].titulo !== program.nome) ? program.videos[0].titulo : (channel?.nome || null));
 
-  return <div style={{
+  return <div className="tv-gc" style={{
     position:"absolute",left:"7%",bottom:"16%",zIndex:9,maxWidth:"62%",
     animation:"gcIn 0.5s cubic-bezier(0.22,1,0.36,1)",
     pointerEvents:"none",
@@ -160,7 +161,7 @@ function OSDHeader({channel,program,visible}){
 // ============================================
 // OSD FOOTER (TV-style bottom bar)
 // ============================================
-function OSDFooter({channel,muted,onMute,favorite,onFavorite,onShare,program,nextProgram,onOpenEPG,onOpenFull,onOpenSettings,onFullscreen,visible}){
+function OSDFooter({channel,muted,onMute,favorite,onFavorite,onShare,program,nextProgram,onOpenEPG,onOpenFull,onOpenSettings,onFullscreen,displayMode,onToggleDisplayMode,isLive,lowLatency,onToggleLowLatency,latencyStatus,visible}){
   const[el,setEl]=useState(0);
   const[isFullscreen,setIsFullscreen]=useState(false);
   
@@ -208,6 +209,8 @@ function OSDFooter({channel,muted,onMute,favorite,onFavorite,onShare,program,nex
         <button onClick={e=>{e.stopPropagation();onMute()}} aria-label={muted?'Ativar som':'Silenciar'} title="Som (M)">{muted?'🔇':'🔊'}</button>
         <button onClick={e=>{e.stopPropagation();onFavorite()}} aria-pressed={favorite} aria-label={favorite?'Remover favorito':'Favoritar canal'} title="Favorito">{favorite?'★':'☆'}</button>
         <button onClick={e=>{e.stopPropagation();onShare()}} title="Compartilhar canal" aria-label="Compartilhar canal">↗</button>
+        <button onClick={e=>{e.stopPropagation();onToggleDisplayMode()}} aria-label={displayMode==="studio"?"Mudar para player normal":"Mudar para modo estúdio"} title="Alternar entre Estúdio e Player ampliado">{displayMode==="studio"?"▣ Estúdio":"▣ Player normal"}</button>
+        {isLive&&<button onClick={e=>{e.stopPropagation();onToggleLowLatency()}} aria-pressed={lowLatency} title={latencyStatus==="unsupported"?"Esta live não oferece reprodução em 2×; ela continuará no modo normal.":"Acelera somente esta live até chegar perto do ao vivo. Playlists não usam esta opção."}>{!lowLatency?"🚀 Reduzir atraso":latencyStatus==="catching_up"?"⏩ Recuperando · 2×":latencyStatus==="unsupported"?"⚠️ 2× indisponível":latencyStatus==="synced"?"✓ Ao vivo":latencyStatus==="requesting"?"⏳ Testando 2×":"⏳ Verificando 2×"}</button>}
         <button onClick={e=>{e.stopPropagation();onOpenEPG()}} style={{background:"rgba(255,255,255,0.1)",border:"1px solid rgba(255,255,255,0.15)",color:"#ccc",padding:"10px 22px",borderRadius:6,cursor:"pointer",fontSize:14,fontWeight:600}}>▲ Guia Rápido</button>
         <button onClick={e=>{e.stopPropagation();onOpenSettings()}} style={{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.12)",color:"#ccc",padding:"10px 16px",borderRadius:6,cursor:"pointer",fontSize:14}}>⚙️</button>
         <button onClick={e=>{e.stopPropagation();onFullscreen()}} style={{background:"rgba(255,255,255,0.1)",border:"1px solid rgba(255,255,255,0.15)",color:"#ccc",padding:"10px 22px",borderRadius:6,cursor:"pointer",fontSize:14,fontWeight:600}}>{isFullscreen?"↙ Sair":"⛶ Tela Cheia"}</button>
@@ -222,12 +225,13 @@ function OSDFooter({channel,muted,onMute,favorite,onFavorite,onShare,program,nex
 function EPGCompact({channels,allPrograms,currentChannelId,onSelectChannel,onSelectProgram,onOpenFull,onClose}){
   const now=getNow();
   const [search,setSearch]=useState('');
-  const matches=search.trim()?channels.flatMap(channel=>buildGuideSchedule(allPrograms,channel.id,channel).filter(p=>p.horarioFim>now&&p.horarioInicio<now+86400).filter(p=>!p.isPlaceholder&&p.nome.toLocaleLowerCase('pt-BR').includes(search.trim().toLocaleLowerCase('pt-BR'))).map(p=>({...p,channelName:channel.nome}))):[];
+  const horizon=now+43200;
+  const matches=search.trim()?channels.flatMap(channel=>buildGuideSchedule(allPrograms,channel.id,channel).filter(p=>p.horarioFim>now&&p.horarioInicio<horizon).filter(p=>!p.isPlaceholder&&p.nome.toLocaleLowerCase('pt-BR').includes(search.trim().toLocaleLowerCase('pt-BR'))).map(p=>({...p,channelName:channel.nome}))):[];
   const scrollRef=useRef(null);
-  const ROW_H=92, PX=400;
-  const totalW=PX*48;
-  const nowPx=(now/3600)*PX;
-  const secToPx=(sec)=>(Number(sec)/3600)*PX;
+  const ROW_H=92, PX=400, timelineStart=Math.floor(now/3600)*3600;
+  const totalW=PX*13;
+  const secToPx=(sec)=>((Number(sec)-timelineStart)/3600)*PX;
+  const nowPx=secToPx(now);
   const[clock,setClock]=useState(new Date());
   const[canScrollL,setCanScrollL]=useState(false);
   const[canScrollR,setCanScrollR]=useState(true);
@@ -241,7 +245,7 @@ function EPGCompact({channels,allPrograms,currentChannelId,onSelectChannel,onSel
   useEffect(()=>{
     const el=scrollRef.current; if(!el)return;
     // Posiciona no "agora" (com margem à esquerda para mostrar o que já passou)
-    el.scrollLeft=Math.max(0,nowPx-260);
+    el.scrollLeft=Math.max(0,nowPx-40);
     updScrollState();
     const on=()=>updScrollState();
     el.addEventListener("scroll",on);
@@ -284,10 +288,10 @@ function EPGCompact({channels,allPrograms,currentChannelId,onSelectChannel,onSel
         <div style={{display:"flex",position:"sticky",top:0,zIndex:8}}>
           <div style={{width:140,flexShrink:0,height:35,position:"sticky",left:0,zIndex:9,background:"rgb(12,14,20)",borderRight:"1px solid rgba(255,255,255,0.08)",borderBottom:"1px solid rgba(255,255,255,0.1)"}}/>
           <div style={{position:"relative",height:35,width:totalW,flexShrink:0,background:"rgb(12,14,20)",borderBottom:"1px solid rgba(255,255,255,0.1)"}}>
-            {Array.from({length:49}).map((_,h)=>{
-              const x=secToPx(h*3600);
+            {Array.from({length:14}).map((_,h)=>{
+              const x=h*PX;
               return <div key={h} style={{position:"absolute",left:x,top:0,bottom:0,borderLeft:"1px solid rgba(255,255,255,0.1)"}}>
-                <span style={{fontSize:13,color:"#ccc",fontWeight:600,padding:"8px 8px",whiteSpace:"nowrap",display:"inline-block"}}>{guideTime(h*3600)}</span>
+                <span style={{fontSize:13,color:"#ccc",fontWeight:600,padding:"8px 8px",whiteSpace:"nowrap",display:"inline-block"}}>{guideTime(timelineStart+h*3600)}</span>
               </div>;
             })}
             <div style={{position:"absolute",left:nowPx-3.5,bottom:-2,width:10,height:10,borderRadius:"50%",background:"#ff3b3b",boxShadow:"0 0 8px #ff3b3b",zIndex:7}}/>
@@ -296,6 +300,7 @@ function EPGCompact({channels,allPrograms,currentChannelId,onSelectChannel,onSel
         {/* LINHAS: canal (sticky esquerda) + programas — mesma linha, mesmo scroll */}
         {[...channels.filter(ch=>ch.id===currentChannelId),...channels.filter(ch=>ch.id!==currentChannelId)].map(ch=>{
           const sched=buildGuideSchedule(allPrograms,ch.id,ch);
+          const upcoming=sched.filter(p=>p.horarioFim>now&&p.horarioInicio<horizon&&!p.isPlaceholder);
           const cur=getCurProg(sched);
           const isCurrent=ch.id===currentChannelId;
           return <div key={ch.id} style={{display:"flex"}}>
@@ -303,19 +308,18 @@ function EPGCompact({channels,allPrograms,currentChannelId,onSelectChannel,onSel
               <div style={{textAlign:"center"}}><ChLogo ch={ch} size={36}/><div style={{fontSize:12,fontWeight:600,color:isCurrent?"#fff":"#888",marginTop:4}}>{ch.nome}</div></div>
             </div>
             <div style={{position:"relative",height:ROW_H,width:totalW,flexShrink:0,borderBottom:"1px solid rgba(255,255,255,0.05)",background:isCurrent?"rgba(26,115,232,0.08)":"transparent",boxSizing:"border-box"}}>
-              {sched.filter(p=>p.horarioInicio<now+86400&&!p.isPlaceholder).map(prog=>{
-                const startSec=Number(prog.horarioInicio), dur=Number(prog.duracao);
-                const left=secToPx(startSec), w=Math.max(secToPx(dur),2);
+              {upcoming.map(prog=>{
+                const startSec=Number(prog.horarioInicio),endSec=Math.min(Number(prog.horarioFim),horizon),displayStart=Math.max(startSec,timelineStart);
+                const left=secToPx(displayStart), w=Math.max(((endSec-displayStart)/3600)*PX,2);
                 const isNow=cur?.id===prog.id;
-                const isPast=Number(prog.horarioFim)<=now;
                 const needsRepeat=w>500;
                 const needsTriple=w>900;
                 return <div key={prog.id} role="button" tabIndex={0} onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();onSelectProgram(prog);}}} onClick={()=>onSelectProgram(prog)}
-                  style={{position:"absolute",left,width:w,top:0,bottom:2,cursor:"pointer",overflow:"hidden",background:isNow?isCurrent?"rgba(60,70,90,0.95)":"rgba(40,44,60,0.95)":isCurrent?"rgba(35,40,55,0.7)":"rgba(30,32,44,0.6)",borderRight:"1px solid rgba(255,255,255,0.06)",borderLeft:"1px solid rgba(255,255,255,0.03)",boxSizing:"border-box",transition:"background 0.2s",opacity:isPast?0.42:1}}
-                  onMouseEnter={e=>{e.currentTarget.style.background=isNow?isCurrent?"rgba(70,85,110,1)":"rgba(60,70,90,1)":isCurrent?"rgba(50,60,75,0.9)":"rgba(45,50,65,0.9)";if(isPast)e.currentTarget.style.opacity=0.7}}
-                  onMouseLeave={e=>{e.currentTarget.style.background=isNow?isCurrent?"rgba(60,70,90,0.95)":"rgba(40,44,60,0.95)":isCurrent?"rgba(35,40,55,0.7)":"rgba(30,32,44,0.6)";if(isPast)e.currentTarget.style.opacity=0.42}}>
+                  style={{position:"absolute",left,width:w,top:0,bottom:2,cursor:"pointer",overflow:"hidden",background:isNow?isCurrent?"rgba(60,70,90,0.95)":"rgba(40,44,60,0.95)":isCurrent?"rgba(35,40,55,0.7)":"rgba(30,32,44,0.6)",borderRight:"1px solid rgba(255,255,255,0.06)",borderLeft:"1px solid rgba(255,255,255,0.03)",boxSizing:"border-box",transition:"background 0.2s"}}
+                  onMouseEnter={e=>{e.currentTarget.style.background=isNow?isCurrent?"rgba(70,85,110,1)":"rgba(60,70,90,1)":isCurrent?"rgba(50,60,75,0.9)":"rgba(45,50,65,0.9)"}}
+                  onMouseLeave={e=>{e.currentTarget.style.background=isNow?isCurrent?"rgba(60,70,90,0.95)":"rgba(40,44,60,0.95)":isCurrent?"rgba(35,40,55,0.7)":"rgba(30,32,44,0.6)"}}>
                   <div style={{position:"absolute",left:10,top:8,right:10}}>
-                    <div style={{fontSize:11,color:"#aaa",marginBottom:4,fontWeight:500}}>{prog.horarioTexto}{isNow&&<span style={{marginLeft:6,fontSize:9,fontWeight:700,padding:"2px 6px",borderRadius:3,background:"#f44336",color:"#fff"}}>AO VIVO</span>}{isPast&&<span style={{marginLeft:6,fontSize:9,fontWeight:700,padding:"2px 6px",borderRadius:3,background:"rgba(255,255,255,0.12)",color:"#aaa"}}>JÁ EXIBIDO</span>}</div>
+                    <div style={{fontSize:11,color:"#aaa",marginBottom:4,fontWeight:500}}>{prog.horarioTexto}{isNow&&<span style={{marginLeft:6,fontSize:9,fontWeight:700,padding:"2px 6px",borderRadius:3,background:"#f44336",color:"#fff"}}>AO VIVO</span>}</div>
                     <div style={{fontSize:14,fontWeight:700,color:isNow?"#fff":"#ddd",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{prog.nome}</div>
                   </div>
                   {needsRepeat&&<div style={{position:"absolute",left:"50%",top:"50%",transform:"translate(-50%,-50%)",textAlign:"center"}}>
@@ -326,7 +330,7 @@ function EPGCompact({channels,allPrograms,currentChannelId,onSelectChannel,onSel
                   </div>}
                 </div>;
               })}
-              {sched.length===0&&<div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",color:"#555",fontSize:13}}>Sem programação</div>}
+              {upcoming.length===0&&<div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",color:"#555",fontSize:13}}>Sem programação nas próximas 12 horas</div>}
             </div>
           </div>;
         })}
@@ -351,14 +355,14 @@ function EPGCompact({channels,allPrograms,currentChannelId,onSelectChannel,onSel
 function FullDay({channels,allPrograms,currentChannelId,onClose,onProgramClick}){
   const [search,setSearch]=useState('');
   const[viewCh,setVCh]=useState(currentChannelId);
-  const ch=channels.find(c=>c.id===viewCh)||channels[0];
-  const sched=buildGuideSchedule(allPrograms,viewCh,ch).filter(p=>!p.isPlaceholder&&p.nome.toLocaleLowerCase('pt-BR').includes(search.trim().toLocaleLowerCase('pt-BR')));
   const [ns,setNs]=useState(getNow());
+  const ch=channels.find(c=>c.id===viewCh)||channels[0];
+  const sched=buildGuideSchedule(allPrograms,viewCh,ch).filter(p=>!p.isPlaceholder&&p.horarioFim>ns&&p.horarioInicio<ns+43200&&p.nome.toLocaleLowerCase('pt-BR').includes(search.trim().toLocaleLowerCase('pt-BR')));
   useEffect(()=>{const timer=setInterval(()=>setNs(getNow()),1000);return()=>clearInterval(timer);},[]);
-  return <div onClick={e=>{e.stopPropagation();onClose()}} style={{position:"fixed",inset:0,zIndex:50,background:"rgba(0,0,0,0.92)",overflowY:"auto"}}>
+  return <div className="full-guide" onClick={e=>{e.stopPropagation();onClose()}} style={{position:"fixed",inset:0,zIndex:50,background:"rgba(0,0,0,0.92)",overflowY:"auto"}}>
     <div onClick={e=>e.stopPropagation()} style={{maxWidth:720,margin:"0 auto",padding:20,minHeight:"100vh"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20,position:"sticky",top:0,background:"rgba(0,0,0,0.95)",padding:"16px 0",zIndex:5}}>
-        <div><div style={{fontSize:20,fontWeight:700,color:"#fff"}}>Próximas 24 horas</div><div style={{fontSize:12,color:"#888",marginTop:2}}>{broadcastDate(new Date(),{weekday:"long",day:"numeric",month:"long"})}</div></div>
+        <div><div style={{fontSize:20,fontWeight:700,color:"#fff"}}>Agora e próximas 12 horas</div><div style={{fontSize:12,color:"#888",marginTop:2}}>{broadcastDate(new Date(),{weekday:"long",day:"numeric",month:"long"})}</div></div>
         <button onClick={onClose} style={{background:"rgba(255,255,255,0.1)",border:"none",color:"#fff",width:40,height:40,borderRadius:"50%",cursor:"pointer",fontSize:18}}>✕</button>
       </div>
       <input className="guide-search" type="search" aria-label="Buscar na programação" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Buscar programa…"/>
@@ -366,11 +370,10 @@ function FullDay({channels,allPrograms,currentChannelId,onClose,onProgramClick})
         {channels.map(c=><button key={c.id} onClick={()=>setVCh(c.id)} style={{padding:"10px 18px",borderRadius:6,cursor:"pointer",flexShrink:0,background:viewCh===c.id?`${c.cor}33`:"rgba(255,255,255,0.04)",border:viewCh===c.id?`1px solid ${c.cor}`:"1px solid rgba(255,255,255,0.08)",color:viewCh===c.id?"#fff":"#888",fontSize:13,fontWeight:600,display:"flex",alignItems:"center",gap:6}}><ChLogo ch={c} size={18}/> {c.nome}</button>)}
       </div>
       <div style={{display:"flex",flexDirection:"column",gap:6}}>
-        {sched.length===0&&<div style={{padding:40,textAlign:"center",color:"#555"}}>Sem programação nas próximas 24 horas.</div>}
-        {sched.filter(p=>p.horarioInicio<ns+86400&&p.horarioFim>ns).map(prog=>{
+        {sched.length===0&&<div style={{padding:40,textAlign:"center",color:"#555"}}>Sem programação nas próximas 12 horas.</div>}
+        {sched.map(prog=>{
           const isNow=ns>=prog.horarioInicio&&ns<prog.horarioFim;
-          const isPast=ns>=prog.horarioFim;
-          return <div key={prog.id} onClick={()=>onProgramClick(prog)} style={{display:"flex",gap:14,padding:"16px 18px",borderRadius:10,cursor:"pointer",background:isNow?"rgba(26,115,232,0.15)":isPast?"rgba(255,255,255,0.015)":"rgba(255,255,255,0.04)",border:isNow?"1px solid #1a73e8":"1px solid rgba(255,255,255,0.06)",opacity:isPast?0.4:1,transition:"all 0.2s"}}>
+          return <div key={prog.id} onClick={()=>onProgramClick(prog)} style={{display:"flex",gap:14,padding:"16px 18px",borderRadius:10,cursor:"pointer",background:isNow?"rgba(26,115,232,0.15)":"rgba(255,255,255,0.04)",border:isNow?"1px solid #1a73e8":"1px solid rgba(255,255,255,0.06)",transition:"all 0.2s"}}>
             <div style={{minWidth:75,textAlign:"center",paddingTop:2}}><div style={{fontSize:18,fontWeight:700,color:isNow?"#4fc3f7":"#fff"}}>{prog.horarioTexto}</div><div style={{fontSize:11,color:"#555",marginTop:2}}>{prog.horarioFimTexto}</div>{isNow&&<div style={{marginTop:6}}><LiveDot/></div>}</div>
             <div style={{width:3,borderRadius:2,background:isNow?ch.cor:"rgba(255,255,255,0.08)",flexShrink:0}}/>
             <div style={{flex:1,minWidth:0}}>
@@ -397,7 +400,7 @@ function ProgModal({program,channel,onClose,onWatch}){
   return <div onClick={onClose} style={{position:"fixed",inset:0,zIndex:100,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
     <div onClick={e=>e.stopPropagation()} style={{background:"#1a1c24",borderRadius:10,maxWidth:500,width:"100%",border:"1px solid rgba(255,255,255,0.1)",overflowY:"auto",maxHeight:"90dvh"}}>
       <div style={{height:140,background:`linear-gradient(135deg,${channel?.cor||"#333"}33,#0a0c12)`,display:"flex",alignItems:"center",justifyContent:"center",position:"relative"}}>
-        {thumbnailForProgram(program)?<img src={thumbnailForProgram(program)} alt={program.nome} style={{width:'100%',height:'100%',objectFit:'cover'}} onError={e=>{e.currentTarget.style.visibility='hidden';}}/>:<ChLogo ch={channel||{logo:"📺"}} size={64}/>}
+        {thumbnailForProgram(program)?<img src={thumbnailForProgram(program)} alt={program.nome} style={{width:'100%',height:'100%',objectFit:'cover'}} onError={e=>{e.currentTarget.style.visibility='hidden';}}/>:<ChLogo ch={channel||{logo:"TV"}} size={64}/>}
         <div style={{position:"absolute",top:12,right:12,display:"flex",gap:4}}><Badge c={program.classificacao}/>{program.tags?.map(t=><Tag key={t} t={t}/>)}</div>
         {isNow&&<div style={{position:"absolute",top:12,left:12}}><LiveDot big/></div>}
       </div>
@@ -449,7 +452,7 @@ function PersistentClock({channel, clockMode="off", clockPosition="tr"}){
     bl:{bottom:20,left:24},
   }[clockPosition]||{top:20,right:24};
   const align=clockPosition.endsWith('l')?'left':'right';
-  return <div style={{
+  return <div className="tv-persistent-clock" style={{
     position:"absolute",...pos,zIndex:8,pointerEvents:"none",
     background:"rgba(0,0,0,0.55)",borderRadius:10,padding:"10px 18px",
     backdropFilter:"blur(4px)",border:`1px solid ${channel?.cor||"#1a73e8"}44`,
@@ -480,7 +483,7 @@ function NextUpOverlay({nextProgram, clockMode, clockPosition="tr", nextUpMode="
   const label=remMins<=1?"Em menos de 1 minuto":`Em ${remMins} minuto${remMins>1?"s":""}`;
   // Posição: embaixo do relógio se visível, caso contrário no topo
   const topOffset=clockMode!=="off"&&clockPosition==="tr"?110:20;
-  return <div style={{
+  return <div className="tv-next-up" style={{
     position:"absolute",top:topOffset,right:24,zIndex:8,pointerEvents:"none",
     background:"rgba(0,0,0,0.72)",borderRadius:10,padding:"10px 18px",maxWidth:320,
     backdropFilter:"blur(4px)",border:"1px solid rgba(255,255,255,0.12)",
@@ -500,7 +503,10 @@ function SettingsMenu({settings,onSave,onClose}){
   const [clockMode,setClockMode]=useState(settings.clockMode||"off");
   const [clockPosition,setClockPosition]=useState(settings.clockPosition||"tr");
   const [nextUpMode,setNextUpMode]=useState(settings.nextUpMode||"off");
-  const save=()=>{onSave({clockMode,clockPosition,nextUpMode});onClose()};
+  const [textSize,setTextSize]=useState(settings.textSize||"normal");
+  const [displayMode,setDisplayMode]=useState(settings.displayMode||"studio");
+  const [autoLayoutMinutes,setAutoLayoutMinutes]=useState(String(settings.autoLayoutMinutes||"off"));
+  const save=()=>{onSave({...settings,clockMode,clockPosition,nextUpMode,textSize,displayMode,autoLayoutMinutes});onClose()};
   const BtnGrp=({label,value,setValue,options})=><div style={{marginBottom:16}}>
     <div style={{fontSize:12,fontWeight:700,color:"#aaa",marginBottom:8,letterSpacing:0.5}}>{label}</div>
     <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
@@ -516,6 +522,9 @@ function SettingsMenu({settings,onSave,onClose}){
       <BtnGrp label="🕐 RELÓGIO NA TELA" value={clockMode} setValue={setClockMode} options={[{v:"off",l:"Desligado"},{v:"always",l:"Sempre"},{v:"15min",l:"A cada 15min"},{v:"30min",l:"A cada 30min"}]}/>
       <BtnGrp label="📍 POSIÇÃO DO RELÓGIO" value={clockPosition} setValue={setClockPosition} options={[{v:"tr",l:"Superior direito"},{v:"tl",l:"Superior esquerdo"},{v:"br",l:"Inferior direito"},{v:"bl",l:"Inferior esquerdo"}]}/>
       <BtnGrp label="📺 AVISAR PRÓXIMO PROGRAMA" value={nextUpMode} setValue={setNextUpMode} options={[{v:"off",l:"Não avisar"},{v:"5min",l:"5 min antes"},{v:"10min",l:"10 min antes"},{v:"15min",l:"15 min antes"}]}/>
+      <BtnGrp label="TAMANHO DOS TEXTOS" value={textSize} setValue={setTextSize} options={[{v:"normal",l:"Normal"},{v:"large",l:"Grande (118%)"},{v:"xlarge",l:"Extra grande (135%)"}]}/>
+      <BtnGrp label="📺 MODO DE EXIBIÇÃO PADRÃO" value={displayMode} setValue={setDisplayMode} options={[{v:"studio",l:"Estúdio (player menor)"},{v:"cinema",l:"Player ampliado"}]}/>
+      <div style={{display:"grid",gap:7,marginBottom:16}}><label htmlFor="auto-layout-minutes" style={{fontSize:12,fontWeight:700,color:"#aaa"}}>⏱ ALTERNAR MODO AUTOMATICAMENTE</label><select id="auto-layout-minutes" value={autoLayoutMinutes} onChange={e=>setAutoLayoutMinutes(e.target.value)}><option value="off">Desativado</option>{[5,10,15,20,30,60].map(n=><option key={n} value={n}>A cada {n} minutos</option>)}</select><small style={{color:"#8998ad",lineHeight:1.45}}>Alterna entre Estúdio e Player ampliado. Tela cheia do navegador continua no botão ⛶.</small></div>
       <div style={{borderTop:"1px solid rgba(255,255,255,0.06)",paddingTop:16,marginTop:4,display:"flex",gap:8,justifyContent:"flex-end"}}>
         <button onClick={onClose} style={{padding:"10px 18px",borderRadius:6,cursor:"pointer",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",color:"#aaa",fontSize:13}}>Cancelar</button>
         <button onClick={save} style={{padding:"10px 22px",borderRadius:6,cursor:"pointer",background:"linear-gradient(135deg,#1a73e8,#4fc3f7)",border:"none",color:"#fff",fontSize:13,fontWeight:700}}>Salvar</button>
@@ -654,15 +663,23 @@ export default function TVWeb(){
   const [selProg, setSP] = useState(null);
   const [fade, setFade] = useState(false);
   const [muted, setMuted] = useState(true);
+  const [latencyStatus,setLatencyStatus]=useState('off');
   const [showSettings, setShowSettings] = useState(false);
   // Settings: persistido em localStorage (leve, sem precisar de Firestore)
   const [settings, setSettings] = useState(()=>{
     const value=readPreference("tvweb_settings",{});return value&&typeof value==="object"&&!Array.isArray(value)?value:{};
   });
+  const [displayMode,setDisplayMode]=useState(()=>readPreference("tvweb_settings",{})?.displayMode||"studio");
   const saveSettings = (s) => {
-    setSettings(s);
-    try{ localStorage.setItem("tvweb_settings", JSON.stringify(s)) }catch{}
+    const next={...settings,...s};setSettings(next);setDisplayMode(next.displayMode||"studio");
+    try{ localStorage.setItem("tvweb_settings", JSON.stringify(next)) }catch{}
   };
+  useEffect(()=>{
+    const minutes=Number(settings.autoLayoutMinutes);
+    if(!Number.isFinite(minutes)||minutes<=0)return;
+    const timer=setInterval(()=>setDisplayMode(mode=>mode==="studio"?"cinema":"studio"),minutes*60_000);
+    return()=>clearInterval(timer);
+  },[settings.autoLayoutMinutes]);
   // Tick: 1s para transições suaves de vídeo na playlist
   const [tick, setTick] = useState(0);
   useEffect(()=>{const i=setInterval(()=>setTick(t=>t+1),1000);return()=>clearInterval(i)},[]);
@@ -690,15 +707,36 @@ export default function TVWeb(){
   const cp=getCurProg(schedule);
   const ci=schedule.findIndex(p=>p.id===cp?.id);
   const np=ci>=0?schedule[ci+1]:null;
+  const activeProgramKey=`${ch?.id||''}:${cp?.srcProgId||cp?.id||''}:${cp?.liveChannel||cp?.liveChannelId||''}`;
+  const [liveLookup,setLiveLookup]=useState(null);
+  useEffect(()=>{
+    const liveChannel=cp?.liveChannel||cp?.liveChannelId;
+    if(!cp?.isLive||!liveChannel){setLiveLookup(null);setLatencyStatus('off');return;}
+    let stopped=false;
+    const controller=new AbortController();
+    setLiveLookup(prev=>prev?.programKey===activeProgramKey?{...prev,status:prev.videoId?'live':'checking'}:{programKey:activeProgramKey,status:'checking',videoId:null});
+    const refresh=async()=>{
+      try{
+        const result=await fetchActiveChannelLive(liveChannel,{signal:controller.signal});
+        if(!stopped)setLiveLookup({programKey:activeProgramKey,status:result.live?'live':'waiting',videoId:result.videoId,title:result.title});
+      }catch(error){
+        if(!stopped&&error.name!=='AbortError')setLiveLookup(prev=>prev?.programKey===activeProgramKey?{...prev,status:'error',errorMessage:error.message}:{programKey:activeProgramKey,status:'error',errorMessage:error.message,videoId:null});
+      }
+    };
+    refresh();const timer=setInterval(refresh,5*60_000);
+    return()=>{stopped=true;controller.abort();clearInterval(timer);};
+  },[activeProgramKey,cp?.isLive,cp?.liveChannel,cp?.liveChannelId]);
+  const activeLive=liveLookup?.programKey===activeProgramKey?liveLookup:null;
 
   const info=getVideoPlaybackInfo(cp);
-  const unavailable=info&&(info.blocked||Number(blockedVideos[info.videoId])>Date.now());
-  const ytVideoId=!unavailable?info?.videoId:null;
-  const playbackIdentity=`${ch?.id}:${cp?.contKey||cp?.id}:${info?.videoIndex}:${info?.cycleIndex}`;
-  useEffect(()=>setPlayerIssue(''),[playbackIdentity]);
+  const blockedId=cp?.isLive?activeLive?.videoId:info?.videoId;
+  const unavailable=!!((!cp?.isLive&&info?.blocked)||Number(blockedVideos[blockedId])>Date.now());
+  const ytVideoId=cp?.isLive?(!unavailable?activeLive?.videoId||null:null):(!unavailable?info?.videoId:null);
+  const playbackIdentity=cp?.isLive?`${activeProgramKey}:${activeLive?.videoId||'live-pending'}`:`${ch?.id}:${cp?.contKey||cp?.id}:${info?.videoIndex}:${info?.cycleIndex}`;
+  useEffect(()=>{setPlayerIssue('');setLatencyStatus(cp?.isLive?'checking':'off');},[playbackIdentity,cp?.isLive]);
   const currentPosition=()=>getVideoPlaybackInfo(cp)?.position||0;
   const fullscreen=useCallback(async()=>{
-    try{if(document.fullscreenElement)await document.exitFullscreen();else if(cRef.current?.requestFullscreen)await cRef.current.requestFullscreen();else showNotice('Use a opção de tela cheia do seu navegador.');}
+    try{if(document.fullscreenElement)await document.exitFullscreen();else if(cRef.current?.requestFullscreen){setDisplayMode('cinema');await cRef.current.requestFullscreen();}else showNotice('Use a opção de tela cheia do seu navegador.');}
     catch{showNotice('Este navegador não permitiu abrir em tela cheia.');}
   },[showNotice]);
   // ========== OSD VISIBILITY (20 seconds) ==========
@@ -733,7 +771,7 @@ export default function TVWeb(){
   // Atalhos respeitam campos de texto, modificadores e controles focados.
   useEffect(()=>{
     const handler=e=>{
-      if(e.altKey||e.ctrlKey||e.metaKey||e.repeat||e.target?.isContentEditable||/^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName||''))return;
+      if(e.altKey||e.ctrlKey||e.metaKey||e.repeat||/^(BUTTON|A)$/.test(e.target?.tagName||'')&&e.key.startsWith('Arrow')||e.target?.isContentEditable||/^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName||''))return;
       const key=e.key.toLowerCase();
       if(key==='escape'){setEPG(false);setFull(false);setSP(null);setShowSettings(false);}
       else if(key==='h')navigate('/');
@@ -788,23 +826,25 @@ export default function TVWeb(){
 
   // ========== LOADING ==========
   if(loading) return <div style={{width:"100%",height:"100vh",background:"#000",display:"flex",alignItems:"center",justifyContent:"center",color:"#888",fontFamily:"system-ui",fontSize:16}}>
-    <div style={{textAlign:"center"}}><div style={{fontSize:48,marginBottom:16}}>📺</div>Carregando TVWEB...</div>
+    <div style={{textAlign:"center"}}><div className="trend-mark" aria-hidden="true" style={{margin:"0 auto 16px",width:58,height:58,fontSize:34}}>T</div>Carregando TREND TV...</div>
   </div>;
   if(!ch)return <div className="page-message"><h1>Nenhum canal disponível</h1><p>{catalogError||"A programação aparecerá assim que um canal for cadastrado."}</p><a href="/">Voltar ao início</a></div>;
 
   // ========== RENDER ==========
-  return <div className="tv-screen" ref={cRef} onWheel={handleWheel}
+  return <div className={`tv-screen tv-text-${settings.textSize||'normal'} tv-layout-${displayMode}`} ref={cRef} onWheel={handleWheel}
     style={{width:"100%",height:"100vh",background:"#000",position:"relative",fontFamily:"'Segoe UI','Roboto',-apple-system,sans-serif",overflow:"hidden",cursor:"default",userSelect:"none"}}>
 
     {/* ===== YOUTUBE PLAYER (completely isolated) ===== */}
-    <div style={{position:"absolute",inset:0,zIndex:1,opacity:fade?0:1,transition:"opacity 0.5s"}}>
+    <div className="tv-video-stage" style={{position:"absolute",inset:0,zIndex:1,opacity:fade?0:1,transition:"opacity 0.5s"}}>
       {ytVideoId && !cp?.isPlaceholder ? (
-        <YoutubePlayer videoId={ytVideoId} identity={playbackIdentity} position={currentPosition} muted={muted} onBlocked={blockVideo} onPlaybackIssue={setPlayerIssue}/>
+        <YoutubePlayer videoId={ytVideoId} identity={playbackIdentity} position={currentPosition} muted={muted} isLive={!!cp?.isLive} lowLatency={!!(cp?.isLive&&settings.lowLatency)} onLowLatencyStatus={setLatencyStatus} onBlocked={blockVideo} onPlaybackIssue={setPlayerIssue}/>
       ) : (
         <div style={{width:"100%",height:"100%",background:`radial-gradient(ellipse at center,${ch.cor||"#1a73e8"}15,#0a0c12 70%)`,display:"flex",alignItems:"center",justifyContent:"center"}}>
-          {cp?.isPlaceholder||unavailable?(
+          {cp?.isLive?(
+            <div style={{textAlign:"center",maxWidth:600,padding:28}}><div style={{fontSize:64,marginBottom:20}}>{activeLive?.status==='checking'?'⏳':activeLive?.status==='error'?'⚠️':'📡'}</div><div style={{fontSize:30,fontWeight:700,color:"#fff",marginBottom:12}}>{unavailable?'Esta live não permite reprodução neste site':activeLive?.status==='error'?'Não foi possível consultar o YouTube':activeLive?.status==='waiting'?'Aguardando a próxima live':'Localizando transmissão ao vivo…'}</div><div style={{fontSize:15,color:"#aaa",lineHeight:1.5}}>{unavailable?'A transmissão está bloqueada para incorporação. Escolha outro canal.':activeLive?.status==='error'?`${activeLive.errorMessage||'A busca será tentada novamente automaticamente.'}`:`Canal ${cp.liveChannel||cp.liveChannelId} · consulta ao YouTube a cada 15 min`}</div></div>
+          ):cp?.isPlaceholder||unavailable?(
             <div style={{textAlign:"center",maxWidth:600}}>
-              <div style={{fontSize:140,marginBottom:30,opacity:0.8}}>📺</div>
+              <div className="trend-mark" aria-hidden="true" style={{margin:"0 auto 30px",width:128,height:128,fontSize:78,opacity:.8}}>T</div>
               <div style={{fontSize:48,fontWeight:700,color:"#fff",marginBottom:16}}>{unavailable?"Vídeo indisponível":"Voltamos já!"}</div>
               <div style={{fontSize:18,color:"#999"}}>{unavailable?"A programação continua no próximo horário. Você também pode trocar de canal.":"Programação em breve"}</div>
             </div>
@@ -839,7 +879,7 @@ export default function TVWeb(){
     }}>🔇 Clique para ativar o som</button>}
 
     {/* ===== GC (lower-third de música/programa) ===== */}
-    {!showEPG&&!showFull&&!unavailable&&!cp?.isJingle&&<GCBar channel={ch} program={cp} nextProgram={np}/>}
+    {!showEPG&&!showFull&&!unavailable&&!cp?.isJingle&&!ch.newsEnabled&&<GCBar channel={ch} program={cp} nextProgram={np}/>}
 
     {/* ===== RELÓGIO PERSISTENTE (apenas quando OSD está oculto, pois OSDHeader já tem relógio) ===== */}
     {!showOSD&&!showEPG&&!showFull&&settings.clockMode&&settings.clockMode!=="off"&&<PersistentClock channel={ch} clockMode={settings.clockMode} clockPosition={settings.clockPosition||"tr"}/>}
@@ -847,7 +887,13 @@ export default function TVWeb(){
     {/* ===== PRÓXIMO PROGRAMA ("Em X minutos...") — só quando OSD está oculto ===== */}
     {!showOSD&&!showEPG&&!showFull&&np&&settings.nextUpMode&&settings.nextUpMode!=="off"&&<NextUpOverlay nextProgram={np} clockPosition={settings.clockPosition||"tr"} clockMode={settings.clockMode||"off"} nextUpMode={settings.nextUpMode}/>}
 
-    <NewsOverlay channel={ch} hidden={showOSD||showEPG||showFull||!!selProg||showSettings||!!cp?.isJingle}/>
+    {!ch.newsEnabled&&displayMode==="studio"&&<aside className="studio-setup-card" aria-live="polite">
+      <span>ESTÚDIO · PACOTE GRÁFICO</span><b className="studio-package-status">DESATIVADO</b>
+      <h2>GC e mensagens ainda não estão no ar</h2>
+      <p>Ative o pacote na área <strong>Redação</strong> do Admin para exibir manchetes, ticker inferior e tweets neste canal.</p>
+      <small>{ch.nome} · {cp?.nome||"Programação"}{np&&` · A seguir: ${np.nome}`}</small>
+    </aside>}
+    <NewsOverlay channel={ch} studio={displayMode==="studio"} hidden={(displayMode!=="studio"&&showOSD)||showEPG||showFull||!!selProg||showSettings||!!cp?.isJingle}/>
     {(notice||catalogError)&&<div role="status" className="tv-notice">{notice||catalogError}</div>}
     {playerIssue&&<div className="playback-issue" role="alert"><p>{playerIssue}</p><button onClick={()=>{setMuted(false);window.dispatchEvent(new Event('trendtv-play'));}}>Reproduzir</button></div>}
     {/* ===== MENU DE CONFIGURAÇÕES ===== */}
@@ -858,7 +904,9 @@ export default function TVWeb(){
 
     {/* ===== OSD FOOTER (TV-style, 20s) ===== */}
     <OSDFooter channel={ch} muted={muted} onMute={()=>setMuted(v=>!v)} favorite={favorites.includes(ch.id)} onFavorite={()=>toggleFavorite(ch.id)} onShare={async()=>{const message=await shareChannel(ch,cp);if(message)showNotice(message);}} program={cp} nextProgram={np} visible={showOSD&&!showEPG&&!showFull}
-      onOpenEPG={()=>setEPG(true)} onOpenFull={()=>setFull(true)} onOpenSettings={()=>setShowSettings(true)} onFullscreen={fullscreen}/>
+      onOpenEPG={()=>setEPG(true)} onOpenFull={()=>setFull(true)} onOpenSettings={()=>setShowSettings(true)} onFullscreen={fullscreen}
+      displayMode={displayMode} onToggleDisplayMode={()=>saveSettings({...settings,displayMode:displayMode==="studio"?"cinema":"studio"})}
+      isLive={!!cp?.isLive} lowLatency={!!(cp?.isLive&&settings.lowLatency)} latencyStatus={latencyStatus} onToggleLowLatency={()=>saveSettings({...settings,lowLatency:!settings.lowLatency})}/>
 
 
     {/* ===== EPG / FULL / MODAL (above everything) ===== */}

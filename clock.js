@@ -24,7 +24,9 @@ export function broadcastDate(date = new Date(), options = {}) {
 const BASE = Date.UTC(2026,0,1);
 export function dateSecondsToAbsolute(date, seconds = 0) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date||'')) return NaN;
-  return (Date.parse(`${date}T00:00:00Z`)-BASE)/1000+Number(seconds);
+  const parsed=Date.parse(`${date}T00:00:00Z`);
+  if(!Number.isFinite(parsed)||new Date(parsed).toISOString().slice(0,10)!==date||!Number.isFinite(Number(seconds)))return NaN;
+  return (parsed-BASE)/1000+Number(seconds);
 }
 export function absoluteToDateSeconds(absolute) {
   const day = Math.floor(absolute/86400);

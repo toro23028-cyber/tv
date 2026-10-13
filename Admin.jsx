@@ -3,7 +3,7 @@ import {assertDocumentSize,cleanProgram,commitPrograms,commitEternityWeek,assert
 import NewsEditor from './NewsEditor';
 import {getToday,getNow,dateSecondsToAbsolute,absoluteToDateSeconds,addBroadcastDays,getBroadcastWeekday} from './clock.js';
 import {buildScheduleAdmin,findConflicts} from './schedule.js';
-import {extractYouTubeId,extractYouTubeId as extractYTId,extractPlaylistId,parseYouTubeBulk} from './youtube-id.js';
+import {extractYouTubeId,extractYouTubeId as extractYTId,normalizeYouTubeChannel,extractPlaylistId,parseYouTubeBulk} from './youtube-id.js';
 import {fetchYouTubeMetadata,fetchYouTubePlaylistItems,enrichVideos} from './youtube.js';
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { db, collection, updateDoc, deleteDoc, onSnapshot, doc, runTransaction } from "./firebase";
@@ -98,7 +98,7 @@ function ytThumb(id){const x=extractYTId(id);return x?`https://img.youtube.com/v
 const iS = {background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:4,padding:"8px 12px",color:"#fff",fontSize:13,outline:"none"};
 const lS = {fontSize:11,color:"#888",fontWeight:600,marginBottom:4,display:"block",letterSpacing:0.5};
 
-function ChLogo({ch,size=28}){
+function ChLogo({ch={},size=28}){
   if(ch.logoType==="custom"&&ch.logoUrl) return <img src={ch.logoUrl} alt="" style={{width:size,height:size,borderRadius:4,objectFit:"cover"}}/>;
   return <span style={{fontSize:size*0.85}}>{ch.logo}</span>;
 }
@@ -150,7 +150,7 @@ function ImgUploader({currentImage,imageType,onImageChange,label,shape="square"}
 // • Solta em cima de outro programa → encaixa no espaço livre mais próximo
 // • Duplo clique = abrir edição completa
 // ============================================
-function GradeVisual({programs,channels,selectedChannel,selDate,onEdit,notify}){
+function GradeVisual({programs,allPrograms=programs,channels,selectedChannel,selDate,onEdit,notify}){
   // programs já vem filtrado por data+canal via dayProgs (inclui projeções do eternity)
   const filtered=programs.filter(p=>p.canalId===selectedChannel).sort((a,b)=>Number(a.horarioInicio)-Number(b.horarioInicio));
   const ch=channels.find(c=>c.id===selectedChannel);
@@ -193,15 +193,17 @@ function GradeVisual({programs,channels,selectedChannel,selDate,onEdit,notify}){
         if(d.start===d.origStart)return;
         const pos=resolvePosition(d.start,d.origDur,others);
         if(pos===null){notify("❌ Não cabe: dia lotado neste canal");return}
-        await commitPrograms([{...p,horarioInicio:pos,horarioFim:pos+d.origDur}]);
+        const update={...p,horarioInicio:pos,horarioFim:pos+d.origDur};
+        assertNoConflicts(allPrograms,[update],channels);await commitPrograms([update]);
         notify(`✅ ${p.isJingle?`🎬 ${p.nome}`:p.nome} → ${fmtSec(pos)}${pos!==d.start?" (encaixado)":""}`);
       }else{
         if(d.dur===d.origDur)return;
         const nd=Math.min(86400-d.origStart,resolveResize(d.origStart,d.dur,others));
-        await commitPrograms([{...p,duracao:nd,horarioFim:d.origStart+nd}]);
+        const update={...p,duracao:nd,horarioFim:d.origStart+nd};
+        assertNoConflicts(allPrograms,[update],channels);await commitPrograms([update]);
         notify(`✅ ${p.isJingle?`🎬 ${p.nome}`:p.nome}: ${fDur(nd)}${nd!==d.dur?" (limitado ao próximo)":""}`);
       }
-    }catch(err){console.error("Grade drag err:",err);notify("❌ Erro ao salvar no Firebase")}
+    }catch(err){console.error("Grade drag err:",err);notify(err.message||"Não foi possível salvar a grade.")}
   };
 
   return <div>
@@ -228,7 +230,7 @@ function GradeVisual({programs,channels,selectedChannel,selDate,onEdit,notify}){
           const editProg=isProj?{...p,horarioInicio:p._srcHorarioInicio,horarioFim:Number(p._srcHorarioInicio)+Number(p.duracao),data:p._srcDate,_isProjected:false}:p;
           return <div key={p.id+"-"+s}
             onPointerDown={isProj?undefined:e=>{if(e.target.dataset&&e.target.dataset.handle)startDrag(e,p,"resize");else startDrag(e,p,"move")}}
-            onPointerMove={isProj?undefined:moveDrag} onPointerUp={isProj?undefined:endDrag} onPointerCancel={isProj?undefined:endDrag}
+            onPointerMove={isProj?undefined:moveDrag} onPointerUp={isProj?undefined:endDrag} onPointerCancel={isProj?undefined:()=>setDrag(null)}
             onDoubleClick={()=>onEdit(editProg)}
             title={isProj?`Projeção do ciclo ∞ — original em ${p._srcDate} · duplo clique para editar`:"Arraste para mover · borda direita = duração · duplo clique = editar"}
             style={{position:"absolute",left,width:w,top:32,height:ROWH-40,
@@ -363,7 +365,7 @@ function TimelineView({programs,channels,selectedChannel,onEdit,onDelete,onReord
 // ============================================
 // PROGRAM MODAL
 // ============================================
-function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existingPrograms,onSave,onClose}){
+export function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existingPrograms,onSave,onDeleteTemplate,onClose}){
   const isEdit=mode==="edit";
   const [nome,setNome]=useState(program?.nome||"");
   const md=()=>setDirty(true); // markDirty — chama junto com qualquer setter
@@ -376,7 +378,10 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
   const [customM,setCM]=useState(program?Math.floor((program.duracao%3600)/60):0);
   const [customS,setCS]=useState(Number(program?.duracao||0)%60);
   const [videos,setVideos]=useState(program?.videos||[{youtubeUrl:program?.youtubeId||"",titulo:""}]);
+  const [isLive,setIsLive]=useState(!!program?.isLive);
+  const [liveChannel,setLiveChannel]=useState(program?.liveChannel||program?.liveChannelId||"");
   const [selectedVideos,setSelectedVideos]=useState(new Set());
+  useEffect(()=>setSelectedVideos(new Set()),[videos]);
   const [showBulkPaste,setShowBulkPaste]=useState(false);
   const [bulkText,setBulkText]=useState("");
   const [bulkStatus,setBulkStatus]=useState("");
@@ -400,17 +405,17 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
   const [startH,setSH]=useState(isEdit?Math.floor(program.horarioInicio/3600):0);
   const [startM,setStartM]=useState(isEdit?Math.floor((program.horarioInicio%3600)/60):0);
 
-  // Templates disponíveis (programas com isTemplate=true do mesmo canal ou sem canal)
-  const templates=existingPrograms.filter(p=>p.isTemplate&&!p.isJingle).sort((a,b)=>a.nome.localeCompare(b.nome));
+  // Modelos são privados do canal e nunca participam da grade de transmissão.
+  const templates=existingPrograms.filter(p=>p.isTemplate&&!p.isJingle&&p.canalId===canalId).sort((a,b)=>a.nome.localeCompare(b.nome));
   const applyTemplate=(t)=>{
-    setNome(t.nome);
+    setNome(t.nome);setIsLive(!!t.isLive);setLiveChannel(t.liveChannel||t.liveChannelId||"");
     setClassificacao(t.classificacao||"L");
     setTags(t.tags||["HD"]);
     setSinopse(t.sinopse||randomProgramDescription());
     setCH(Math.floor((t.duracao||3600)/3600));
     setCM(Math.floor(((t.duracao||3600)%3600)/60));setCS(Number(t.duracao||3600)%60);
     setDP(0);
-    setGcAlways(t.gcAlways||false);
+    setGcAlways(t.gcAlways||false);setGcNever(t.gcNever||false);
     setMaratona(t.maratona||false);
     setBlocoDuracao(t.blocoDuracao||BLOCO_PADRAO);
     setPOLU(t.overlayLogoUrl||"");
@@ -418,6 +423,7 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
     setPOLS(t.overlaySize||0);
     setTT(t.thumbnailType||"youtube");
     setTU(t.thumbnailUrl||null);
+    md();
     // Não copia vídeos — só a estrutura do programa
   };
 
@@ -425,10 +431,10 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
   const selectedCh=channels.find(c=>c.id===canalId);
   const channelProgs=buildScheduleAdmin(existingPrograms.filter(p=>!isEdit||p.id!==program?.id),canalId,selectedCh,selectedDate).filter(p=>!!p.isJingle===!!isJingle);
   const autoStart=Math.max(0,...channelProgs.map(p=>Number(p.horarioFim)));
-  const horIn=startMode==='custom'?Number(startH)*3600+Number(startM)*60+(isEdit?Number(program.horarioInicio)%60:0):autoStart;
+  const horIn=isTemplate?0:startMode==='custom'?Number(startH)*3600+Number(startM)*60+(isEdit?Number(program.horarioInicio)%60:0):autoStart;
   const horFim=horIn+dur;
-  const hasOverlap=findConflicts(existingPrograms,{id:program?.id,canalId,data:selectedDate,horarioInicio:horIn,duracao:dur,isJingle},selectedCh).length>0;
-  const signature=JSON.stringify({nome,canalId,classificacao,tags,sinopse,durationPreset,customH,customM,customS,videos,thumbnailType,thumbnailUrl,gcAlways,gcNever,maratona,blocoDuracao,isTemplate,isJingle,jingleType,overlayLogoUrl,overlayCorner,overlaySize,startMode,startH,startM});
+  const hasOverlap=!isTemplate&&findConflicts(existingPrograms,{id:program?.id,canalId,data:selectedDate,horarioInicio:horIn,duracao:dur,isJingle},selectedCh).length>0;
+  const signature=JSON.stringify({nome,canalId,classificacao,tags,sinopse,durationPreset,customH,customM,customS,videos,isLive,liveChannel,thumbnailType,thumbnailUrl,gcAlways,gcNever,maratona,blocoDuracao,isTemplate,isJingle,jingleType,overlayLogoUrl,overlayCorner,overlaySize,startMode,startH,startM});
   const initialSignature=useRef(signature);
   const hasChanges=dirty||signature!==initialSignature.current;
   useEffect(()=>{const handler=e=>{if(hasChanges){e.preventDefault();e.returnValue='';}};window.addEventListener('beforeunload',handler);return()=>window.removeEventListener('beforeunload',handler);},[hasChanges]);
@@ -443,10 +449,12 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
     if(!canalId){setError('Selecione um canal.');return;}
     if(!Number.isInteger(horIn)||horIn<0||horIn>=86400){setError('Este dia já terminou. Selecione o dia seguinte ou ajuste o horário.');return;}
     if(hasOverlap){setError("Conflito de horário!");return}
-    if(!videos.length||!videos.some(v=>v.youtubeUrl?.trim())){setError('Adicione um vídeo.');return;}
-    if(videos.some(v=>v.youtubeUrl?.trim()&&!extractYouTubeId(v.youtubeUrl))){setError('Há um link inválido. Importe a playlist ou use links de vídeos.');return;}
-    
-    if(videos.filter(v=>v.youtubeUrl?.trim()).length>1&&videos.some(v=>v.youtubeUrl?.trim()&&(!Number.isFinite(Number(v.duration))||Number(v.duration)<=0))){setError('Preencha a duração em segundos de cada vídeo ou use Buscar Todos.');return;}
+    const resolvedLiveChannel=normalizeYouTubeChannel(liveChannel);
+    if(isLive&&!resolvedLiveChannel){setError('Informe o ID do canal, uma URL /channel/UC... ou o link/@handle do canal.');return;}
+    if(!isLive&&!isTemplate&&!videos.length){setError('Adicione um vídeo ou playlist.');return;}
+    if(!isLive&&!isTemplate&&!videos.some(v=>v.youtubeUrl?.trim())){setError('Adicione um vídeo ou playlist.');return;}
+    if(!isLive&&!isTemplate&&videos.some(v=>v.youtubeUrl?.trim()&&!extractYouTubeId(v.youtubeUrl))){setError('Há um link inválido. Importe a playlist ou use links de vídeos.');return;}
+    if(!isLive&&!isTemplate&&videos.filter(v=>v.youtubeUrl?.trim()).length>1&&videos.some(v=>v.youtubeUrl?.trim()&&(!Number.isFinite(Number(v.duration))||Number(v.duration)<=0))){setError('Preencha a duração em segundos de cada vídeo ou use Buscar Todos.');return;}
     // Validação: ultrapassa 24h? (permitido: continua no dia seguinte)
     const totalSeconds=Number(horIn)+dur;
     if(totalSeconds>86400){
@@ -461,7 +469,7 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
     
     setSaving(true);
     try {
-      await onSave({id:isEdit?program.id:`prog_${Date.now()}`,nome,canalId,classificacao,tags,sinopse:finalSinopse,data:selectedDate,duracao:dur,horarioInicio:horIn,horarioFim:horFim,youtubeId:videos.find(v=>v.youtubeUrl?.trim()).youtubeUrl,videos:videos.filter(v=>v.youtubeUrl.trim()),thumbnailType,thumbnailUrl,gcAlways,maratona,blocoDuracao:Number(blocoDuracao)||BLOCO_PADRAO,isTemplate,gcNever,isJingle,jingleType:isJingle?jingleType:"",overlayLogoUrl:overlayLogoUrl.trim()||null,overlayCorner:overlayCorner||"",overlaySize:overlaySize||null});
+      await onSave({id:isEdit?program.id:`prog_${crypto.randomUUID()}`,nome,canalId,classificacao,tags,sinopse:finalSinopse,data:selectedDate,duracao:dur,horarioInicio:horIn,horarioFim:horFim,youtubeId:isLive?"":videos.find(v=>v.youtubeUrl?.trim())?.youtubeUrl||"",videos:isLive?[]:videos.filter(v=>v.youtubeUrl?.trim()),isLive,liveChannel:isLive?resolvedLiveChannel:"",thumbnailType,thumbnailUrl,gcAlways,maratona,blocoDuracao:Number(blocoDuracao)||BLOCO_PADRAO,isTemplate,gcNever,isJingle,jingleType:isJingle?jingleType:"",overlayLogoUrl:overlayLogoUrl.trim()||null,overlayCorner:overlayCorner||"",overlaySize:overlaySize||null});
       setSaving(false);
     } catch(err) {
       console.error("Erro ao salvar:",err);
@@ -474,7 +482,7 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
     <div className="program-modal" role="dialog" aria-modal="true" aria-label="Editor de programa" onClick={e=>e.stopPropagation()} style={{background:"#14161e",borderRadius:12,maxWidth:640,width:"100%",border:"1px solid rgba(255,255,255,0.1)",maxHeight:"92vh",overflowY:"auto"}}>
       <div style={{padding:"16px 20px",borderBottom:"1px solid rgba(255,255,255,0.08)",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <span style={{fontSize:16,fontWeight:700,color:"#fff"}}>{isEdit?"✏️ Editar":"➕ Novo"} Programa</span>
-        <button onClick={()=>onClose(hasChanges)} style={{background:"none",border:"none",color:"#888",cursor:"pointer",fontSize:18}}>✕</button>
+        <button onClick={()=>{if(!saving)onClose(hasChanges)}} style={{background:"none",border:"none",color:"#888",cursor:"pointer",fontSize:18}}>✕</button>
       </div>
       <div style={{padding:20,display:"flex",flexDirection:"column",gap:16}}>
 
@@ -482,7 +490,7 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
         {!isEdit&&templates.length>0&&<div style={{padding:"10px 14px",background:"rgba(255,202,40,0.06)",border:"1px solid rgba(255,202,40,0.2)",borderRadius:8}}>
           <div style={{fontSize:11,fontWeight:700,color:"#ffca28",marginBottom:8}}>📋 USAR PADRÃO DE PROGRAMA</div>
           <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-            {templates.map(t=><button key={t.id} onClick={()=>applyTemplate(t)} style={{padding:"5px 12px",borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:600,background:"rgba(255,202,40,0.1)",border:"1px solid rgba(255,202,40,0.3)",color:"#ffca28"}}>{t.nome}</button>)}
+            {templates.map(t=><span key={t.id} style={{display:"inline-flex",margin:"0 6px 6px 0"}}><button onClick={()=>applyTemplate(t)} style={{padding:"5px 12px",borderRadius:"4px 0 0 4px",cursor:"pointer",fontSize:11,fontWeight:600,background:"rgba(255,202,40,0.1)",border:"1px solid rgba(255,202,40,0.3)",color:"#ffca28"}}>{t.nome}</button><button aria-label={`Excluir modelo ${t.nome}`} title="Excluir modelo" onClick={()=>onDeleteTemplate(t)} style={{padding:"5px 9px",borderRadius:"0 4px 4px 0",background:"rgba(244,67,54,0.12)",border:"1px solid rgba(244,67,54,0.3)",color:"#ff8a80"}}>✕</button></span>)}
           </div>
           <div style={{fontSize:10,color:"#888",marginTop:6}}>Preenche o formulário com o padrão. Você ainda altera o horário e os vídeos.</div>
         </div>}
@@ -490,7 +498,7 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
         {/* Canal */}
         <div><label style={lS}>CANAL</label>
           <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-            {channels.filter(c=>!c.isInfo).map(c=><button key={c.id} onClick={()=>setCanalId(c.id)} style={{padding:"6px 12px",borderRadius:4,cursor:"pointer",fontSize:12,background:canalId===c.id?`${c.cor}33`:"rgba(255,255,255,0.04)",border:canalId===c.id?`1px solid ${c.cor}`:"1px solid rgba(255,255,255,0.08)",color:canalId===c.id?"#fff":"#888",display:"flex",alignItems:"center",gap:4}}><ChLogo ch={c} size={16}/> {c.nome}</button>)}
+            {channels.filter(c=>!c.isInfo).map(c=><button key={c.id} onClick={()=>{setCanalId(c.id);md()}} style={{padding:"6px 12px",borderRadius:4,cursor:"pointer",fontSize:12,background:canalId===c.id?`${c.cor}33`:"rgba(255,255,255,0.04)",border:canalId===c.id?`1px solid ${c.cor}`:"1px solid rgba(255,255,255,0.08)",color:canalId===c.id?"#fff":"#888",display:"flex",alignItems:"center",gap:4}}><ChLogo ch={c} size={16}/> {c.nome}</button>)}
           </div>
         </div>
 
@@ -498,18 +506,25 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
         <div><label style={lS}>NOME DO PROGRAMA</label>
           <input value={nome} onChange={e=>{setNome(e.target.value);md()}} placeholder="Ex: Documentário" style={{...iS,width:"100%"}}/></div>
 
+        {/* Fonte do programa: playlists seguem o player e o sincronismo normais; lives são descobertas pelo canal. */}
+        <div style={{padding:14,border:"1px solid rgba(255,255,255,.1)",borderRadius:8,background:"rgba(255,255,255,.025)"}}>
+          <label style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer",fontSize:13,fontWeight:700,color:isLive?"#ff6b70":"#d5dfed"}}><input type="checkbox" checked={isLive} onChange={e=>{setIsLive(e.target.checked);md()}}/> ESTE PROGRAMA É UMA LIVE DO YOUTUBE</label>
+          {isLive&&<div style={{marginTop:12}}><label style={lS}>CANAL DO YOUTUBE PARA BUSCA AUTOMÁTICA</label><input value={liveChannel} onChange={e=>{setLiveChannel(e.target.value);md()}} placeholder="ID UC..., link do canal ou @handle" style={{...iS,width:"100%"}}/><small style={{display:"block",marginTop:6,color:"#99a9bd",lineHeight:1.5}}>A TV procura transmissões públicas ativas desse canal e troca o vídeo automaticamente. A consulta ao YouTube é atualizada em ciclos de aproximadamente 15 minutos. Na Vercel, permita o ID UC do canal; você o encontra no YouTube Studio → Configurações → Canal → Configurações avançadas. Cole o ID UC..., a URL /channel/UC... ou o link/@handle do canal, não o link de uma live específica.</small></div>}
+        </div>
+
         {/* Videos */}
-        <div>
+        {!isLive&&<div>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8,flexWrap:"wrap",gap:6}}>
             <label style={{...lS,marginBottom:0}}>VÍDEOS / PLAYLIST</label>
             <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
               <span style={{fontSize:10,color:"#555"}}>{videos.length} vídeo(s)</span>
               <input type="checkbox" checked={videos.length>0&&selectedVideos.size===videos.length} onChange={e=>{if(e.target.checked){const newSel=new Set();for(let i=0;i<videos.length;i++)newSel.add(i);setSelectedVideos(newSel)}else{setSelectedVideos(new Set())}}} title="Marcar/desmarcar todos" style={{width:14,height:14,cursor:"pointer",accentColor:"#4caf50"}}/>
+              <button disabled={!selectedVideos.size} onClick={()=>{if(!confirm(`Remover ${selectedVideos.size} vídeos da playlist?`))return;setVideos(list=>list.filter((_,i)=>!selectedVideos.has(i)));md();}}>Remover selecionados ({selectedVideos.size})</button>
               <button onClick={()=>{setBulkText("");setBulkStatus("");setShowBulkPaste(true)}} style={{fontSize:11,color:"#ffca28",background:"rgba(255,202,40,0.1)",border:"1px solid rgba(255,202,40,0.35)",padding:"4px 10px",borderRadius:3,cursor:"pointer",fontWeight:700}}>📋 Colar Playlist</button>
               <button onClick={async()=>{
                 try{
                   setError('Verificando vídeos…');
-                  const enriched=await enrichVideos(videos);setVideos(enriched);
+                  const enriched=await enrichVideos(videos);setVideos(enriched);md();
                   const total=enriched.reduce((n,v)=>n+(Number(v.duration)||0),0);
                   if(total>0){setCH(Math.floor(total/3600));setCM(Math.floor(total%3600/60));setCS(total%60);setDP(0);}
                   const blocked=enriched.filter(v=>v.blocked).length;
@@ -533,10 +548,10 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
               <span style={{fontSize:11,color:"#555",fontWeight:700,minWidth:20}}>#{i+1}</span>
               {(()=>{const t=ytThumb(v.youtubeUrl);return t?<div style={{position:"relative",flexShrink:0}}><img src={t} alt="" style={{width:40,height:26,borderRadius:3,objectFit:"cover",opacity:v.blocked?0.4:1}}/>{v.blocked&&<span title="Bloqueado para embed — não pode ser exibido" style={{position:"absolute",top:-4,right:-4,background:"#f44336",color:"#fff",borderRadius:"50%",width:14,height:14,fontSize:9,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800}}>!</span>}</div>:null})()}
               <input value={v.youtubeUrl}
-                onChange={e=>{const nv=[...videos];nv[i]={...v,youtubeUrl:e.target.value,duration:0,blocked:false};setVideos(nv)}}
+                onChange={e=>{const nv=[...videos];nv[i]={...v,youtubeUrl:e.target.value,duration:0,blocked:false};setVideos(nv);md()}}
                 placeholder="Cole a URL do YouTube" style={{...iS,flex:1}}/>
-              <input type="number" aria-label={`Duração do vídeo ${i+1} em segundos`} title="Duração do vídeo em segundos" min="1" value={v.duration||""} placeholder="segundos" onChange={e=>setVideos(videos.map((x,j)=>j===i?{...x,duration:Math.max(0,Number(e.target.value)||0)}:x))} style={{...iS,width:90}}/>
-              <input value={v.titulo||""} onChange={e=>{const nv=[...videos];nv[i]={...v,titulo:e.target.value};setVideos(nv)}} placeholder="Título" style={{...iS,width:120}}/>
+              <input type="number" aria-label={`Duração do vídeo ${i+1} em segundos`} title="Duração do vídeo em segundos" min="1" value={v.duration||""} placeholder="segundos" onChange={e=>{setVideos(videos.map((x,j)=>j===i?{...x,duration:Math.max(0,Number(e.target.value)||0)}:x));md()}} style={{...iS,width:90}}/>
+              <input value={v.titulo||""} onChange={e=>{const nv=[...videos];nv[i]={...v,titulo:e.target.value};setVideos(nv);md()}} placeholder="Título" style={{...iS,width:120}}/>
               {extractPlaylistId(v.youtubeUrl)&&<button title="Detectada URL de playlist — buscar títulos dos vídeos" onClick={async()=>{
                 const plId=extractPlaylistId(v.youtubeUrl);
                 setError("🌐 Consultando o YouTube...");
@@ -548,19 +563,19 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
                 }
                 const before=videos.slice(0,i).filter(x=>x.youtubeUrl.trim()&&!extractPlaylistId(x.youtubeUrl));
                 const after=videos.slice(i+1).filter(x=>x.youtubeUrl.trim());
-                setVideos([...before,...items,...after]);
+                setVideos([...before,...items,...after]);md();
                 setError("");
               }} style={{background:"rgba(255,202,40,0.15)",border:"1px solid rgba(255,202,40,0.4)",color:"#ffca28",padding:"6px 10px",borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:700,whiteSpace:"nowrap"}}>🎵 Importar Playlist</button>}
-              <button onClick={async()=>{const vId=extractYouTubeId(v.youtubeUrl);if(!vId){setError("URL YouTube inválida");return}const meta=await fetchYouTubeMetadata(vId);if(meta){const nv=[...videos];nv[i]={...nv[i],youtubeUrl:v.youtubeUrl,titulo:meta.title,duration:meta.duration,blocked:meta.blocked};setVideos(nv);if(videos.length===1){setCH(Math.floor(meta.duration/3600));setCM(Math.floor((meta.duration%3600)/60));setCS(meta.duration%60);setDP(0);}setSinopse(meta.description);setError("")}else setError(window.__ytLastError||"Erro ao buscar vídeo")}} style={{background:"rgba(26,115,232,0.15)",border:"1px solid rgba(26,115,232,0.3)",color:"#4fc3f7",padding:"6px 10px",borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:600,whiteSpace:"nowrap"}}>🔍 Buscar</button>
-              {videos.length>1&&<button onClick={()=>setVideos(videos.filter((_,j)=>j!==i))} style={{background:"none",border:"none",color:"#f44336",cursor:"pointer",fontSize:14}}>✕</button>}
+              <button onClick={async()=>{const vId=extractYouTubeId(v.youtubeUrl);if(!vId){setError("URL YouTube inválida");return}const meta=await fetchYouTubeMetadata(vId);if(meta){const nv=[...videos];nv[i]={...nv[i],youtubeUrl:v.youtubeUrl,titulo:meta.title,duration:meta.duration,blocked:meta.blocked};setVideos(nv);if(videos.length===1){setCH(Math.floor(meta.duration/3600));setCM(Math.floor((meta.duration%3600)/60));setCS(meta.duration%60);setDP(0);}setSinopse(meta.description);md();setError("")}else setError(window.__ytLastError||"Erro ao buscar vídeo")}} style={{background:"rgba(26,115,232,0.15)",border:"1px solid rgba(26,115,232,0.3)",color:"#4fc3f7",padding:"6px 10px",borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:600,whiteSpace:"nowrap"}}>🔍 Buscar</button>
+              {videos.length>1&&<button onClick={()=>{setVideos(videos.filter((_,j)=>j!==i));md()}} style={{background:"none",border:"none",color:"#f44336",cursor:"pointer",fontSize:14}}>✕</button>}
             </div>)}
           </div>
-          <button onClick={()=>setVideos([...videos,{youtubeUrl:"",titulo:""}])} style={{marginTop:8,padding:"8px 14px",borderRadius:4,cursor:"pointer",background:"rgba(76,175,80,0.1)",border:"1px solid rgba(76,175,80,0.3)",color:"#4caf50",fontSize:12,fontWeight:600,width:"100%"}}>+ Adicionar vídeo</button>
+          <button onClick={()=>{setVideos([...videos,{youtubeUrl:"",titulo:""}]);md()}} style={{marginTop:8,padding:"8px 14px",borderRadius:4,cursor:"pointer",background:"rgba(76,175,80,0.1)",border:"1px solid rgba(76,175,80,0.3)",color:"#4caf50",fontSize:12,fontWeight:600,width:"100%"}}>+ Adicionar vídeo</button>
           {/* Ferramentas da playlist */}
           {videos.length>1&&<div style={{marginTop:8,display:"flex",gap:6,flexWrap:"wrap"}}>
             <button onClick={()=>{
               const clean=videos.map(v=>({...v,titulo:(v.titulo||"").replace(/\s*[\(\[](Official\s*(Music\s*)?Video|Lyric\s*Video|Audio|Clipe Oficial|Videoclipe|Vídeo Oficial|Official Audio|HD|HQ|4K|Remastered|ft\.?[^)\]]*|feat\.?[^)\]]*|prod\.?[^)\]]*)[\)\]]/gi,"").replace(/\s*(Official\s*(Music\s*)?Video|Lyric\s*Video|Official Audio|Clipe Oficial|Videoclipe|Vídeo Oficial)/gi,"").replace(/\s{2,}/g," ").trim()}));
-              setVideos(clean);
+              setVideos(clean);md();
             }} title="Remove 'Official Video', 'Clipe Oficial', etc. dos títulos" style={{padding:"6px 12px",borderRadius:4,cursor:"pointer",fontSize:11,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.1)",color:"#aaa"}}>🧹 Limpar nomes</button>
             <button onClick={()=>{
               const valid=videos.filter(v=>{
@@ -568,13 +583,13 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
                 const titleBad=t.includes("deleted video")||t.includes("private video")||t.includes("vídeo removido")||t.includes("video privado");
                 return v.youtubeUrl.trim()&&!titleBad&&!v.blocked;
               });
-              if(valid.length<videos.length){setVideos(valid);setError(`🗑️ ${videos.length-valid.length} vídeo(s) deletado(s)/privado(s) removido(s)`)}else setError("✅ Nenhum vídeo deletado ou privado encontrado");
+              if(valid.length<videos.length){setVideos(valid);md();setError(`🗑️ ${videos.length-valid.length} vídeo(s) deletado(s)/privado(s) removido(s)`)}else setError("✅ Nenhum vídeo deletado ou privado encontrado");
             }} title="Remove vídeos com título 'Deleted video', 'Private video' ou marcados como bloqueados pelo 🔍 Buscar Todos" style={{padding:"6px 12px",borderRadius:4,cursor:"pointer",fontSize:11,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.1)",color:"#aaa"}}>🗑️ Remover deletados/bloqueados</button>
             <button onClick={()=>{
-              const shuffled=[...videos];for(let i=shuffled.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[shuffled[i],shuffled[j]]=[shuffled[j],shuffled[i]]}setVideos(shuffled);
+              const shuffled=[...videos];for(let i=shuffled.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[shuffled[i],shuffled[j]]=[shuffled[j],shuffled[i]]}setVideos(shuffled);md();
             }} title="Embaralha a ordem dos vídeos" style={{padding:"6px 12px",borderRadius:4,cursor:"pointer",fontSize:11,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.1)",color:"#aaa"}}>🔀 Aleatorizar</button>
           </div>}
-        </div>
+        </div>}
 
         {/* Bulk paste modal */}
         {showBulkPaste&&<div onClick={()=>setShowBulkPaste(false)} style={{position:"fixed",inset:0,zIndex:200,background:"rgba(0,0,0,0.75)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
@@ -611,8 +626,8 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
                 const existing=videos.filter(x=>x.youtubeUrl.trim()&&!extractPlaylistId(x.youtubeUrl));
                 const seen=new Set(existing.map(v=>extractYouTubeId(v.youtubeUrl)));
                 const unique=items.filter(v=>{const id=extractYouTubeId(v.youtubeUrl);if(!id||seen.has(id))return false;seen.add(id);return true;});
-                setVideos([...existing,...unique]);
-                setBulkStatus(`✅ ${items.length} vídeo(s) adicionado(s)`);
+                setVideos([...existing,...unique]);md();
+                setBulkStatus(`✅ ${unique.length} vídeo(s) adicionado(s) · ${items.length-unique.length} repetido(s) ignorado(s)`);
                 setTimeout(()=>{setShowBulkPaste(false);setBulkText("");setBulkStatus("")},900);
               }} style={{flex:2,padding:10,borderRadius:4,cursor:"pointer",background:"linear-gradient(135deg,#ffca28,#ffa000)",border:"none",color:"#000",fontSize:12,fontWeight:700}}>📥 Importar</button>
             </div>
@@ -622,24 +637,24 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
         {/* Start time */}
         <div><label style={lS}>HORÁRIO DE INÍCIO</label>
           <div style={{display:"flex",gap:6,marginBottom:8}}>
-            <button onClick={()=>setSM("auto")} style={{padding:"6px 14px",borderRadius:4,cursor:"pointer",fontSize:12,background:startMode==="auto"?"#1a73e822":"rgba(255,255,255,0.04)",border:startMode==="auto"?"1px solid #1a73e8":"1px solid rgba(255,255,255,0.08)",color:startMode==="auto"?"#4fc3f7":"#888"}}>⏩ Automático ({fmtSec(autoStart)})</button>
-            <button onClick={()=>setSM("custom")} style={{padding:"6px 14px",borderRadius:4,cursor:"pointer",fontSize:12,background:startMode==="custom"?"#1a73e822":"rgba(255,255,255,0.04)",border:startMode==="custom"?"1px solid #1a73e8":"1px solid rgba(255,255,255,0.08)",color:startMode==="custom"?"#4fc3f7":"#888"}}>🕐 Escolher horário</button>
+            <button onClick={()=>{setSM("auto");md()}} style={{padding:"6px 14px",borderRadius:4,cursor:"pointer",fontSize:12,background:startMode==="auto"?"#1a73e822":"rgba(255,255,255,0.04)",border:startMode==="auto"?"1px solid #1a73e8":"1px solid rgba(255,255,255,0.08)",color:startMode==="auto"?"#4fc3f7":"#888"}}>⏩ Automático ({fmtSec(autoStart)})</button>
+            <button onClick={()=>{setSM("custom");md()}} style={{padding:"6px 14px",borderRadius:4,cursor:"pointer",fontSize:12,background:startMode==="custom"?"#1a73e822":"rgba(255,255,255,0.04)",border:startMode==="custom"?"1px solid #1a73e8":"1px solid rgba(255,255,255,0.08)",color:startMode==="custom"?"#4fc3f7":"#888"}}>🕐 Escolher horário</button>
           </div>
           {startMode==="custom"&&<div style={{display:"flex",gap:8,alignItems:"center"}}>
-            <input type="number" min="0" max="23" value={startH} onChange={e=>setSH(parseInt(e.target.value)||0)} style={{...iS,width:55,textAlign:"center"}}/><span style={{color:"#888"}}>h</span>
-            <input type="number" min="0" max="59" value={startM} onChange={e=>setStartM(parseInt(e.target.value)||0)} style={{...iS,width:55,textAlign:"center"}}/><span style={{color:"#888"}}>min</span>
+            <input type="number" min="0" max="23" value={startH} onChange={e=>{setSH(parseInt(e.target.value)||0);md()}} style={{...iS,width:55,textAlign:"center"}}/><span style={{color:"#888"}}>h</span>
+            <input type="number" min="0" max="59" value={startM} onChange={e=>{setStartM(parseInt(e.target.value)||0);md()}} style={{...iS,width:55,textAlign:"center"}}/><span style={{color:"#888"}}>min</span>
           </div>}
         </div>
 
-        {durationPreset===0&&<label style={lS}>SEGUNDOS ADICIONAIS<input aria-label="Segundos adicionais" type="number" min="0" max="59" value={customS} onChange={e=>setCS(Math.min(59,Math.max(0,Number(e.target.value)||0)))} style={{...iS,width:80,marginLeft:8}}/></label>}
+        {durationPreset===0&&<label style={lS}>SEGUNDOS ADICIONAIS<input aria-label="Segundos adicionais" type="number" min="0" max="59" value={customS} onChange={e=>{setCS(Math.min(59,Math.max(0,Number(e.target.value)||0)));md()}} style={{...iS,width:80,marginLeft:8}}/></label>}
         {/* Duration */}
         <div><label style={lS}>DURAÇÃO</label>
           <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:8}}>
-            {DURATION_PRESETS.map(p=><button key={p.label} onClick={()=>{setDP(p.value);if(p.value>0){setCH(Math.floor(p.value/3600));setCM(Math.floor((p.value%3600)/60))}}} style={{padding:"6px 12px",borderRadius:4,cursor:"pointer",fontSize:12,background:(durationPreset===p.value||(p.value===0&&durationPreset===0))?"#1a73e8":"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",color:(durationPreset===p.value||(p.value===0&&durationPreset===0))?"#fff":"#888"}}>{p.label}</button>)}
+            {DURATION_PRESETS.map(p=><button key={p.label} onClick={()=>{setDP(p.value);if(p.value>0){setCH(Math.floor(p.value/3600));setCM(Math.floor((p.value%3600)/60))}md()}} style={{padding:"6px 12px",borderRadius:4,cursor:"pointer",fontSize:12,background:(durationPreset===p.value||(p.value===0&&durationPreset===0))?"#1a73e8":"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",color:(durationPreset===p.value||(p.value===0&&durationPreset===0))?"#fff":"#888"}}>{p.label}</button>)}
           </div>
           {durationPreset===0&&<div style={{display:"flex",gap:8,alignItems:"center"}}>
-            <input type="number" min="0" max="99" value={customH} onChange={e=>setCH(e.target.value)} style={{...iS,width:55,textAlign:"center"}}/><span style={{color:"#888"}}>h</span>
-            <input type="number" min="0" max="59" value={customM} onChange={e=>setCM(e.target.value)} style={{...iS,width:55,textAlign:"center"}}/><span style={{color:"#888"}}>min</span>
+            <input type="number" min="0" max="99" value={customH} onChange={e=>{setCH(e.target.value);md()}} style={{...iS,width:55,textAlign:"center"}}/><span style={{color:"#888"}}>h</span>
+            <input type="number" min="0" max="59" value={customM} onChange={e=>{setCM(e.target.value);md()}} style={{...iS,width:55,textAlign:"center"}}/><span style={{color:"#888"}}>min</span>
             {dur>86400&&<span style={{fontSize:11,color:"#ffca28",fontWeight:600}}>⚠️ +24h: atravessa {Math.floor(dur/86400)} dia(s)</span>}
           </div>}
         </div>
@@ -649,30 +664,30 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
           <div style={{display:"flex",flexDirection:"column",gap:8}}>
             {/* Tipo: Vinheta/Intervalo */}
             <label style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:isJingle?"rgba(156,39,176,0.12)":"rgba(255,255,255,0.02)",border:isJingle?"1px solid rgba(156,39,176,0.35)":"1px solid rgba(255,255,255,0.06)",borderRadius:6,cursor:"pointer"}}>
-              <input type="checkbox" checked={isJingle} onChange={e=>{setIsJingle(e.target.checked);if(e.target.checked&&!jingleType)setJingleType("break")}} style={{width:16,height:16,accentColor:"#9c27b0",cursor:"pointer"}}/>
+              <input type="checkbox" checked={isJingle} onChange={e=>{setIsJingle(e.target.checked);if(e.target.checked&&!jingleType)setJingleType("break");md()}} style={{width:16,height:16,accentColor:"#9c27b0",cursor:"pointer"}}/>
               <div style={{flex:1}}><div style={{fontSize:13,fontWeight:600,color:isJingle?"#ce93d8":"#ccc"}}>🎬 Vinheta / Intervalo</div>
               <div style={{fontSize:11,color:"#777"}}>Toca sem mostrar informações de programa na tela. Ideal para vinhetas de abertura, encerramento e intervalos comerciais.</div></div>
-              {isJingle&&<select value={jingleType} onChange={e=>setJingleType(e.target.value)} onClick={e=>e.stopPropagation()} style={{...iS,width:130,cursor:"pointer",flexShrink:0}}>
+              {isJingle&&<select value={jingleType} onChange={e=>{setJingleType(e.target.value);md()}} onClick={e=>e.stopPropagation()} style={{...iS,width:130,cursor:"pointer",flexShrink:0}}>
                 <option value="open">🎬 Abertura</option>
                 <option value="break">📢 Intervalo</option>
                 <option value="close">🏁 Encerramento</option>
               </select>}
             </label>
             <label style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:gcAlways?"rgba(156,39,176,0.12)":"rgba(255,255,255,0.02)",border:gcAlways?"1px solid rgba(156,39,176,0.4)":"1px solid rgba(255,255,255,0.06)",borderRadius:6,cursor:"pointer",opacity:gcNever?0.4:1}}>
-              <input type="checkbox" checked={gcAlways} disabled={gcNever} onChange={e=>{setGcAlways(e.target.checked)}} style={{width:16,height:16,accentColor:"#9c27b0",cursor:gcNever?"not-allowed":"pointer"}}/>
+              <input type="checkbox" checked={gcAlways} disabled={gcNever} onChange={e=>{setGcAlways(e.target.checked);md()}} style={{width:16,height:16,accentColor:"#9c27b0",cursor:gcNever?"not-allowed":"pointer"}}/>
               <div><div style={{fontSize:13,fontWeight:600,color:gcAlways?"#ce93d8":"#ccc"}}>♪ GC sempre ativo neste programa</div>
               <div style={{fontSize:11,color:"#777"}}>GC fica fixo na tela durante todo este programa (independente do padrão do canal)</div></div>
             </label>
             <label style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:gcNever?"rgba(244,67,54,0.10)":"rgba(255,255,255,0.02)",border:gcNever?"1px solid rgba(244,67,54,0.35)":"1px solid rgba(255,255,255,0.06)",borderRadius:6,cursor:"pointer",opacity:gcAlways?0.4:1}}>
-              <input type="checkbox" checked={gcNever} disabled={gcAlways} onChange={e=>{setGcNever(e.target.checked)}} style={{width:16,height:16,accentColor:"#f44336",cursor:gcAlways?"not-allowed":"pointer"}}/>
+              <input type="checkbox" checked={gcNever} disabled={gcAlways} onChange={e=>{setGcNever(e.target.checked);md()}} style={{width:16,height:16,accentColor:"#f44336",cursor:gcAlways?"not-allowed":"pointer"}}/>
               <div><div style={{fontSize:13,fontWeight:600,color:gcNever?"#ef9a9a":"#ccc"}}>🚫 Desativar GC neste programa</div>
               <div style={{fontSize:11,color:"#777"}}>Suprime o GC mesmo que o canal tenha GC automático ativado (canal de música ou gcAlways no canal)</div></div>
             </label>
             <label style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:maratona?"rgba(255,202,40,0.10)":"rgba(255,255,255,0.02)",border:maratona?"1px solid rgba(255,202,40,0.4)":"1px solid rgba(255,255,255,0.06)",borderRadius:6,cursor:"pointer"}}>
-              <input type="checkbox" checked={maratona} onChange={e=>setMaratona(e.target.checked)} style={{width:16,height:16,accentColor:"#ffca28",cursor:"pointer"}}/>
+              <input type="checkbox" checked={maratona} onChange={e=>{setMaratona(e.target.checked);md()}} style={{width:16,height:16,accentColor:"#ffca28",cursor:"pointer"}}/>
               <div style={{flex:1}}><div style={{fontSize:13,fontWeight:600,color:maratona?"#ffca28":"#ccc"}}>🏃 Modo Maratona</div>
               <div style={{fontSize:11,color:"#777"}}>Divide no guia em blocos "Maratona {nome||"..."} (1/N)". Playlists acima de 6h viram Maratona automaticamente.</div></div>
-              {maratona&&<select value={blocoDuracao} onChange={e=>setBlocoDuracao(Number(e.target.value))} onClick={e=>e.preventDefault()} style={{...iS,width:110,cursor:"pointer"}}>
+              {maratona&&<select value={blocoDuracao} onChange={e=>{setBlocoDuracao(Number(e.target.value));md()}} onClick={e=>e.stopPropagation()} style={{...iS,width:110,cursor:"pointer"}}>
                 <option value={7200}>Blocos 2h</option><option value={10800}>Blocos 3h</option><option value={14400}>Blocos 4h</option>
               </select>}
             </label>
@@ -690,17 +705,17 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
         {/* Thumbnail */}
         <div><label style={lS}>THUMBNAIL</label>
           <div style={{display:"flex",gap:6,marginBottom:10}}>
-            <button onClick={()=>setTT("youtube")} style={{padding:"6px 14px",borderRadius:4,cursor:"pointer",fontSize:12,background:thumbnailType==="youtube"?"#f4433622":"rgba(255,255,255,0.04)",border:thumbnailType==="youtube"?"1px solid #f44336":"1px solid rgba(255,255,255,0.08)",color:thumbnailType==="youtube"?"#f44336":"#888"}}>▶ YouTube</button>
-            <button onClick={()=>setTT("custom")} style={{padding:"6px 14px",borderRadius:4,cursor:"pointer",fontSize:12,background:thumbnailType==="custom"?"#1a73e822":"rgba(255,255,255,0.04)",border:thumbnailType==="custom"?"1px solid #1a73e8":"1px solid rgba(255,255,255,0.08)",color:thumbnailType==="custom"?"#4fc3f7":"#888"}}>🖼️ Personalizada</button>
+            <button onClick={()=>{setTT("youtube");md()}} style={{padding:"6px 14px",borderRadius:4,cursor:"pointer",fontSize:12,background:thumbnailType==="youtube"?"#f4433622":"rgba(255,255,255,0.04)",border:thumbnailType==="youtube"?"1px solid #f44336":"1px solid rgba(255,255,255,0.08)",color:thumbnailType==="youtube"?"#f44336":"#888"}}>▶ YouTube</button>
+            <button onClick={()=>{setTT("custom");md()}} style={{padding:"6px 14px",borderRadius:4,cursor:"pointer",fontSize:12,background:thumbnailType==="custom"?"#1a73e822":"rgba(255,255,255,0.04)",border:thumbnailType==="custom"?"1px solid #1a73e8":"1px solid rgba(255,255,255,0.08)",color:thumbnailType==="custom"?"#4fc3f7":"#888"}}>🖼️ Personalizada</button>
           </div>
           {thumbnailType==="youtube"&&yt&&<div style={{display:"flex",alignItems:"center",gap:10}}><img src={yt} alt="" style={{width:120,height:68,borderRadius:4,objectFit:"cover"}}/><span style={{fontSize:11,color:"#888"}}>Auto do YouTube</span></div>}
-          {thumbnailType==="custom"&&<ImgUploader currentImage={thumbnailUrl} imageType={thumbnailUrl?"custom":"none"} onImageChange={({url})=>setTU(url)} label="" shape="wide"/>}
+          {thumbnailType==="custom"&&<ImgUploader currentImage={thumbnailUrl} imageType={thumbnailUrl?"custom":"none"} onImageChange={({url})=>{setTU(url);md()}} label="" shape="wide"/>}
         </div>
 
         {/* Classification */}
         <div><label style={lS}>CLASSIFICAÇÃO</label>
           <div style={{display:"flex",gap:4}}>
-            {CLASSIF_OPTIONS.map(c=><button key={c} onClick={()=>setClassificacao(c)} style={{width:36,height:36,borderRadius:4,cursor:"pointer",fontSize:12,fontWeight:800,background:classificacao===c?CC[c]:"rgba(255,255,255,0.04)",border:classificacao===c?"2px solid #fff":"1px solid rgba(255,255,255,0.08)",color:classificacao===c?(c==="L"||c==="18"?"#fff":"#000"):"#888"}}>{c}</button>)}
+            {CLASSIF_OPTIONS.map(c=><button key={c} onClick={()=>{setClassificacao(c);md()}} style={{width:36,height:36,borderRadius:4,cursor:"pointer",fontSize:12,fontWeight:800,background:classificacao===c?CC[c]:"rgba(255,255,255,0.04)",border:classificacao===c?"2px solid #fff":"1px solid rgba(255,255,255,0.08)",color:classificacao===c?(c==="L"||c==="18"?"#fff":"#000"):"#888"}}>{c}</button>)}
           </div>
         </div>
 
@@ -719,7 +734,7 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
               {id:"REPRISE",label:"Reprise",cor:"#795548"},
             ].map(tag=>{
               const active=tags.includes(tag.id);
-              return <button key={tag.id} onClick={()=>{if(active)setTags(tags.filter(t=>t!==tag.id));else setTags([...tags,tag.id])}} style={{
+              return <button key={tag.id} onClick={()=>{if(active)setTags(tags.filter(t=>t!==tag.id));else setTags([...tags,tag.id]);md()}} style={{
                 padding:"6px 14px",borderRadius:4,cursor:"pointer",fontSize:12,fontWeight:600,
                 background:active?`${tag.cor}22`:"rgba(255,255,255,0.04)",
                 border:active?`1px solid ${tag.cor}`:"1px solid rgba(255,255,255,0.08)",
@@ -757,7 +772,7 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
 
         {/* Salvar como padrão */}
         <label style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:isTemplate?"rgba(255,202,40,0.08)":"rgba(255,255,255,0.02)",border:isTemplate?"1px solid rgba(255,202,40,0.35)":"1px solid rgba(255,255,255,0.06)",borderRadius:6,cursor:"pointer"}}>
-          <input type="checkbox" checked={isTemplate} onChange={e=>setIsTemplate(e.target.checked)} style={{width:15,height:15,accentColor:"#ffca28",cursor:"pointer"}}/>
+          <input type="checkbox" checked={isTemplate} onChange={e=>{setIsTemplate(e.target.checked);md()}} style={{width:15,height:15,accentColor:"#ffca28",cursor:"pointer"}}/>
           <div><div style={{fontSize:12,fontWeight:600,color:isTemplate?"#ffca28":"#aaa"}}>📋 Salvar como padrão reutilizável</div>
           <div style={{fontSize:10,color:"#666"}}>O padrão aparece para uso rápido ao criar novos programas (só a estrutura — você altera os vídeos a cada vez)</div></div>
         </label>
@@ -765,12 +780,12 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
         {/* Logo overlay por programa */}
         <div style={{padding:"10px 12px",background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:6}}>
           <div style={{fontSize:12,fontWeight:600,color:"#ccc",marginBottom:6}}>🖼️ Logo na tela (opcional — sobrescreve a do canal)</div>
-          <input value={overlayLogoUrl} onChange={e=>setPOLU(e.target.value)} placeholder="URL da logo PNG (deixe vazio = usa a do canal)" style={{...iS,width:"100%",marginBottom:overlayLogoUrl?6:0}}/>
+          <input value={overlayLogoUrl} onChange={e=>{setPOLU(e.target.value);md()}} placeholder="URL da logo PNG (deixe vazio = usa a do canal)" style={{...iS,width:"100%",marginBottom:overlayLogoUrl?6:0}}/>
           {overlayLogoUrl&&<>
             <img src={overlayLogoUrl} alt="preview" style={{height:36,maxWidth:100,objectFit:"contain",background:"rgba(255,255,255,0.05)",borderRadius:3,padding:3,marginBottom:6,display:"block"}} onError={e=>e.target.style.display="none"}/>
             <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:6}}>
               {[{v:"tr",l:"↗ Sup. Dir."},{v:"tl",l:"↖ Sup. Esq."},{v:"br",l:"↘ Inf. Dir."},{v:"bl",l:"↙ Inf. Esq."}].map(o=>
-                <button key={o.v} onClick={()=>setPOLC(o.v)} style={{padding:"4px 10px",borderRadius:4,cursor:"pointer",fontSize:10,background:overlayCorner===o.v?"rgba(26,115,232,0.3)":"rgba(255,255,255,0.04)",border:overlayCorner===o.v?"1px solid #1a73e8":"1px solid rgba(255,255,255,0.08)",color:overlayCorner===o.v?"#4fc3f7":"#888"}}>{o.l}</button>
+                <button key={o.v} onClick={()=>{setPOLC(o.v);md()}} style={{padding:"4px 10px",borderRadius:4,cursor:"pointer",fontSize:10,background:overlayCorner===o.v?"rgba(26,115,232,0.3)":"rgba(255,255,255,0.04)",border:overlayCorner===o.v?"1px solid #1a73e8":"1px solid rgba(255,255,255,0.08)",color:overlayCorner===o.v?"#4fc3f7":"#888"}}>{o.l}</button>
               )}
             </div>
           </>}
@@ -778,7 +793,7 @@ function ProgramModal({mode,program,channels,selectedChannel,selectedDate,existi
         </div>
 
         <div style={{display:"flex",gap:8}}>
-          <button onClick={()=>onClose(hasChanges)} style={{flex:1,padding:12,borderRadius:6,cursor:"pointer",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",color:"#aaa",fontSize:13,fontWeight:600}}>Cancelar</button>
+          <button onClick={()=>{if(!saving)onClose(hasChanges)}} style={{flex:1,padding:12,borderRadius:6,cursor:"pointer",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",color:"#aaa",fontSize:13,fontWeight:600}}>Cancelar</button>
           <button onClick={save} disabled={hasOverlap||saving} style={{flex:2,padding:12,borderRadius:6,cursor:hasOverlap||saving?"not-allowed":"pointer",background:hasOverlap||saving?"#333":"#1a73e8",border:"none",color:"#fff",fontSize:13,fontWeight:700,opacity:hasOverlap||saving?0.5:1}}>{saving?"⏳ Salvando...":isEdit?"💾 Salvar":"✅ Agendar"}</button>
         </div>
       </div>
@@ -983,7 +998,7 @@ function JinglesTab({programs,channels,selCh,setSelCh,dates,selDate,setSelDate,n
     };
     try{
       assertNoConflicts(programs,[{...payload,id:editJingle?.id}],channels);
-      await commitPrograms([{...payload,id:editJingle?.id||`jingle_${Date.now()}`}]);
+      await commitPrograms([{...payload,id:editJingle?.id||`jingle_${crypto.randomUUID()}`}]);
       notify(editJingle?"✅ Vinheta atualizada":"✅ Vinheta adicionada");
       setShowModal(false);
     }catch(err){notify(err.message||"Erro ao salvar");}
@@ -1123,6 +1138,7 @@ export default function AdminPanel({onLogout}){
   const [showDup,setSD]=useState(false);
   const [toast,setToast]=useState("");
   const [eternityBusy,setEternityBusy]=useState(false);
+  const selectedTabMeta={schedule:{title:"Programação",description:"Organize a grade, as playlists e o ciclo semanal."},channels:{title:"Canais",description:"Gerencie canais, numeração, logos e identidade visual."},jingles:{title:"Vinhetas",description:"Agende intervalos e vinhetas por canal."},news:{title:"Redação",description:"Edite manchetes e publicações do pacote gráfico."}}[tab];
 
   const notify=(m)=>{setToast(m);setTimeout(()=>setToast(""),3000)};
 
@@ -1139,11 +1155,15 @@ export default function AdminPanel({onLogout}){
     if(!confirm('Remover este programa da grade?'))return;
     try{await deleteDoc(doc(db,'programs',id));notify('Programa removido.');}catch{notify('Não foi possível remover. Tente novamente.');}
   };
+  const handleDeleteTemplate=async template=>{
+    if(!confirm(`Excluir o modelo "${template.nome}"?`))return;
+    try{await commitPrograms([],[template.id]);notify('Modelo excluído.');}catch(e){notify(e.message||'Não foi possível excluir o modelo.');}
+  };
   const handleDup=async(from,to)=>{
     if(from===to)return false;
-    const source=programs.filter(p=>p.data===from);
+    const source=programs.filter(p=>p.data===from&&!p.isTemplate);
     if(!source.length){notify('O dia de origem está vazio.');return false;}
-    const target=programs.filter(p=>p.data===to);
+    const target=programs.filter(p=>p.data===to&&!p.isTemplate);
     if(target.length&&!confirm(`Substituir os ${target.length} programas de ${getDayLabel(to)}?`))return false;
     try{
       const changes=source.map(p=>({...cleanProgram(p),data:to}));
@@ -1235,7 +1255,7 @@ export default function AdminPanel({onLogout}){
   };
 
   // Clear selected programs when channel or date changes
-  useEffect(()=>{setSelectedProgs(new Set())},[selCh,selDate]);
+  useEffect(()=>{setSelectedProgs(new Set());setCloneMenuProgs([]);setShowCloneModal(false)},[selCh,selDate,tab]);
 
   // Para compatibilidade, manter dayProgs (filtra só o dia selecionado)
   // Com eternity: usa buildScheduleAdmin que projeta os programas do ciclo
@@ -1248,21 +1268,22 @@ export default function AdminPanel({onLogout}){
   return <div className="admin-page" style={{width:"100%",minHeight:"100vh",background:"#0a0c12",fontFamily:"'Segoe UI','Roboto',-apple-system,sans-serif",color:"#fff"}}>
     {catalog.error&&<p role="alert" className="notice">{catalog.error}</p>}
     {/* Header */}
-    <div style={{padding:"16px 24px",borderBottom:"1px solid rgba(255,255,255,0.08)",display:"flex",alignItems:"center",justifyContent:"space-between",background:"rgba(255,255,255,0.02)",flexWrap:"wrap",gap:10}}>
+    <div className="admin-topbar" style={{padding:"16px 24px",borderBottom:"1px solid rgba(255,255,255,0.08)",display:"flex",alignItems:"center",justifyContent:"space-between",background:"rgba(255,255,255,0.02)",flexWrap:"wrap",gap:10}}>
       <div style={{display:"flex",alignItems:"center",gap:12}}>
-        <span style={{fontSize:24}}>📺</span>
-        <div><div style={{fontSize:18,fontWeight:700,color:"#fff"}}>TVWEB Admin</div><div style={{fontSize:11,color:"#888"}}>Painel de Programação</div></div>
+        <span className="trend-mark" aria-hidden="true">T</span>
+        <div><div style={{fontSize:18,fontWeight:700,color:"#fff"}}>TREND TV <span style={{color:"#8290a6",fontWeight:500}}>· Painel</span></div><div style={{fontSize:11,color:"#888"}}>Gestão da programação</div></div>
       </div>
       <button onClick={onLogout} className="secondary">Sair</button>
       <button onClick={()=>setSD(true)} style={{padding:"8px 16px",borderRadius:6,cursor:"pointer",background:"rgba(156,39,176,0.15)",border:"1px solid rgba(156,39,176,0.3)",color:"#ce93d8",fontSize:12,fontWeight:600}}>📋 Duplicar dia</button>
     </div>
 
-    <div style={{maxWidth:900,margin:"0 auto",padding:20}}>
+    <div className="admin-shell" style={{maxWidth:1180,margin:"0 auto",padding:20}}>
       {/* Tabs */}
-      <div style={{display:"flex",gap:2,borderBottom:"2px solid #1e2030",marginBottom:20}}>
-        {[{id:"schedule",label:"📅 Programação"},{id:"channels",label:"📺 Canais"},{id:"jingles",label:"🎬 Vinhetas"},{id:"news",label:"📰 Notícias"}].map(t=>
-          <button key={t.id} onClick={()=>{if(newsDirty&&!confirm("Sair da redação sem salvar?"))return;setNewsDirty(false);setTab(t.id);}} style={{padding:"10px 20px",fontSize:13,fontWeight:600,cursor:"pointer",background:tab===t.id?"#1a73e8":"transparent",color:tab===t.id?"#fff":"#888",border:"none",borderRadius:"6px 6px 0 0"}}>{t.label}</button>)}
+      <div className="admin-nav" role="tablist" aria-label="Áreas do painel">
+        {[{id:"schedule",label:"Programação",icon:"▤"},{id:"channels",label:"Canais",icon:"◉"},{id:"jingles",label:"Vinhetas",icon:"◌"},{id:"news",label:"Redação",icon:"▰"}].map(t=>
+          <button role="tab" aria-selected={tab===t.id} key={t.id} onClick={()=>{if(newsDirty&&!confirm("Sair da redação sem salvar?"))return;setNewsDirty(false);setTab(t.id);}} className={tab===t.id?"active":""}><span aria-hidden="true">{t.icon}</span>{t.label}</button>)}
       </div>
+      <header className="admin-section-heading"><div><span>ÁREA DE TRABALHO</span><h1>{selectedTabMeta.title}</h1><p>{selectedTabMeta.description}</p></div>{tab==="schedule"&&<button className="admin-add-button" onClick={()=>{setEP(null);setSM(true)}}>＋ Novo programa</button>}</header>
 
       {tab==="schedule"&&<>
         {/* Date */}
@@ -1343,17 +1364,11 @@ export default function AdminPanel({onLogout}){
 Essa ação é irreversível. Todos os ${ids.length} programas selecionados serão removidos do banco.
 
 Deseja continuar?`))return;
-            notify(`🗑️ Apagando ${ids.length} programas...`);
-            let ok=0,fail=0;
-            for(const id of ids){
-              try{await deleteDoc(doc(db,"programs",id));ok++}catch{fail++}
-            }
-            setSelectedProgs(new Set());
-            notify(`✅ ${ok} removido(s)${fail>0?` · ❌ ${fail} erro(s)`:""}`);
+            try{await commitPrograms([],ids);setSelectedProgs(new Set());notify(`${ids.length} programas removidos.`);}catch(e){notify(e.message||'Não foi possível remover a seleção.');}
           }} style={{padding:"8px 14px",borderRadius:6,cursor:"pointer",fontSize:11,fontWeight:700,background:"rgba(244,67,54,0.12)",border:"1px solid rgba(244,67,54,0.35)",color:"#f44336",whiteSpace:"nowrap"}}>🗑️ Apagar {selectedProgs.size}</button>}
           <button onClick={async()=>{
             if(!selCh)return;
-            const real=programs.filter(p=>p.canalId===selCh&&p.data===effectiveSelDate&&!p.isJingle).sort((a,b)=>a.horarioInicio-b.horarioInicio);
+            const real=programs.filter(p=>p.canalId===selCh&&p.data===effectiveSelDate&&!p.isJingle&&!p.isTemplate).sort((a,b)=>a.horarioInicio-b.horarioInicio);
             if(!real.length){notify('Selecione o dia original do ciclo para organizar.');return;}
             if(!confirm('Encostar os programas deste dia, preservando as durações e todos os outros dias?'))return;
             let cursor=dateSecondsToAbsolute(effectiveSelDate,Number(real[0].horarioInicio));
@@ -1397,28 +1412,15 @@ Deseja continuar?`))return;
         {viewMode==="lista"
           ? <TimelineView programs={dayProgs} channels={channels} selectedChannel={selCh}
               onEdit={p=>{setEP(programs.find(x=>x.id===p.id)||p);setSM(true)}} onDelete={handleDel} onReorder={handleReorder} onToggleSelect={toggleProgSelect} selectedProgs={selectedProgs}/>
-          : <GradeVisual programs={dayProgs} channels={channels} selectedChannel={selCh} selDate={effectiveSelDate}
+          : <GradeVisual programs={dayProgs} allPrograms={programs} channels={channels} selectedChannel={selCh} selDate={effectiveSelDate}
               onEdit={p=>{setEP(programs.find(x=>x.id===p.id)||p);setSM(true)}} notify={notify}/>}
 
-        <button onClick={()=>{setEP(null);setSM(true)}} style={{marginTop:16,width:"100%",padding:14,borderRadius:8,cursor:"pointer",background:"linear-gradient(135deg,#1a73e8,#4fc3f7)",border:"none",color:"#fff",fontSize:14,fontWeight:700}}>+ Adicionar Programa</button>
+        <button className="admin-add-button admin-add-button-bottom" onClick={()=>{setEP(null);setSM(true)}}>＋ Adicionar programa</button>
       </>}
 
       {/* FLOATING CLONE BUTTON - RIGHT SIDE */}
-      {selectedProgs.size>0&&<div style={{position:"fixed",bottom:40,right:40,display:"flex",flexDirection:"column",gap:8,zIndex:50}}>
+      {selectedProgs.size>0&&<div className="admin-bulk-bar" style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",display:"flex",alignItems:"center",gap:8,zIndex:50}}>
         <button onClick={()=>{const selected=dayProgs.filter(p=>selectedProgs.has(p.id));setCloneMenuProgs(selected)}} style={{padding:"14px 20px",borderRadius:8,cursor:"pointer",background:"linear-gradient(135deg,#4caf50,#81c784)",border:"none",color:"#fff",fontSize:14,fontWeight:700,boxShadow:"0 4px 20px rgba(76,175,80,0.4)",whiteSpace:"nowrap"}}>📋 Clonar {selectedProgs.size}</button>
-        <button onClick={async()=>{
-          const ids=[...selectedProgs];
-          if(!confirm(`🗑️ APAGAR ${ids.length} PROGRAMA(S)
-
-Essa ação é irreversível.
-
-Deseja continuar?`))return;
-          notify(`🗑️ Apagando ${ids.length} programas...`);
-          let ok=0,fail=0;
-          for(const id of ids){try{await deleteDoc(doc(db,"programs",id));ok++}catch{fail++}}
-          setSelectedProgs(new Set());
-          notify(`✅ ${ok} removido(s)${fail>0?` · ❌ ${fail} erro(s)`:""}`);
-        }} style={{padding:"14px 20px",borderRadius:8,cursor:"pointer",background:"linear-gradient(135deg,#f44336,#e57373)",border:"none",color:"#fff",fontSize:14,fontWeight:700,boxShadow:"0 4px 20px rgba(244,67,54,0.4)",whiteSpace:"nowrap"}}>🗑️ Apagar {selectedProgs.size}</button>
         <button onClick={()=>setSelectedProgs(new Set())} style={{padding:"8px 20px",borderRadius:8,cursor:"pointer",background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.12)",color:"#aaa",fontSize:12}}>✕ Cancelar seleção</button>
       </div>}
 
@@ -1428,7 +1430,7 @@ Deseja continuar?`))return;
 
     </div>
 
-    {showModal&&<ProgramModal mode={editProg?"edit":"add"} program={editProg} channels={channels} selectedChannel={selCh} selectedDate={editProg?.data||effectiveSelDate} existingPrograms={programs} onSave={handleSave} onClose={(dirty)=>{
+    {showModal&&<ProgramModal mode={editProg?"edit":"add"} program={editProg} channels={channels} selectedChannel={selCh} selectedDate={editProg?.data||effectiveSelDate} existingPrograms={programs} onSave={handleSave} onDeleteTemplate={handleDeleteTemplate} onClose={(dirty)=>{
   if(dirty&&!confirm("Fechar sem salvar?\n\nAs alterações feitas não foram salvas e serão perdidas."))return;
   setSM(false);setEP(null);
 }}/>}
@@ -1437,7 +1439,7 @@ Deseja continuar?`))return;
     {cloneMenuProgs.length>0&&<div onClick={()=>setCloneMenuProgs([])} style={{position:"fixed",inset:0,zIndex:100}}>
       <div style={{position:"fixed",bottom:200,right:40,background:"#1a1c24",border:"1px solid rgba(255,255,255,0.2)",borderRadius:8,boxShadow:"0 4px 16px rgba(0,0,0,0.6)",zIndex:101,minWidth:200}} onClick={e=>e.stopPropagation()}>
         <div style={{padding:"8px 0"}}>
-          <button onClick={()=>{handleQuickClone();setCloneMenuProgs([])}} style={{width:"100%",padding:"12px 16px",textAlign:"left",background:"transparent",border:"none",color:"#4caf50",cursor:"pointer",fontSize:13,fontWeight:600,borderBottom:"0.5px solid rgba(255,255,255,0.1)",transition:"background 0.2s"}} onMouseEnter={e=>e.target.style.background="rgba(76,175,80,0.1)"} onMouseLeave={e=>e.target.style.background="transparent"}>
+          <button onClick={handleQuickClone} style={{width:"100%",padding:"12px 16px",textAlign:"left",background:"transparent",border:"none",color:"#4caf50",cursor:"pointer",fontSize:13,fontWeight:600,borderBottom:"0.5px solid rgba(255,255,255,0.1)",transition:"background 0.2s"}} onMouseEnter={e=>e.target.style.background="rgba(76,175,80,0.1)"} onMouseLeave={e=>e.target.style.background="transparent"}>
             ✓ Clonar aqui
           </button>
           <button onClick={()=>{setCloneData({channel:"",date:null,time:""});setShowCloneModal(true)}} style={{width:"100%",padding:"12px 16px",textAlign:"left",background:"transparent",border:"none",color:"#4fc3f7",cursor:"pointer",fontSize:13,fontWeight:600,transition:"background 0.2s"}} onMouseEnter={e=>e.target.style.background="rgba(79,195,247,0.1)"} onMouseLeave={e=>e.target.style.background="transparent"}>

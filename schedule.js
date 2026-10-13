@@ -9,7 +9,7 @@ export const placeholder = {nome:'Voltamos já!',sinopse:'Programação em breve
 // Datas posteriores são exceções explícitas; o ciclo nunca começa antes da âncora.
 export function projectInstances(programs, channelId, channel, date = getToday()) {
   const day = dateSecondsToAbsolute(date);
-  const all = programs.filter(p=>p.canalId===channelId && safeDuration(p))
+  const all = programs.filter(p=>p.canalId===channelId && !p.isTemplate && safeDuration(p) && Number.isInteger(Number(p.horarioInicio)) && Number(p.horarioInicio)>=0 && Number(p.horarioInicio)<DAY)
     .map(p=>({...p,duracao:Number(p.duracao),horarioInicio:Number(p.horarioInicio)||0}));
   const dated = all.filter(p=>p.data).map(p=>({...p,absStart:dateSecondsToAbsolute(p.data,p.horarioInicio)}))
     .filter(p=>Number.isFinite(p.absStart)).sort((a,b)=>a.absStart-b.absStart || String(a.id).localeCompare(String(b.id)));

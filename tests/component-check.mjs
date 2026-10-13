@@ -1,0 +1,35 @@
+import assert from 'node:assert/strict';
+import {createServer} from 'vite';
+import react from '@vitejs/plugin-react';
+import {createElement as h} from 'react';
+import {renderToString} from 'react-dom/server';
+import {MemoryRouter} from 'react-router-dom';
+import path from 'node:path';
+const root=process.cwd(),firebase=path.join(root,'tests/fixtures/firebase.js'),catalog=path.join(root,'tests/fixtures/catalog.jsx');
+const server=await createServer({configFile:false,root,plugins:[{name:'test-data-only',enforce:'pre',resolveId(id){if(/^\.\/firebase(?:\.js)?$/.test(id))return firebase;if(id==='./Catalog')return catalog;}},react()],server:{middlewareMode:true,hmr:false,ws:false},appType:'custom'});
+const render=component=>renderToString(h(MemoryRouter,null,component));
+let checks=0;
+try{
+ const {default:Home}=await server.ssrLoadModule('/Home.jsx');assert.match(render(h(Home)),/Guia ao vivo/);checks++;
+ const {default:TV}=await server.ssrLoadModule('/TV.jsx');assert.match(render(h(TV)),/tv-layout-studio/);checks++;
+ const {default:Admin,ProgramModal}=await server.ssrLoadModule('/Admin.jsx');assert.match(render(h(Admin,{onLogout(){}})),/Novo programa/);checks++;
+ // Empty catalogue must still open the modal without crashing in the logo preview.
+ assert.match(render(h(ProgramModal,{mode:'add',channels:[],existingPrograms:[],selectedDate:'2026-10-12',onClose(){},onSave(){},onDeleteTemplate(){}})),/Editor de programa/);checks++;
+ const channel={id:'c',nome:'Teste',numero:1,cor:'#278bd1'};
+ const model={id:'model',nome:'Modelo',canalId:'c',data:'2026-10-12',horarioInicio:0,duracao:3600,isTemplate:true};
+ const real={...model,id:'real',isTemplate:false};
+ const modelHTML=render(h(ProgramModal,{mode:'edit',program:model,channels:[channel],existingPrograms:[real,model],selectedDate:model.data,onClose(){},onSave(){},onDeleteTemplate(){}}));
+ assert.doesNotMatch(modelHTML,/Conflito de horário!/);checks++;
+ const {default:NewsOverlay}=await server.ssrLoadModule('/NewsOverlay.jsx');
+ const now=Date.now(),items=[{id:'n',kind:'news',title:'Manchete de teste',subtitle:'Contexto de teste',source:'Redação',approved:true,expiresAt:now+60000},{id:'t',kind:'tweet',title:'Comentário',source:'@teste',approved:true,expiresAt:now+60000}];
+ const preview={items,config:{enabled:true,gc:true,ticker:true,social:true}};
+ assert.match(render(h(NewsOverlay,{preview,studio:true})),/full-template/);checks++;
+ assert.match(render(h(NewsOverlay,{preview})),/Manchete de teste/);checks++;
+ const data=await server.ssrLoadModule('/admin-data.js'),mock=await server.ssrLoadModule('/tests/fixtures/firebase.js');
+ Object.defineProperty(globalThis,'navigator',{value:{onLine:false},configurable:true});
+ await assert.rejects(data.commitPrograms([{id:'p',nome:'teste'}]),/Sem conexão/);assert.equal(mock.state.writes,0);checks++;
+ globalThis.navigator.onLine=true;
+ await data.commitPrograms([{id:'p',nome:'teste'}],['q']);assert.equal(mock.state.writes,1);assert.equal(mock.state.batches.at(-1).length,2);checks++;
+ await assert.rejects(data.commitPrograms(Array.from({length:451},()=>({}))),/450/);assert.equal(mock.state.writes,1);checks++;
+ console.log(`${checks} verificações de renderização e gravação simulada passaram; nenhuma conexão ao Firebase.`);
+}finally{await server.close();}

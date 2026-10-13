@@ -1,5 +1,6 @@
-export const DEFAULT_NEWS_CONFIG={enabled:false,ticker:true,gc:false,social:false,interval:20,corner:'tr'};
-export const NEWS_WORD_LIMIT=25;
+export const DEFAULT_NEWS_CONFIG={enabled:false,ticker:true,gc:true,social:true,interval:20,socialSpeed:34,corner:'tr',template:'trend-wall-v1'};
+export const NEWS_WORD_LIMIT=12;
+export const NEWS_LIMITS={headline:78,subtitle:130,tweet:160,topic:54,source:48,category:28};
 export const countWords=value=>String(value||'').trim().split(/\s+/).filter(Boolean).length;
 export const newsDuration=item=>[10,15,20,30].includes(Number(item.durationMinutes))?Number(item.durationMinutes):30;
 export const prepareNewsPublication=(items,now=Date.now())=>items.map(p=>({...p,expiresAt:now+newsDuration(p)*60000}));
@@ -11,13 +12,23 @@ export const NEWS_DURATION_OPTIONS=[
 ];
 export function safeSourceURL(value){try{const u=new URL(String(value||''));return u.protocol==='https:'||u.protocol==='http:'?u.href:'';}catch{return '';}}
 export function normalizeNewsItem(item,now=Date.now()){
-  const text=String(item.title||item.titulo||item.text||'').trim().slice(0,240);
+  const rawKind=String(item.kind||'');
+  const kind=['news','tweet','topic'].includes(rawKind)?rawKind:rawKind==='social'?'tweet':'news';
+  const titleLimit=kind==='tweet'?NEWS_LIMITS.tweet:kind==='topic'?NEWS_LIMITS.topic:NEWS_LIMITS.headline;
+  const text=String(item.title||item.titulo||item.text||'').trim().slice(0,titleLimit);
   return {id:typeof item.id==='string'?item.id.slice(0,100):crypto.randomUUID(),title:text,
-    source:String(item.source||item.fonte||item.author||'').trim().slice(0,80),url:safeSourceURL(item.url||item.link),
-    kind:item.kind==='social'?'social':'news',urgent:item.urgent===true,approved:item.approved===true,durationMinutes:newsDuration(item),
+    subtitle:String(item.subtitle||item.subtitulo||'').trim().slice(0,NEWS_LIMITS.subtitle),
+    source:String(item.source||item.fonte||item.author||(kind==='topic'?'TRENDING':'' )).trim().slice(0,NEWS_LIMITS.source),
+    category:String(item.category||item.topicLabel||'').trim().slice(0,NEWS_LIMITS.category),
+    imageUrl:safeSourceURL(item.imageUrl||item.image),url:safeSourceURL(item.url||item.link),
+    kind,urgent:item.urgent===true,approved:item.approved===true,durationMinutes:newsDuration(item),
     expiresAt:Number.isFinite(Number(item.expiresAt))&&Number(item.expiresAt)>0?Number(item.expiresAt):now+1800000};
 }
-export function publishableItems(items,now=Date.now()){return items.filter(p=>p.approved===true&&p.title?.trim()&&p.source?.trim()&&Number(p.expiresAt)>now).map(p=>normalizeNewsItem(p,now)).slice(0,50);}
+export function publishableItems(items,now=Date.now()){
+  return (Array.isArray(items)?items:[]).filter(p=>p&&typeof p==='object'&&Number.isFinite(Number(p.expiresAt))&&Number(p.expiresAt)>now).map(p=>normalizeNewsItem(p,now))
+    .filter(p=>p.approved===true&&p.title.trim()&&(p.kind==='topic'||p.source.trim())&&Number(p.expiresAt)>now)
+    .slice(0,50);
+}
 export function parseNewsImport(text){
   let input;
   if(text.trim().startsWith('<')){

@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {getToday,getNow,dateSecondsToAbsolute,absoluteToDateSeconds,addBroadcastDays,getBroadcastWeekday} from '../clock.js';
 import {buildSchedule,getCurProg,getVideoPlaybackInfo,buildScheduleAdmin,findConflicts} from '../schedule.js';
-import {extractYouTubeId,parseYouTubeBulk,parseDurationISO} from '../youtube-id.js';
+import {extractYouTubeId,normalizeYouTubeChannel,parseYouTubeBulk,parseDurationISO} from '../youtube-id.js';
 import {publishableItems,parseNewsImport,safeSourceURL} from '../news.js';
 const channel={id:'c'},date='2026-09-05',id1='abcdefghijk',id2='lmnopqrstuv';
 const p=(extra={})=>({id:'p',nome:'Programa',canalId:'c',data:date,horarioInicio:0,duracao:3600,youtubeId:id1,...extra});
@@ -13,6 +13,8 @@ test('grade expirada não volta ao ar fora de eternity',()=>{assert.ok(buildSche
 test('duração inválida não causa loop no fallback legado',()=>{for(const duracao of [-1,0,NaN,Infinity])assert.ok(buildSchedule([p({data:'',duracao})],'c',channel,date).every(x=>x.isPlaceholder));});
 test('programa após meia-noite preserva offset de mídia',()=>{const schedule=buildSchedule([p({data:'2026-09-04',horarioInicio:82800,duracao:7200})],'c',channel,date);const cur=getCurProg(schedule,1800);assert.equal(cur.mediaOffset,3600);assert.equal(getVideoPlaybackInfo(cur,1800).position,5400);});
 test('blocos de maratona mantêm a identidade e o tempo contínuo',()=>{const schedule=buildSchedule([p({duracao:36000})],'c',channel,date);const a=getCurProg(schedule,10799),b=getCurProg(schedule,10800);assert.equal(a.contKey,b.contKey);assert.equal(getVideoPlaybackInfo(b,10800).position,10800);});
+test('normaliza ID, URL de canal e handle do YouTube para live automática',()=>{const id='UC1234567890123456789012';assert.equal(normalizeYouTubeChannel(id),id);assert.equal(normalizeYouTubeChannel(`https://www.youtube.com/channel/${id}`),id);assert.equal(normalizeYouTubeChannel('https://youtube.com/@TrendTV'), '@TrendTV');assert.equal(normalizeYouTubeChannel('não é canal'),null);});
+test('grade preserva a configuração de live para resolução durante a exibição',()=>{const live=buildSchedule([p({isLive:true,liveChannel:'@TrendTV',videos:[],youtubeId:''})],'c',channel,date)[0];assert.equal(live.isLive,true);assert.equal(live.liveChannel,'@TrendTV');assert.deepEqual(live.videos,[]);});
 test('playlist troca no segundo exato sem cortar ou acrescentar buffer',()=>{const prog=p({videos:[{youtubeUrl:id1,duration:61},{youtubeUrl:id2,duration:62}]});assert.equal(getVideoPlaybackInfo(prog,60).videoId,id1);assert.equal(getVideoPlaybackInfo(prog,61).videoId,id2);assert.equal(getVideoPlaybackInfo(prog,61).position,0);assert.equal(getVideoPlaybackInfo(prog,123).videoId,id1);assert.equal(getVideoPlaybackInfo(prog,123).cycleIndex,1);});
 test('eternity preserva a âncora antiga no Admin e na TV',()=>{const source=p({data:'2026-01-01'}),ch={...channel,eternity:true,eternityDays:1};assert.equal(getCurProg(buildSchedule([source],'c',ch,date),100).srcProgId,'p');const admin=buildScheduleAdmin([source],'c',ch,date);assert.equal(admin[0]._srcDate,'2026-01-01');assert.equal(admin[0]._isProjected,true);});
 test('eternity não repete programas antes da âncora',()=>{const source=p({data:'2026-09-10'});assert.ok(buildSchedule([source],'c',{...channel,eternity:true},date).every(x=>x.isPlaceholder));});

@@ -1,0 +1,1 @@
+export function useCatalog(){return{channels:[{id:'c',numero:1,nome:'Canal de teste',cor:'#278bd1',newsEnabled:true}],programs:[{id:'p',canalId:'c',nome:'Programa de teste',data:'2026-10-12',horarioInicio:0,duracao:86400,youtubeId:'abcdefghijk'}],loading:false,error:''}}

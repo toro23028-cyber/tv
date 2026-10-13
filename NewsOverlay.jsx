@@ -1,7 +1,8 @@
 import {useEffect,useState} from 'react';
 import {db,doc,onSnapshot} from './firebase';
 import {DEFAULT_NEWS_CONFIG,publishableItems} from './news';
-export default function NewsOverlay({channel,hidden=false,preview}){
+
+export default function NewsOverlay({channel,hidden=false,preview,studio=false}){
   const [published,setPublished]=useState(null),[now,setNow]=useState(Date.now());
   useEffect(()=>{
     setPublished(null);if(preview||!channel?.newsEnabled)return;
@@ -10,12 +11,30 @@ export default function NewsOverlay({channel,hidden=false,preview}){
   useEffect(()=>{const timer=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(timer);},[]);
   const data=preview||published,config={...DEFAULT_NEWS_CONFIG,...data?.config};
   if(hidden||!data||!config.enabled)return null;
-  const items=publishableItems(data.items||[],now),news=items.filter(p=>p.kind==='news'),posts=items.filter(p=>p.kind==='social');
+  const items=publishableItems(data.items||[],now),news=items.filter(p=>p.kind==='news'),socialItems=items.filter(p=>p.kind==='tweet'||p.kind==='topic');
   const interval=Math.min(120,Math.max(10,Number(config.interval)||20))*1000;
-  const index=Math.floor(now/interval),headline=news[index%news.length],post=posts[index%posts.length];
-  return <div className={`news-overlays ${preview?'preview':''}`} aria-label="Informações do canal">
-    {config.gc&&headline&&<div key={headline.id} className={`news-gc ${headline.urgent?'urgent':''}`}><span>{headline.urgent?'URGENTE':'EM PAUTA'} · {headline.source}</span><strong>{headline.title}</strong></div>}
-    {config.social&&post&&<div className={`social-overlay corner-${config.corner||'tr'}`} key={post.id}><small>PUBLICAÇÃO · {post.source}</small><p>{post.title}</p>{post.url&&<small>{new URL(post.url).hostname}</small>}</div>}
-    {config.ticker&&news.length>0&&<div className="news-ticker"><b>AGORA</b><div className="ticker-window"><div className="ticker-track" style={{animationDuration:`${Math.max(30,news.reduce((n,p)=>n+p.title.length,0)/10)}s`}}>{[0,1].map(copy=><div className="ticker-copy" key={copy} aria-hidden={copy===1}>{news.map(p=><span key={p.id} className={p.urgent?'urgent-text':''}>{p.urgent?'URGENTE · ':''}{p.title}<small> — {p.source}</small></span>)}</div>)}</div></div></div>}
+  const index=Math.floor(now/interval),headline=news[index%Math.max(1,news.length)];
+  const scrollSeconds=Math.max(24,Math.min(90,Number(config.socialSpeed)||34));
+  const fullTemplate=(studio||!!preview)&&!!config.gc&&!!headline&&!!config.ticker&&news.length>0&&!!config.social&&socialItems.length>0;
+  return <div className={`news-overlays ${studio?'studio':''} ${preview?'preview':''} ${fullTemplate?'full-template':''}`} aria-label={studio?'Pacote gráfico do modo estúdio':'Informações do canal'}>
+    {fullTemplate&&<img className="news-wall-base" src="/news-wall-base.png" alt="" aria-hidden="true"/>}
+    {config.gc&&headline&&<section key={headline.id} className={`news-gc ${headline.urgent?'urgent':''} ${headline.imageUrl?'has-image':''}`} aria-live="polite">
+      <span className="news-gc-label"><b>{headline.urgent?'URGENTE':headline.category||'EM PAUTA'}</b><i>{headline.source}</i></span>
+      {headline.imageUrl&&<img className="news-gc-thumb" src={headline.imageUrl} alt="" onError={e=>{e.currentTarget.style.visibility='hidden';}}/>}
+      <strong>{headline.title}</strong>{headline.subtitle&&<p>{headline.subtitle}</p>}
+    </section>}
+    {config.social&&<aside className="social-wall" aria-label="Mensagens e trending topics">
+      <header><span>NA CONVERSA</span><b>{socialItems.length} mensagens</b></header>
+      {socialItems.length>0?<div className="social-wall-window"><div className="social-wall-track" style={{animationDuration:`${scrollSeconds}s`,animationPlayState:socialItems.length>1?'running':'paused'}}>
+        {[0,1].map(copy=><div className="social-wall-copy" key={copy} aria-hidden={copy===1}>{socialItems.map((item,i)=><article className={`social-card ${item.kind==='topic'?'topic-card':''} ${item.urgent?'urgent':''}`} key={`${item.id}-${copy}`}>
+          <div><span>{item.kind==='topic'?'TRENDING TOPIC':'POST NA CONVERSA'}</span><small>{item.category||item.source}</small></div>
+          <p>{item.title}</p>
+          {item.kind==='tweet'&&<footer>{item.source}{item.url&&<a href={item.url} target="_blank" rel="noreferrer">Abrir publicação ↗</a>}</footer>}
+          {item.kind==='topic'&&<footer>{item.source||'TRENDING'}{item.url&&<a href={item.url} target="_blank" rel="noreferrer">Ver assunto ↗</a>}</footer>}
+          {item.kind==='news'&&item.subtitle&&<small>{item.subtitle}</small>}
+        </article>)}</div>)}
+      </div></div>:<p className="social-empty">Sem mensagens liberadas no momento.</p>}
+    </aside>}
+    {config.ticker&&news.length>0&&<div className="news-ticker"><b>AGORA</b><div className="ticker-window"><div className="ticker-track" style={{animationDuration:`${Math.max(30,news.reduce((n,p)=>n+p.title.length,0)/10)}s`}}>{[0,1].map(copy=><div className="ticker-copy" key={copy} aria-hidden={copy===1}>{news.map(p=><span key={`${p.id}-${copy}`} className={p.urgent?'urgent-text':''}>{p.urgent?'URGENTE · ':''}{p.title}<small> — {p.source}</small></span>)}</div>)}</div></div></div>}
   </div>;
 }

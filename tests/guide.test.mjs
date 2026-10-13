@@ -24,6 +24,11 @@ test('guia vazio não inventa programação e cruza ano corretamente',()=>{
   assert.ok(buildGuideSchedule([],'c',ch,date).every(p=>p.isPlaceholder));
   assert.equal(guideTime(90000),'Amanhã · 01:00');
 });
+test('programas modelo nunca entram na TV nem no ciclo eternity',()=>{
+  const model=p({id:'model',isTemplate:true,horarioInicio:0,duracao:86400});
+  assert.ok(buildGuideSchedule([model],'c',ch,date).every(item=>item.isPlaceholder));
+  assert.ok(buildGuideSchedule([model],'c',{...ch,eternity:true},date).every(item=>item.isPlaceholder));
+});
 test('duração editorial permanece estável e começa na publicação',()=>{
   const item=normalizeNewsItem({title:'Uma notícia',durationMinutes:10},1000);
   assert.equal(newsDuration(item),10);

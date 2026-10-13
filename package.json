@@ -1,7 +1,27 @@
 {
-  "name":"trendtv", "version":"1.1.0", "private":true, "type":"module",
-  "engines":{"node":">=22.12.0"},
-  "scripts":{"dev":"vite --host 0.0.0.0","build":"vite build","preview":"vite preview","test":"node --test tests/*.test.mjs"},
-  "dependencies":{"firebase":"^12.18.0","react":"^19.2.0","react-dom":"^19.2.0","react-router-dom":"^7.13.0"},
-  "devDependencies":{"vite":"^8.0.13","@vitejs/plugin-react":"^6.0.2"}
+  "name": "trendtv",
+  "version": "1.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node tests/run.mjs",
+    "test:components": "node tests/component-check.mjs",
+    "check": "npm test && npm run test:components && npm run build"
+  },
+  "dependencies": {
+    "firebase": "^12.18.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-router-dom": "^7.13.0"
+  },
+  "devDependencies": {
+    "vite": "^8.0.13",
+    "@vitejs/plugin-react": "^6.0.2"
+  }
 }

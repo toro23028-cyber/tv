@@ -11,6 +11,20 @@ export function extractYouTubeId(value){
     return /^[\w-]{11}$/.test(id||'')?id:null;
   }catch{return null;}
 }
+export function normalizeYouTubeChannel(value){
+  if(typeof value!=='string')return null;
+  const text=value.trim();
+  if(/^UC[\w-]{22}$/.test(text))return text;
+  if(/^@?[\w.-]{3,30}$/.test(text))return `@${text.replace(/^@/,'')}`;
+  try{
+    const u=new URL(text.startsWith('http')?text:`https://${text}`),host=u.hostname.toLowerCase();
+    if(!['youtube.com','www.youtube.com','m.youtube.com'].includes(host))return null;
+    const id=/^\/channel\/(UC[\w-]{22})(?:\/|$)/.exec(u.pathname)?.[1];
+    if(id)return id;
+    const handle=/^\/@([\w.-]{3,30})(?:\/|$)/.exec(u.pathname)?.[1];
+    return handle?`@${handle}`:null;
+  }catch{return null;}
+}
 export function extractPlaylistId(value){
   try{const u=new URL(value.trim());return /(^|\.)youtube\.com$/.test(u.hostname)?u.searchParams.get('list'):null;}catch{return null;}
 }
